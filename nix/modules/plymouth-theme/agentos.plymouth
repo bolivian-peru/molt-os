@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=AgentOS
+Description=AgentOS boot splash — dark, minimal, breathing animation
+ModuleName=script
+
+[script]
+ImageDir=/share/plymouth/themes/agentos
+ScriptFile=/share/plymouth/themes/agentos/agentos.script

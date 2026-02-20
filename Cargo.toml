@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agentd",
+    "crates/agentctl",
+    "crates/agentos-egress",
+    "crates/agentos-voice",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/molt-os/molt-os"
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }

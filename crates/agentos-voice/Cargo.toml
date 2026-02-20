@@ -1,0 +1,19 @@
+[package]
+name = "agentos-voice"
+version.workspace = true
+edition.workspace = true
+description = "AgentOS voice daemon — STT (whisper.cpp) + TTS (piper) over PipeWire"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+axum = { version = "0.8", features = ["json"] }
+hyper = "1"
+tower = "0.5"
+uuid.workspace = true
