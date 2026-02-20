@@ -25,7 +25,7 @@ let
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>AgentOS Setup</title>
+      <title>Thorox Setup</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -153,8 +153,14 @@ let
     </head>
     <body>
       <div class="container">
-        <div class="logo">AgentOS</div>
-        <div class="subtitle">AI-native operating system</div>
+        <div class="logo">Thorox</div>
+        <div class="subtitle">Your server has a brain now</div>
+
+        <div class="step" id="wifi-hint" style="display:none; margin-bottom: 24px; padding: 12px 16px; background: #1a1a2e; border-radius: 8px; border: 1px solid #333344;">
+          <span class="step-text" style="font-size: 13px; color: #888899;">
+            Need WiFi? Press <strong style="color:#60a5fa">Super+T</strong> to open a terminal, then run <code style="background:#222233; padding:2px 6px; border-radius:4px;">nmtui</code>
+          </span>
+        </div>
 
         <div class="step">
           <span class="step-number active">1</span>
@@ -176,12 +182,12 @@ let
         <div class="error" id="error"></div>
 
         <button class="btn" id="submit" onclick="submitKey()">
-          Activate AgentOS
+          Activate Thorox
         </button>
 
         <div class="spinner" id="spinner"></div>
         <div class="success" id="success">
-          Connected. Starting AgentOS...
+          Connected. Starting Thorox...
         </div>
       </div>
 
@@ -191,6 +197,12 @@ let
         const error = document.getElementById('error');
         const success = document.getElementById('success');
         const spinner = document.getElementById('spinner');
+        const wifiHint = document.getElementById('wifi-hint');
+
+        // Show WiFi hint if offline
+        if (!navigator.onLine) wifiHint.style.display = 'block';
+        window.addEventListener('online', () => wifiHint.style.display = 'none');
+        window.addEventListener('offline', () => wifiHint.style.display = 'block');
 
         input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') submitKey();
@@ -224,10 +236,13 @@ let
               btn.style.display = 'none';
               input.style.display = 'none';
 
-              // Redirect to chat after gateway starts
-              setTimeout(() => {
-                window.location.href = '/';
-              }, 3000);
+              // Poll until gateway is ready, then redirect
+              const poll = setInterval(async () => {
+                try {
+                  const r = await fetch('/', { method: 'HEAD' });
+                  if (r.ok) { clearInterval(poll); window.location.href = '/'; }
+                } catch (_) {}
+              }, 1000);
             } else {
               throw new Error(data.error || 'Setup failed');
             }
@@ -236,7 +251,7 @@ let
             error.textContent = err.message;
             error.style.display = 'block';
             btn.disabled = false;
-            btn.textContent = 'Activate AgentOS';
+            btn.textContent = 'Activate Thorox';
           }
         }
       </script>
@@ -262,7 +277,7 @@ let
       exit 0
     fi
 
-    echo "Starting AgentOS setup wizard on port $PORT..."
+    echo "Starting Thorox setup wizard on port $PORT..."
 
     ${pkgs.nodejs_22}/bin/node -e "
     const http = require('http');
@@ -342,8 +357,8 @@ let
     mkdir -p "$(dirname "$ENV_FILE")"
 
     echo ""
-    echo "AgentOS Setup"
-    echo "============="
+    echo "Thorox Setup"
+    echo "============"
 
     if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
       EXISTING=$(head -c 15 "$KEY_FILE")

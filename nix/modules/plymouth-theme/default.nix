@@ -9,11 +9,11 @@ stdenv.mkDerivation {
   nativeBuildInputs = [ imagemagick ];
 
   buildPhase = ''
-    # Generate a simple logo PNG: white "AgentOS" text on transparent background
+    # Generate logo PNG: white "Thorox" text on transparent background
     # Using ImageMagick to create the wordmark — no external assets needed
     convert -size 400x80 xc:transparent \
       -font "DejaVu-Sans" -pointsize 48 -fill white \
-      -gravity center -annotate 0 "AgentOS" \
+      -gravity center -annotate 0 "Thorox" \
       logo.png
   '';
 

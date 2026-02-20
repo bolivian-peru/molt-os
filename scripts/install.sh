@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# AgentOS Installer — One command to give your server a brain
+# Thorox Installer — One command to give your server a brain
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/moltOS/molt-os/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/bolivian-peru/agent-os/main/scripts/install.sh | bash
 #
 # Or with options:
 #   curl -fsSL ... | bash -s -- --skip-nixos --api-key sk-ant-...
@@ -24,8 +24,8 @@
 set -euo pipefail
 
 VERSION="0.1.0"
-REPO_URL="https://github.com/moltOS/molt-os.git"
-INSTALL_DIR="/opt/molt-os"
+REPO_URL="https://github.com/bolivian-peru/agent-os.git"
+INSTALL_DIR="/opt/agent-os"
 STATE_DIR="/var/lib/agentos"
 RUN_DIR="/run/agentos"
 OPENCLAW_DIR="/opt/openclaw"
@@ -41,10 +41,10 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-log()   { echo -e "${GREEN}[agentos]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[agentos]${NC} $*"; }
-error() { echo -e "${RED}[agentos]${NC} $*" >&2; }
-info()  { echo -e "${BLUE}[agentos]${NC} $*"; }
+log()   { echo -e "${GREEN}[thorox]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[thorox]${NC} $*"; }
+error() { echo -e "${RED}[thorox]${NC} $*" >&2; }
+info()  { echo -e "${BLUE}[thorox]${NC} $*"; }
 
 die() { error "$@"; exit 1; }
 

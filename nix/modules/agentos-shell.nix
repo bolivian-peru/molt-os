@@ -26,8 +26,11 @@ let
     # Dark background
     output * bg #0a0a0f solid_color
 
-    # Auto-start: Firefox in kiosk mode pointed at OpenClaw
-    exec ${cfg.browser}/bin/firefox --kiosk http://localhost:${toString gatewayPort}
+    # Wait for gateway/setup wizard to be ready, then launch Firefox
+    exec bash -c 'for i in $(seq 1 30); do curl -sf http://localhost:${toString gatewayPort}/ >/dev/null 2>&1 && break; sleep 1; done; exec ${cfg.browser}/bin/firefox --kiosk http://localhost:${toString gatewayPort}'
+
+    # Launch Waybar (if useWaybar is enabled, swaybar block below is hidden)
+    ${if cfg.useWaybar then "exec ${pkgs.waybar}/bin/waybar" else ""}
 
     # === Emergency keybinds ===
     # Super+T: open a terminal (escape hatch for power users)
@@ -35,7 +38,7 @@ let
     # Super+Q: quit current window
     bindsym $mod+q kill
     # Super+Shift+E: exit Sway (emergency)
-    bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit AgentOS?' -B 'Yes' 'swaymsg exit'
+    bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit Thorox?' -B 'Yes' 'swaymsg exit'
     # Super+F: open file manager
     bindsym $mod+f exec ${pkgs.pcmanfm}/bin/pcmanfm
 
@@ -56,7 +59,8 @@ let
     bindsym $mod+Shift+1 move container to workspace number 1
     bindsym $mod+Shift+2 move container to workspace number 2
 
-    # Status bar — minimal, just essentials
+    # Fallback status bar (only used if Waybar is disabled)
+    ${if cfg.useWaybar then "" else ''
     bar {
       position top
       height 28
@@ -71,14 +75,15 @@ let
         inactive_workspace #0a0a0f #0a0a0f #555566
       }
     }
+    ''}
 
     # Input configuration
     input type:keyboard {
       xkb_options ctrl:nocaps
     }
 
-    # Seat configuration
-    seat seat0 xcursor_theme default 24
+    # Hide cursor after 3 seconds of inactivity (kiosk mode)
+    seat seat0 hide_cursor 3000
   '';
 
   # Waybar config for richer status bar (optional, used if waybar is enabled)
@@ -182,6 +187,8 @@ in {
       firefox
       foot
       wl-clipboard
+      curl              # needed for readiness check before browser launch
+      networkmanagerapplet  # WiFi management (nm-applet in tray)
     ] ++ optionals cfg.fileManager [ pcmanfm ];
   };
 }
