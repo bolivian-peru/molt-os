@@ -151,7 +151,10 @@
 
     # --- Packages ---
     packages.${linuxSystem} = {
-      agentd = self.overlays.default linuxPkgs linuxPkgs // { inherit (linuxPkgs) agentos-agentd; };
+      agentd = linuxPkgs.agentos-agentd;
+      agentctl = linuxPkgs.agentos-agentctl;
+      egress = linuxPkgs.agentos-egress;
+      voice = linuxPkgs.agentos-voice;
       default = linuxPkgs.agentos-agentd;
     };
 

@@ -1,4 +1,4 @@
-# AgentOS Live ISO — Boot from USB, talk to your computer
+# Thorox Live ISO — Boot from USB, talk to your computer
 #
 # Build (on a Linux machine or the Hetzner server):
 #   nix build .#nixosConfigurations.agentos-iso.config.system.build.isoImage
@@ -7,11 +7,11 @@
 #   dd if=result/iso/agentos-*.iso of=/dev/sdX bs=4M status=progress
 #
 # What happens when you boot:
-#   1. Plymouth splash (AgentOS logo, breathing animation)
+#   1. Plymouth splash (Thorox logo, breathing animation)
 #   2. Auto-login → Sway kiosk mode
 #   3. Firefox opens full-screen to setup wizard (localhost:18789)
 #   4. User connects WiFi, enters Anthropic API key
-#   5. AgentOS is alive — start chatting with your computer
+#   5. Thorox is alive — start chatting with your computer
 #
 { config, lib, pkgs, ... }:
 
@@ -29,17 +29,9 @@
     plymouth.enable = true;
   };
 
-  # --- Silent boot (no kernel spam) ---
-  boot.consoleLogLevel = 0;
-  boot.kernelParams = [
-    "quiet"
-    "splash"
-    "rd.systemd.show_status=false"
-    "rd.udev.log_level=3"
-    "udev.log_priority=3"
-    "vt.global_cursor_default=0"
-  ];
-  boot.initrd.verbose = false;
+  # Silent boot params are set by agentos.nix when plymouth.enable = true
+  # Adding vt.global_cursor_default=0 here (not in the module)
+  boot.kernelParams = [ "vt.global_cursor_default=0" ];
 
   # --- Live ISO user ---
   users.users.agent = {
