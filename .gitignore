@@ -1,0 +1,48 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node.js
+node_modules/
+dist/
+*.tsbuildinfo
+.npm
+
+# Nix
+result
+result-*
+.direnv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Secrets (never commit)
+*.pem
+*.key
+secrets/
+.keys/
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+
+# Memory system runtime data
+/var/lib/agentos/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
