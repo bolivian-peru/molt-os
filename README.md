@@ -1,160 +1,183 @@
 <div align="center">
 
-# AgentOS
+# 🛡️ Thorox
 
-**The first server that IS an AI agent — not just running one.**
+**Your server has a brain now.**
 
-Self-healing infrastructure. Natural language DevOps. Hash-chained audit trail.
-Built on NixOS for atomic, rollbackable system management.
+Self-healing infrastructure powered by NixOS + AI.
+It watches. It learns. It fixes. You sleep.
 
-[Install](#install) · [Demo](#demo) · [How It Works](#how-it-works) · [Features](#features) · [Architecture](#architecture)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
+[![NixOS](https://img.shields.io/badge/NixOS-Powered-5277C3.svg)](https://nixos.org/)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-Compatible-red.svg)](https://openclaw.ai/)
+
+[Install](#install) · [30-Second Demo](#demo) · [Why Thorox?](#why-thorox) · [How It Works](#how-it-works) · [Features](#features) · [Docs](docs/)
 
 </div>
 
 ---
 
-## What is this?
-
-Everyone's building AI agents that run ON a server. AgentOS is the first server that IS an AI agent.
-
-```
-You:    "Install PostgreSQL with nightly backups"
-Thorox: Here's the NixOS config I'd add:
-          services.postgresql.enable = true;
-          services.postgresqlBackup = { ... };
-        This creates generation 48. Rollbackable. Apply?
-
-You:    "Something broke after the last update"
-Thorox: Generation 48 updated OpenSSL 3.1→3.2.
-        Your app uses a deprecated TLS cipher.
-        Rolling back to generation 47... Done. App is back.
-        Audit entry #52 recorded.
-
-[3 AM, you're asleep]
-Thorox: nginx went down. Config file was corrupted.
-        Rolled back to last known-good generation.
-        nginx is running. Sending you the incident report.
-```
-
-You stop SSHing into servers. You just talk to them.
+> *"I stopped SSHing into my servers. Now I just text them on Telegram."*
 
 ---
 
+## What Happens at 3 AM
+
+```
+[3:17 AM]  nginx goes down. Config file corrupted.
+[3:17 AM]  Thorox detects failure via heartbeat monitor.
+[3:17 AM]  Thorox diagnoses: missing nginx config, last working in generation 47.
+[3:18 AM]  Thorox runs NixOS rollback → generation 47 restored.
+[3:18 AM]  nginx is back. 47 seconds total downtime.
+[3:18 AM]  Thorox messages you on Telegram: "Fixed it. Here's what happened."
+[3:18 AM]  Audit entry #52 recorded in hash-chained ledger.
+
+You wake up at 8 AM. Everything's fine.
+Your morning briefing explains what happened.
+```
+
 ## Install
 
-One command:
+One command. 60 seconds. Works on any Linux server.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/moltOS/molt-os/main/scripts/install.sh | sudo bash
+curl -fsSL https://thorox.dev/install | bash
 ```
 
 Or with an API key:
 
 ```bash
-curl -fsSL ... | sudo bash -s -- --api-key sk-ant-...
+curl -fsSL https://thorox.dev/install | bash -s -- --api-key sk-ant-...
 ```
 
 Then open `http://localhost:18789` and start talking to your server.
 
-**Supported platforms:** Ubuntu 22.04+, Debian 12+, existing NixOS
+**Supported:** Ubuntu 22.04+, Debian 12+, NixOS
 **Tested on:** Hetzner Cloud, DigitalOcean, bare metal
-
----
 
 ## Demo
 
-**Self-healing:** Break nginx → AgentOS detects it → diagnoses root cause → NixOS rollback → fixed. 60 seconds.
+<!-- Replace with actual asciinema embed or GIF -->
+<!-- [![Demo](https://asciinema.org/a/XXXXX.svg)](https://asciinema.org/a/XXXXX) -->
 
-**Natural language DevOps:** "Set up Caddy as a reverse proxy for my app on port 3000" → generates NixOS config → shows diff → applies atomically.
+```
+You:     "What's eating my RAM?"
+Thorox:  PostgreSQL is using 4.2 GB — 3 idle connections
+         holding 800 MB each. Want me to add PgBouncer?
 
-**Morning briefing:** Every day at 7am you get a server health report with security events, resource trends, and overnight incidents.
+You:     "Yes"
+Thorox:  Here's the NixOS config I'll add:
+           services.pgbouncer.enable = true;
+           services.pgbouncer.databases = { ... };
+         This creates generation 48. Rollbackable. Apply?
 
-<!-- TODO: demo video link -->
+You:     "Apply"
+Thorox:  Done. RAM: 5.8 GB → 2.1 GB.
+         Audit entry #53 recorded.
+```
 
----
+**Self-healing demo:** Break nginx → Thorox detects → diagnoses root cause → NixOS rollback → fixed. Under 60 seconds. [Watch video →](docs/)
+
+**Morning briefing:** Every day at 7 AM, a Telegram message with service health, resource trends, security events, and overnight incidents.
+
+## Why Thorox?
+
+Everyone's building AI agents that run **ON** a server.
+Thorox is the first server that **IS** an AI agent.
+
+| | Without Thorox | With Thorox |
+|---|---|---|
+| 3 AM crash | PagerDuty wakes you | Thorox fixes it, tells you at breakfast |
+| Bad deploy | Hope you have backups | NixOS rollback — instant, atomic |
+| "What changed?" | `grep bash_history` | Hash-chained audit trail with reasoning |
+| New service | Write Ansible playbooks | "Set up PostgreSQL with nightly backups" |
+| Security | Quarterly scan, maybe | Continuous score + auto-hardening |
+| Config drift | Invisible, permanent | Detected and reconciled |
+| Reproduce server | Pray your docs are right | NixOS config IS the server |
+
+### vs. Other OpenClaw Setups
+
+| | Clawezy / VivaClaw / etc. | Nathan's Self-Healing Blog | Thorox |
+|---|---|---|---|
+| System awareness | ❌ Shell commands only | ⚠️ SSH-based | ✅ Native daemon (agentd) |
+| Atomic rollback | ❌ Ubuntu/Debian | ❌ Ansible/Terraform | ✅ NixOS generations |
+| Audit trail | ❌ None | ⚠️ Git history | ✅ Hash-chained, tamper-proof |
+| Self-healing | ❌ | ⚠️ Manual scripts | ✅ Automatic + rollback |
+| OS-level memory | ❌ | ❌ | ✅ Persistent context |
+| Continuous monitoring | ❌ | ⚠️ Cron | ✅ Always-on watchers |
 
 ## How It Works
 
-AgentOS = **NixOS** + **agentd** + **OpenClaw** + **hash-chained audit ledger**
+Thorox = **NixOS** (the body) + **agentd** (the nervous system) + **OpenClaw** (the brain)
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  You (chat / Telegram / API)                         │
-├──────────────────────────────────────────────────────┤
-│  OpenClaw AI Gateway          port 18789             │
-│  Claude Opus / Sonnet         agent reasoning        │
-├──────────────────────────────────────────────────────┤
-│  agentos-bridge plugin        12 system tools        │
-│  ├─ system_health             CPU, RAM, disk, uptime │
-│  ├─ shell_exec                full root access       │
-│  ├─ file_read / file_write    filesystem access      │
-│  ├─ service_status            systemd services       │
-│  ├─ journal_logs              log analysis           │
-│  ├─ network_info              ports, interfaces      │
-│  ├─ event_log                 audit ledger queries   │
-│  └─ memory_store / recall     long-term memory       │
-├──────────────────────────────────────────────────────┤
-│  agentd                       Rust daemon on Unix    │
-│  ├─ System queries            socket (/run/agentos/) │
-│  ├─ Hash-chained ledger       tamper-proof audit     │
-│  └─ Memory system             persistent context     │
-├──────────────────────────────────────────────────────┤
-│  NixOS                        declarative OS layer   │
-│  ├─ Atomic rebuilds           nixos-rebuild switch   │
-│  ├─ Rollback                  instant generation     │
-│  │                            revert                 │
-│  └─ Reproducible              config IS the server   │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  You (Telegram / Web Chat / SSH / API)              │
+├─────────────────────────────────────────────────────┤
+│  OpenClaw AI Gateway        Claude / Sonnet         │
+│  Agent reasoning · Skills · Memory                  │
+├─────────────────────────────────────────────────────┤
+│  agentd (Rust daemon)       The Nervous System      │
+│  ├─ system_health           CPU, RAM, disk, uptime  │
+│  ├─ service_status          systemd services        │
+│  ├─ journal_logs            Log analysis            │
+│  ├─ shell_exec              Controlled root access  │
+│  ├─ file_read / file_write  Filesystem access       │
+│  ├─ network_info            Ports, interfaces       │
+│  ├─ event_log               Audit ledger queries    │
+│  └─ memory_store / recall   Long-term memory        │
+├─────────────────────────────────────────────────────┤
+│  NixOS                      The Body                │
+│  ├─ Atomic rebuilds         All-or-nothing deploys  │
+│  ├─ Instant rollback        Any generation, 1 cmd   │
+│  └─ Reproducible            Config = server         │
+└─────────────────────────────────────────────────────┘
 ```
 
-The AI agent doesn't just run shell commands. It proposes **declarative state transitions** on a formally-specified system. Every change is reviewable, reversible, and auditable.
-
----
+The AI doesn't run shell commands and hope for the best.
+It proposes **declarative state transitions** on a formally-specified system.
+Every change is reviewable, reversible, and auditable.
 
 ## Features
 
-### Self-Healing Infrastructure
-AgentOS monitors services, detects failures, diagnoses root causes, and auto-remediates using NixOS atomic rollback. Every action logged to the hash-chained audit ledger.
+🔧 **Self-Healing Infrastructure**
+Monitors services, detects failures, diagnoses root causes, auto-remediates via NixOS atomic rollback. Every action logged to the hash-chained audit ledger.
 
-### Natural Language System Configuration
-Describe what you want in plain English. AgentOS generates the NixOS config, shows you the diff, and applies it atomically. No more learning Nix language to get NixOS benefits.
+💬 **Natural Language DevOps**
+"Install Caddy as reverse proxy for port 3000" → generates NixOS config → shows diff → applies atomically. No more learning Nix language.
 
-### Generation-Aware Time-Travel Debugging
-"What broke and when?" AgentOS correlates NixOS generations + audit ledger + journal logs to pinpoint exactly which config change caused which failure.
+⏰ **Morning Briefing**
+Daily Telegram report: service health, resource trends, security events, overnight incidents, cost tracking.
 
-### Predictive Resource Management
-Trend analysis on disk, memory, and CPU usage. Alerts you days before exhaustion. Proposes and applies NixOS config fixes (log rotation, swap, garbage collection).
+🕐 **Time-Travel Debugging**
+"What broke overnight?" → correlates NixOS generations + audit ledger + journal logs → pinpoints the exact config change that caused the failure.
 
-### Security Hardening Score
-Continuous security posture assessment. Auto-fixes safe issues (fail2ban, SSH hardening, port closing). Presents a score with actionable recommendations.
+🔒 **Security Autopilot**
+Continuous posture scoring. Auto-fixes safe issues (fail2ban, SSH hardening, exposed ports). Presents a score with actionable recommendations.
 
-### Configuration Drift Detection
-Detects manual changes that exist outside NixOS management — imperative packages, ad-hoc cron jobs, manually edited configs. Offers to bring everything into declarative management.
+📊 **Predictive Resource Management**
+Trend analysis on disk, memory, CPU usage. Alerts days before exhaustion. Proposes and applies NixOS config fixes.
 
-### Flight Recorder
-Black box telemetry for your server. Continuous state snapshots for post-incident forensics. "What happened at 3 AM?" answered with timestamped evidence.
+🧹 **Configuration Drift Detection**
+Finds manual changes outside NixOS management — imperative packages, ad-hoc cron jobs, hand-edited configs. Offers to bring everything into declarative management.
 
-### Intelligent Nix Store Optimization
-Smart garbage collection that knows which generations to keep (current, last-known-good, backup baselines) and which to clean. Reclaims disk with surgical precision.
+✈️ **Flight Recorder**
+Black box telemetry for your server. Continuous state snapshots for post-incident forensics.
 
-### Morning Briefing
-Daily infrastructure report: service health, resource trends, security events, overnight incidents, and cost tracking. Screenshot-ready for your team Slack.
+🧠 **Intelligent Nix Optimization**
+Smart garbage collection that knows which generations to keep (current, last-known-good, backup baseline) and which to clean.
 
----
+## Built on OpenClaw
 
-## Why NixOS?
+Thorox extends the [OpenClaw](https://openclaw.ai) ecosystem. It's not a fork — it's the **infrastructure layer** that gives OpenClaw agents system-level superpowers.
 
-The combination of AI + NixOS enables features that are **genuinely impossible** on Ubuntu/Debian/RHEL:
+If OpenClaw is the brain, Thorox is the nervous system.
 
-| Feature | Ubuntu + AI | AgentOS (NixOS + AI) |
-|---------|-------------|---------------------|
-| Rollback a bad change | Hope you have backups | `nixos-rebuild switch --rollback` — instant |
-| Reproduce server | Pray your Ansible is accurate | Config file IS the server — identical rebuild |
-| Audit trail | grep through bash history | Hash-chained tamper-proof ledger |
-| Config drift | Invisible and permanent | Detected and reconcilable |
-| Atomic deploys | apt-get halfway through and crash? | All-or-nothing generation switch |
-
----
+- **agentd** provides native OS awareness (not just shell commands)
+- **Hash-chained ledger** provides tamper-proof audit trail
+- **NixOS** provides atomic, rollbackable system state
+- **Skills** teach the agent OS-level workflows
 
 ## Architecture
 
@@ -166,134 +189,49 @@ RING 1: Approved apps          Sandboxed, declared capabilities
 RING 2: Untrusted tools        Max isolation, no network, minimal fs
 ```
 
-### Components
-
-- **agentd** — Rust daemon on Unix socket. System queries, hash-chained event ledger, memory endpoints.
-- **agentos-bridge** — OpenClaw plugin. 12 tools that give the AI structured system access.
-- **agentos-egress** — Localhost HTTP proxy with domain allowlist for sandboxed tools.
-- **Skills** — Markdown instructions that teach the agent OS-level workflows (self-healing, security hardening, etc.)
-
 ### Event Ledger
 
-Every system action is recorded in a SQLite database with SHA-256 hash chaining:
+Every system action is recorded in SQLite with SHA-256 hash chaining:
 
 ```sql
-CREATE TABLE events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts TEXT NOT NULL,
-  type TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  prev_hash TEXT NOT NULL,
-  hash TEXT NOT NULL  -- SHA-256(id || ts || type || actor || payload || prev_hash)
-);
+-- Every event references the previous hash.
+-- Break the chain → instant detection.
+hash = SHA-256(id || ts || type || actor || payload || prev_hash)
 ```
 
-Tamper-proof. Every event references the previous hash. Break the chain → instant detection.
-
----
-
-## Repository Layout
-
-```
-flake.nix                       NixOS flake (OS configurations + Rust builds)
-Cargo.toml                      Rust workspace
-crates/
-  agentd/                       System daemon (axum + rusqlite + tokio)
-  agentctl/                     CLI tool (verify-ledger, events)
-  agentos-egress/               Egress proxy (domain allowlist)
-  agentos-voice/                Voice pipeline (whisper.cpp + piper-tts)
-packages/
-  agentos-bridge/               OpenClaw plugin (12 system tools)
-nix/
-  modules/agentos.nix           Core NixOS module
-  modules/agentos-shell.nix     Kiosk desktop shell
-  modules/agentos-setup.nix     First-boot setup wizard
-  hosts/dev-vm.nix              QEMU development VM
-  hosts/server.nix              Headless server
-  hosts/hetzner.nix             Hetzner Cloud deployment
-  hosts/iso.nix                 Installer ISO
-skills/                         Agent skill definitions
-  self-healing/                 Detect + diagnose + auto-fix
-  morning-briefing/             Daily infrastructure report
-  security-hardening/           Continuous security scoring
-  natural-language-config/      NixOS config from plain English
-  drift-detection/              Find imperative drift
-  generation-timeline/          Time-travel debugging
-  predictive-resources/         Resource exhaustion prediction
-  nix-optimizer/                Smart Nix store management
-  flight-recorder/              Server black box telemetry
-  system-monitor/               Real-time system monitoring
-  ...
-templates/                      Agent identity + personality
-scripts/
-  install.sh                    One-command installer
-  deploy-hetzner.sh             Hetzner deployment automation
-```
-
----
+Tamper-proof. SOC2-auditor friendly. Every AI action is accountable.
 
 ## Development
 
 ```bash
-# Enter dev shell (provides Rust, Node.js, Nix tools)
-nix develop
-
-# Check everything compiles
-cargo check --workspace
-
-# Run tests
-cargo test --workspace
-
-# Run agentd locally
-cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/agentos
+nix develop                  # Enter dev shell (Rust, Node.js, Nix tools)
+cargo check --workspace      # Verify compilation
+cargo test --workspace       # Run tests
+cargo run -p agentd          # Run agentd locally
 
 # Build the dev VM
 nix build .#nixosConfigurations.agentos-dev.config.system.build.vm
-./result/bin/run-agentos-dev-vm -m 4096 -smp 4
 
-# Build the ISO
+# Build the installer ISO
 nix build .#nixosConfigurations.agentos-iso.config.system.build.isoImage
 ```
 
----
-
-## Deploy to Hetzner Cloud
-
-```bash
-# Generate SSH key
-ssh-keygen -t ed25519 -f .keys/agentos_hetzner -N ""
-
-# Create a CX22 server with Ubuntu 24.04 in Hetzner dashboard
-# Add your SSH public key in Hetzner > Security > SSH Keys
-
-# Deploy
-./scripts/deploy-hetzner.sh <server-ip> .keys/agentos_hetzner
-
-# Access (via SSH tunnel)
-ssh -i .keys/agentos_hetzner -L 18789:localhost:18789 root@<server-ip>
-# Open http://localhost:18789 in your browser
-```
-
----
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full development guide.
 
 ## Roadmap
 
 - [x] agentd system daemon with hash-chained ledger
 - [x] OpenClaw bridge plugin (12 system tools)
 - [x] NixOS module for declarative deployment
-- [x] First-boot setup wizard
 - [x] Self-healing, security hardening, morning briefing skills
-- [x] One-command installer
 - [x] Hetzner Cloud deployment
+- [ ] One-command curl installer
 - [ ] Telegram channel integration
-- [ ] ZVEC vector memory (semantic search, auto-injection)
-- [ ] Desktop kiosk mode (Sway + full-screen chat)
+- [ ] ZVEC vector memory (semantic search)
 - [ ] Voice interface (whisper.cpp + piper-tts)
 - [ ] Fleet mode (multi-server shared intelligence)
-- [ ] One-command curl installer from GitHub
-
----
+- [ ] Home Assistant bridge
+- [ ] Desktop kiosk mode
 
 ## License
 
@@ -303,8 +241,10 @@ MIT. See [LICENSE](LICENSE).
 
 <div align="center">
 
-**AgentOS** — the server that thinks.
+**Thorox** — your server has a brain now.
 
 Built with NixOS, Rust, and OpenClaw.
+
+[⭐ Star this repo](../../stargazers) · [🐛 Report bug](../../issues) · [💡 Request feature](../../issues)
 
 </div>

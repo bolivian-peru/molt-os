@@ -1,48 +1,118 @@
-# AgentOS ISO — Installer image
-# Build: nix build .#nixosConfigurations.agentos-iso.config.system.build.isoImage
+# AgentOS Live ISO — Boot from USB, talk to your computer
+#
+# Build (on a Linux machine or the Hetzner server):
+#   nix build .#nixosConfigurations.agentos-iso.config.system.build.isoImage
+#
+# Write to USB:
+#   dd if=result/iso/agentos-*.iso of=/dev/sdX bs=4M status=progress
+#
+# What happens when you boot:
+#   1. Plymouth splash (AgentOS logo, breathing animation)
+#   2. Auto-login → Sway kiosk mode
+#   3. Firefox opens full-screen to setup wizard (localhost:18789)
+#   4. User connects WiFi, enters Anthropic API key
+#   5. AgentOS is alive — start chatting with your computer
+#
 { config, lib, pkgs, ... }:
 
 {
-  networking.hostName = "agentos-installer";
+  networking.hostName = "agentos-live";
   system.stateVersion = "24.11";
 
+  # --- Enable AgentOS (core + gateway + shell) ---
   services.agentos = {
     enable = true;
     openclaw.enable = true;
-    sandbox.enable = false;  # No sandbox in installer
-    memory.enable = false;   # No persistent memory in installer
+    sandbox.enable = false;
+    memory.enable = true;
+    shell.enable = true;
+    plymouth.enable = true;
   };
 
-  # Installer boots to a minimal Sway session with the agent ready
-  programs.sway.enable = true;
+  # --- Silent boot (no kernel spam) ---
+  boot.consoleLogLevel = 0;
+  boot.kernelParams = [
+    "quiet"
+    "splash"
+    "rd.systemd.show_status=false"
+    "rd.udev.log_level=3"
+    "udev.log_priority=3"
+    "vt.global_cursor_default=0"
+  ];
+  boot.initrd.verbose = false;
 
-  services.greetd = {
-    enable = true;
-    settings = {
-      default_session = {
-        command = "${pkgs.sway}/bin/sway";
-        user = "nixos";
-      };
-    };
-  };
-
-  users.users.nixos = {
+  # --- Live ISO user ---
+  users.users.agent = {
     isNormalUser = true;
-    extraGroups = [ "wheel" "networkmanager" ];
+    extraGroups = [ "wheel" "networkmanager" "audio" "video" "input" ];
     initialPassword = "";
     shell = pkgs.bash;
   };
 
   security.sudo.wheelNeedsPassword = false;
 
+  # --- Networking (WiFi + Ethernet) ---
+  networking.networkmanager.enable = true;
+  networking.wireless.enable = false; # NetworkManager handles WiFi
+
+  # --- Audio (PipeWire) ---
+  security.rtkit.enable = true;
+  services.pipewire = {
+    enable = true;
+    alsa.enable = true;
+    pulse.enable = true;
+  };
+
+  # --- Fonts (clean rendering) ---
+  fonts = {
+    packages = with pkgs; [
+      jetbrains-mono
+      noto-fonts
+      noto-fonts-emoji
+    ];
+    fontconfig.defaultFonts = {
+      monospace = [ "JetBrains Mono" ];
+      sansSerif = [ "Noto Sans" ];
+    };
+  };
+
+  # --- System packages ---
   environment.systemPackages = with pkgs; [
-    kitty
+    # Core tools
+    vim
+    git
+    curl
+    jq
+    htop
+
+    # Desktop
     firefox
-    gparted
+    foot
+    wl-clipboard
+    pcmanfm
     networkmanagerapplet
+
+    # For the NixOS install-to-disk flow
+    gparted
+    parted
+
+    # Build tools (for running cargo if needed)
+    gcc
+    pkg-config
+    sqlite
+    openssl
   ];
 
-  networking.networkmanager.enable = true;
+  # --- Nix ---
+  nix.settings = {
+    experimental-features = [ "nix-command" "flakes" ];
+    auto-optimise-store = true;
+  };
 
-  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+  # --- Misc ---
+  time.timeZone = "UTC";
+  i18n.defaultLocale = "en_US.UTF-8";
+
+  # --- ISO-specific: increase tmpfs for live session ---
+  boot.tmp.tmpfsSize = "80%";
 }
