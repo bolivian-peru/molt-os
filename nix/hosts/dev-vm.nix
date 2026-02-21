@@ -1,15 +1,15 @@
-# AgentOS Dev VM — QEMU virtual machine with Sway desktop
-# Build: nix build .#nixosConfigurations.agentos-dev.config.system.build.vm
-# Run:   ./result/bin/run-agentos-dev-vm -m 4096 -smp 4
+# osModa Dev VM — QEMU virtual machine with Sway desktop
+# Build: nix build .#nixosConfigurations.osmoda-dev.config.system.build.vm
+# Run:   ./result/bin/run-osmoda-dev-vm -m 4096 -smp 4
 { config, lib, pkgs, ... }:
 
 {
   # --- System Identity ---
-  networking.hostName = "agentos-dev";
+  networking.hostName = "osmoda-dev";
   system.stateVersion = "24.11";
 
-  # --- Enable AgentOS ---
-  services.agentos = {
+  # --- Enable osModa ---
+  services.osmoda = {
     enable = true;
     openclaw.enable = true;
     sandbox.enable = true;
@@ -36,14 +36,14 @@
     };
   };
 
-  # Desktop shell is managed by services.agentos.shell (agentos-shell.nix)
+  # Desktop shell is managed by services.osmoda.shell (osmoda-shell.nix)
 
   # --- Auto-login User ---
   users.users.agent = {
     isNormalUser = true;
-    description = "AgentOS User";
+    description = "osModa User";
     extraGroups = [ "wheel" "networkmanager" "video" "audio" ];
-    initialPassword = "agentos";
+    initialPassword = "osmoda";
     shell = pkgs.zsh;
   };
 
@@ -76,7 +76,7 @@
     (nerdfonts.override { fonts = [ "FiraCode" "JetBrainsMono" ]; })
   ];
 
-  # Sway kiosk config and Waybar are managed by agentos-shell.nix
+  # Sway kiosk config and Waybar are managed by osmoda-shell.nix
 
   # --- Nix Settings ---
   nix = {

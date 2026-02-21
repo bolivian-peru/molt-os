@@ -5,14 +5,14 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "agentctl", about = "AgentOS CLI — query events and verify ledger integrity")]
+#[command(name = "agentctl", about = "osModa CLI — query events and verify ledger integrity")]
 struct Cli {
     /// Path to the agentd state directory
-    #[arg(long, default_value = "/var/lib/agentos")]
+    #[arg(long, default_value = "/var/lib/osmoda")]
     state_dir: PathBuf,
 
     /// Path to the agentd Unix socket
-    #[arg(long, default_value = "/run/agentos/agentd.sock")]
+    #[arg(long, default_value = "/run/osmoda/agentd.sock")]
     socket: PathBuf,
 
     #[command(subcommand)]
@@ -146,7 +146,7 @@ fn cmd_verify_ledger(state_dir: &PathBuf) -> Result<()> {
         ))
     })?;
 
-    let mut expected_prev_hash = "0".repeat(64);
+    let mut expected_prev_hash = "0".repeat(64); // matches GENESIS_PREV_HASH in agentd ledger
     let mut count = 0u64;
     let mut errors = 0u64;
 
@@ -162,8 +162,8 @@ fn cmd_verify_ledger(state_dir: &PathBuf) -> Result<()> {
             errors += 1;
         }
 
-        // Recompute hash
-        let hash_input = format!("{id}{ts}{event_type}{actor}{payload}{prev_hash}");
+        // Recompute hash (pipe-delimited to match agentd ledger format)
+        let hash_input = format!("{id}|{ts}|{event_type}|{actor}|{payload}|{prev_hash}");
         let mut hasher = Sha256::new();
         hasher.update(hash_input.as_bytes());
         let computed_hash = hex::encode(hasher.finalize());

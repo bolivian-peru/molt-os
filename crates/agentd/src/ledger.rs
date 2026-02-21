@@ -56,14 +56,41 @@ impl Ledger {
                 payload TEXT NOT NULL,
                 prev_hash TEXT NOT NULL,
                 hash TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS incidents (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                resolved_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS incident_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_id TEXT NOT NULL REFERENCES incidents(id),
+                step_number INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                result TEXT NOT NULL,
+                receipt_id TEXT,
+                timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
             );",
         )
-        .context("failed to create events table")?;
+        .context("failed to create tables")?;
 
-        Ok(Self { conn })
+        let mut ledger = Self { conn };
+        ledger.migrate()?;
+        Ok(ledger)
     }
 
     /// Compute the SHA-256 hash for an event row.
+    /// Uses pipe delimiters to prevent field-boundary collisions
+    /// (e.g., id="12" + ts="3abc" would otherwise equal id="123" + ts="abc").
     fn compute_hash(
         id: i64,
         ts: &str,
@@ -72,16 +99,87 @@ impl Ledger {
         payload: &str,
         prev_hash: &str,
     ) -> String {
-        let input = format!("{id}{ts}{event_type}{actor}{payload}{prev_hash}");
+        let input = format!("{id}|{ts}|{event_type}|{actor}|{payload}|{prev_hash}");
         let mut hasher = Sha256::new();
         hasher.update(input.as_bytes());
         hex::encode(hasher.finalize())
     }
 
+    /// Current schema version. Increment when making breaking changes.
+    const CURRENT_SCHEMA_VERSION: i64 = 2;
+
+    /// Run any pending migrations.
+    fn migrate(&mut self) -> Result<()> {
+        let version: i64 = self.conn
+            .query_row(
+                "SELECT version FROM schema_version WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if version < 2 && version > 0 {
+            // Migration from v1 (no delimiters) to v2 (pipe-delimited hashes):
+            // Re-hash all events with the new delimiter format.
+            tracing::info!("migrating ledger from schema v{version} to v2 (pipe-delimited hashes)");
+            self.rehash_chain()?;
+        }
+
+        if version < Self::CURRENT_SCHEMA_VERSION {
+            self.conn.execute(
+                "INSERT OR REPLACE INTO schema_version (id, version) VALUES (1, ?1)",
+                params![Self::CURRENT_SCHEMA_VERSION],
+            ).context("failed to update schema version")?;
+        }
+
+        Ok(())
+    }
+
+    /// Recompute all hashes in the chain using the current hash format.
+    fn rehash_chain(&mut self) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()
+            .context("failed to begin rehash transaction")?;
+
+        let mut stmt = tx.prepare(
+            "SELECT id, ts, type, actor, payload FROM events ORDER BY id ASC"
+        )?;
+        let rows: Vec<(i64, String, String, String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(stmt);
+
+        let mut prev_hash = GENESIS_PREV_HASH.to_string();
+        for (id, ts, event_type, actor, payload) in &rows {
+            let hash = Self::compute_hash(*id, ts, event_type, actor, payload, &prev_hash);
+            tx.execute(
+                "UPDATE events SET prev_hash = ?1, hash = ?2 WHERE id = ?3",
+                params![prev_hash, hash, id],
+            )?;
+            prev_hash = hash;
+        }
+
+        tx.commit().context("failed to commit rehash")?;
+        tracing::info!(events = rows.len(), "ledger rehash complete");
+        Ok(())
+    }
+
+    /// Flush WAL to main database file. Call on graceful shutdown.
+    pub fn flush(&self) -> Result<()> {
+        self.conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")
+            .context("failed to checkpoint WAL")?;
+        Ok(())
+    }
+
     /// Retrieve the hash of the most recent event, or the genesis zero-hash if empty.
     pub fn last_hash(&self) -> Result<String> {
-        let maybe: Option<String> = self
-            .conn
+        Self::last_hash_conn(&self.conn)
+    }
+
+    /// Retrieve the hash of the most recent event using an explicit connection/transaction.
+    fn last_hash_conn(conn: &Connection) -> Result<String> {
+        let maybe: Option<String> = conn
             .query_row(
                 "SELECT hash FROM events ORDER BY id DESC LIMIT 1",
                 [],
@@ -94,23 +192,25 @@ impl Ledger {
 
     /// Append a new event to the ledger, computing its hash from the chain.
     ///
+    /// The entire operation runs inside a transaction to prevent TOCTOU races
+    /// where concurrent appends could interleave and corrupt the hash chain.
+    ///
     /// Returns the created event including its assigned id, timestamp, and hash.
     pub fn append(&self, event_type: &str, actor: &str, payload: &str) -> Result<Event> {
-        let prev_hash = self.last_hash()?;
+        let tx = self.conn.unchecked_transaction()
+            .context("failed to begin transaction")?;
 
-        // Insert with server-generated timestamp; we need to read it back.
-        self.conn
-            .execute(
-                "INSERT INTO events (type, actor, payload, prev_hash, hash) VALUES (?1, ?2, ?3, ?4, '')",
-                params![event_type, actor, payload, prev_hash],
-            )
-            .context("failed to insert event")?;
+        let prev_hash = Self::last_hash_conn(&tx)?;
 
-        let id = self.conn.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO events (type, actor, payload, prev_hash, hash) VALUES (?1, ?2, ?3, ?4, '')",
+            params![event_type, actor, payload, prev_hash],
+        )
+        .context("failed to insert event")?;
 
-        // Read back the server-generated timestamp.
-        let ts: String = self
-            .conn
+        let id = tx.last_insert_rowid();
+
+        let ts: String = tx
             .query_row("SELECT ts FROM events WHERE id = ?1", params![id], |row| {
                 row.get(0)
             })
@@ -118,12 +218,13 @@ impl Ledger {
 
         let hash = Self::compute_hash(id, &ts, event_type, actor, payload, &prev_hash);
 
-        self.conn
-            .execute(
-                "UPDATE events SET hash = ?1 WHERE id = ?2",
-                params![hash, id],
-            )
-            .context("failed to update event hash")?;
+        tx.execute(
+            "UPDATE events SET hash = ?1 WHERE id = ?2",
+            params![hash, id],
+        )
+        .context("failed to update event hash")?;
+
+        tx.commit().context("failed to commit event")?;
 
         Ok(Event {
             id,
@@ -253,4 +354,318 @@ impl Ledger {
             .context("failed to count events")?;
         Ok(count)
     }
+
+    // ── Incidents ──
+
+    /// Create a new incident workspace.
+    pub fn create_incident(&self, id: &str, name: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO incidents (id, name) VALUES (?1, ?2)",
+                params![id, name],
+            )
+            .context("failed to create incident")?;
+        Ok(())
+    }
+
+    /// Add a step to an incident.
+    pub fn add_incident_step(
+        &self,
+        incident_id: &str,
+        step_number: u32,
+        action: &str,
+        result: &str,
+        receipt_id: Option<&str>,
+    ) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO incident_steps (incident_id, step_number, action, result, receipt_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![incident_id, step_number, action, result, receipt_id],
+            )
+            .context("failed to add incident step")?;
+        Ok(())
+    }
+
+    /// Get an incident by ID with all its steps.
+    pub fn get_incident(&self, id: &str) -> Result<Option<IncidentRow>> {
+        let incident = self
+            .conn
+            .query_row(
+                "SELECT id, name, status, created_at, resolved_at FROM incidents WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(IncidentRow {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        status: row.get(2)?,
+                        created_at: row.get(3)?,
+                        resolved_at: row.get(4)?,
+                        steps: Vec::new(),
+                    })
+                },
+            )
+            .ok();
+
+        match incident {
+            Some(mut inc) => {
+                inc.steps = self.get_incident_steps(&inc.id)?;
+                Ok(Some(inc))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get all steps for an incident.
+    fn get_incident_steps(&self, incident_id: &str) -> Result<Vec<IncidentStepRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT step_number, action, result, receipt_id, timestamp FROM incident_steps WHERE incident_id = ?1 ORDER BY step_number ASC",
+        )?;
+        let steps = stmt
+            .query_map(params![incident_id], |row| {
+                Ok(IncidentStepRow {
+                    step_number: row.get(0)?,
+                    action: row.get(1)?,
+                    result: row.get(2)?,
+                    receipt_id: row.get(3)?,
+                    timestamp: row.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to collect incident steps")?;
+        Ok(steps)
+    }
+
+    /// List incidents, optionally filtered by status.
+    pub fn list_incidents(&self, status: Option<&str>) -> Result<Vec<IncidentRow>> {
+        let (sql, param_values): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match status {
+            Some(s) => (
+                "SELECT id, name, status, created_at, resolved_at FROM incidents WHERE status = ?1 ORDER BY created_at DESC".to_string(),
+                vec![Box::new(s.to_string())],
+            ),
+            None => (
+                "SELECT id, name, status, created_at, resolved_at FROM incidents ORDER BY created_at DESC".to_string(),
+                vec![],
+            ),
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = self.conn.prepare(&sql)?;
+        let incidents = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                Ok(IncidentRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    status: row.get(2)?,
+                    created_at: row.get(3)?,
+                    resolved_at: row.get(4)?,
+                    steps: Vec::new(),
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to list incidents")?;
+
+        // Load steps for each incident
+        let mut result = Vec::new();
+        for mut inc in incidents {
+            inc.steps = self.get_incident_steps(&inc.id)?;
+            result.push(inc);
+        }
+        Ok(result)
+    }
+
+    /// Update incident status (e.g., "resolved").
+    pub fn resolve_incident(&self, id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE incidents SET status = 'resolved', resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1",
+            params![id],
+        ).context("failed to resolve incident")?;
+        Ok(())
+    }
 }
+
+/// Row type for incidents from the database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentRow {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+    pub steps: Vec<IncidentStepRow>,
+}
+
+/// Row type for incident steps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentStepRow {
+    pub step_number: u32,
+    pub action: String,
+    pub result: String,
+    pub receipt_id: Option<String>,
+    pub timestamp: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_incident_create_and_get() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+
+        // Create an incident
+        ledger
+            .create_incident("inc-001", "Database Connection Failed")
+            .expect("failed to create incident");
+
+        // Get the incident back
+        let incident = ledger
+            .get_incident("inc-001")
+            .expect("failed to get incident")
+            .expect("incident should exist");
+
+        // Verify fields
+        assert_eq!(incident.id, "inc-001");
+        assert_eq!(incident.name, "Database Connection Failed");
+        assert_eq!(incident.status, "open");
+        assert!(incident.resolved_at.is_none());
+        assert_eq!(incident.steps.len(), 0);
+    }
+
+    #[test]
+    fn test_incident_add_steps() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+
+        // Create an incident
+        ledger
+            .create_incident("inc-002", "Server CPU High")
+            .expect("failed to create incident");
+
+        // Add step 1
+        ledger
+            .add_incident_step("inc-002", 1, "Investigate CPU usage", "CPU at 95%", None)
+            .expect("failed to add step 1");
+
+        // Add step 2
+        ledger
+            .add_incident_step("inc-002", 2, "Restart service", "Service restarted successfully", Some("receipt-123"))
+            .expect("failed to add step 2");
+
+        // Get the incident and verify steps
+        let incident = ledger
+            .get_incident("inc-002")
+            .expect("failed to get incident")
+            .expect("incident should exist");
+
+        assert_eq!(incident.steps.len(), 2);
+
+        // Verify step order
+        assert_eq!(incident.steps[0].step_number, 1);
+        assert_eq!(incident.steps[0].action, "Investigate CPU usage");
+        assert_eq!(incident.steps[0].result, "CPU at 95%");
+        assert_eq!(incident.steps[0].receipt_id, None);
+
+        assert_eq!(incident.steps[1].step_number, 2);
+        assert_eq!(incident.steps[1].action, "Restart service");
+        assert_eq!(incident.steps[1].result, "Service restarted successfully");
+        assert_eq!(incident.steps[1].receipt_id, Some("receipt-123".to_string()));
+    }
+
+    #[test]
+    fn test_list_incidents_filter_by_status() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+
+        // Create incident 1
+        ledger
+            .create_incident("inc-003", "Memory Leak Detected")
+            .expect("failed to create incident 1");
+
+        // Create incident 2
+        ledger
+            .create_incident("inc-004", "Disk Space Low")
+            .expect("failed to create incident 2");
+
+        // Resolve incident 2
+        ledger
+            .resolve_incident("inc-004")
+            .expect("failed to resolve incident");
+
+        // List open incidents
+        let open_incidents = ledger
+            .list_incidents(Some("open"))
+            .expect("failed to list open incidents");
+
+        assert_eq!(open_incidents.len(), 1);
+        assert_eq!(open_incidents[0].id, "inc-003");
+        assert_eq!(open_incidents[0].status, "open");
+
+        // List all incidents
+        let all_incidents = ledger
+            .list_incidents(None)
+            .expect("failed to list all incidents");
+
+        assert_eq!(all_incidents.len(), 2);
+
+        // List resolved incidents
+        let resolved_incidents = ledger
+            .list_incidents(Some("resolved"))
+            .expect("failed to list resolved incidents");
+
+        assert_eq!(resolved_incidents.len(), 1);
+        assert_eq!(resolved_incidents[0].id, "inc-004");
+        assert_eq!(resolved_incidents[0].status, "resolved");
+        assert!(resolved_incidents[0].resolved_at.is_some());
+    }
+
+    #[test]
+    fn test_hash_delimiter_prevents_collision() {
+        // Without delimiters, these two events could produce the same hash:
+        // Event A: id=1, ts="23", type="abc" → "123abc..."
+        // Event B: id=12, ts="3", type="abc" → "123abc..."
+        // With pipe delimiters: "1|23|abc|..." vs "12|3|abc|..." → different hashes
+        let hash_a = Ledger::compute_hash(1, "23", "abc", "actor", "payload", "prev");
+        let hash_b = Ledger::compute_hash(12, "3", "abc", "actor", "payload", "prev");
+        assert_ne!(hash_a, hash_b, "pipe delimiters should prevent field-boundary collisions");
+    }
+
+    #[test]
+    fn test_hash_chain_integrity() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+
+        ledger.append("test.event", "tester", "payload1").unwrap();
+        ledger.append("test.event", "tester", "payload2").unwrap();
+        ledger.append("test.event", "tester", "payload3").unwrap();
+
+        assert!(ledger.verify().unwrap(), "hash chain should be valid");
+    }
+
+    #[test]
+    fn test_schema_version_set() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+        let version: i64 = ledger.conn
+            .query_row("SELECT version FROM schema_version WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, Ledger::CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_flush() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+        ledger.append("test", "actor", "payload").unwrap();
+        // flush should not error on in-memory DB
+        assert!(ledger.flush().is_ok());
+    }
+
+    #[test]
+    fn test_incident_not_found() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+
+        // Try to get a non-existent incident
+        let incident = ledger
+            .get_incident("non-existent-id")
+            .expect("should not error on missing incident");
+
+        assert!(incident.is_none());
+    }
+}
+

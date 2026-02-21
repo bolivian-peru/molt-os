@@ -88,11 +88,12 @@ pub async fn memory_recall_handler(
     let ledger = state.ledger.lock().await;
 
     // Query all memory events (both ingest and store types)
+    // Cap internal scan to 5000 events per type (10000 total max)
     let ingest_events = ledger
         .query(&EventFilter {
             event_type: Some("memory.ingest".to_string()),
             actor: None,
-            limit: Some(1000),
+            limit: Some(5000),
         })
         .map_err(|e| {
             tracing::error!(error = %e, "failed to query memory ingest events");
@@ -103,7 +104,7 @@ pub async fn memory_recall_handler(
         .query(&EventFilter {
             event_type: Some("memory.store".to_string()),
             actor: None,
-            limit: Some(1000),
+            limit: Some(5000),
         })
         .map_err(|e| {
             tracing::error!(error = %e, "failed to query memory store events");
@@ -116,22 +117,17 @@ pub async fn memory_recall_handler(
         .collect::<Vec<_>>();
 
     let total_searched = all_events.len();
-    let max_results = body.max_results.unwrap_or(10);
+    let max_results = body.max_results.unwrap_or(10).min(100); // Cap at 100
     let query_lower = body.query.to_lowercase();
     let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
 
     let mut chunks: Vec<MemoryChunk> = Vec::new();
 
     for event in &all_events {
-        // Apply timeframe filter if specified
+        // Apply timeframe filter if specified (prefix match: "2026-02" matches February 2026)
         if let Some(ref tf) = body.timeframe {
             if !event.ts.starts_with(tf) {
-                // Simple prefix-based timeframe filter (e.g., "2026-02" matches February 2026)
-                // Also supports full date prefix matching
-                let matches = event.ts.starts_with(tf);
-                if !matches {
-                    continue;
-                }
+                continue;
             }
         }
 

@@ -1,8 +1,8 @@
-# CLAUDE.md — molt-os (AgentOS)
+# CLAUDE.md — osModa
 
 ## What this is
 
-AgentOS (molt-os): NixOS distribution where OpenClaw IS the operating system.
+osModa: NixOS distribution where OpenClaw IS the operating system.
 Not an agent running on an OS. The agent IS the OS.
 
 OpenClaw has FULL system access. Root. All files. All processes. All APIs.
@@ -20,26 +20,47 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 
 ## Components
 
-1. **agentd** (Rust) — kernel bridge daemon. Unix socket API at `/run/agentos/agentd.sock`.
+1. **agentd** (Rust) — kernel bridge daemon. Unix socket API at `/run/osmoda/agentd.sock`.
    Gives OpenClaw structured access to: processes, services, network, filesystem, NixOS config,
    kernel params, users, firewall. Append-only hash-chained event log in SQLite.
    Memory system endpoints for ingest/recall/store.
+   Agent Card (EIP-8004) identity + capability discovery.
+   Structured receipts + incident workspaces for auditable troubleshooting.
 
-2. **agentos-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (12 tools): system_health, system_query,
+2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
+   `api.registerTool()` factory pattern (37 tools): system_health, system_query,
    event_log, memory_store, memory_recall, shell_exec, file_read, file_write,
-   directory_list, service_status, journal_logs, network_info.
-   M1+ files (memory-backend.ts, memory-engine.ts, voice-client.ts) are present but not yet wired.
+   directory_list, service_status, journal_logs, network_info,
+   wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
+   safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback,
+   watcher_add, watcher_list, routine_add, routine_list, routine_trigger,
+   agent_card, receipt_list, incident_create, incident_step,
+   voice_status, voice_speak, voice_transcribe, voice_record, voice_listen,
+   backup_create, backup_list.
 
-3. **agentos-egress** (Rust) — localhost-only HTTP CONNECT proxy. Domain allowlist
+3. **osmoda-egress** (Rust) — localhost-only HTTP CONNECT proxy. Domain allowlist
    per capability token. Only path to internet for sandboxed tools.
 
-4. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
+4. **osmoda-keyd** (Rust) — OS-native crypto wallet daemon. Unix socket at `/run/osmoda/keyd.sock`.
+   AES-256-GCM encrypted keys, policy-gated signing (daily limits), ETH + SOL wallets.
+   Runs with PrivateNetwork=true (zero network access). Keys never leave keyd.
+   SignerBackend trait allows future MPC/HSM/Vault integration.
+
+5. **osmoda-watch** (Rust) — SafeSwitch + autopilot watchers. Unix socket at `/run/osmoda/watch.sock`.
+   Deploy transactions with timer + health gates + auto-rollback.
+   Autopilot watchers: deterministic health checks with escalation (restart → rollback → notify).
+
+6. **osmoda-routines** (Rust) — background cron/event/webhook automation engine.
+   Unix socket at `/run/osmoda/routines.sock`.
+   Runs scheduled tasks between agent conversations (health checks, service monitors, log scans).
+   Default routines match HEARTBEAT.md cadences.
+
+7. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
    file-manager, network-manager, service-explorer.
 
-5. **NixOS module** (agentos.nix) — single module that wires everything as systemd services.
+8. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
 
 ## Repo layout
 
@@ -47,7 +68,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 ./CLAUDE.md                              # This file (canonical project doc)
 ./flake.nix                              # Root flake (NixOS + Rust via crane)
 ./Cargo.toml                             # Rust workspace root
-./nix/modules/agentos.nix                # NixOS module (THE core config file)
+./nix/modules/osmoda.nix                 # NixOS module (THE core config file)
 ./nix/hosts/dev-vm.nix                   # QEMU dev VM (Sway desktop)
 ./nix/hosts/server.nix                   # Headless server config
 ./nix/hosts/iso.nix                      # Installer ISO config
@@ -60,24 +81,51 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       │   ├── health.rs                  # GET /health
       │   ├── system.rs                  # POST /system/query
       │   ├── events.rs                  # GET /events/log
-      │   └── memory.rs                  # /memory/ingest, /memory/recall, /memory/store
+      │   ├── memory.rs                  # /memory/ingest, /memory/recall, /memory/store
+      │   ├── agent_card.rs              # GET /agent/card, POST /agent/card/generate
+      │   └── receipts.rs               # GET /receipts, /incident/* endpoints
       ├── ledger.rs                      # SQLite event log + hash chain
       └── state.rs                       # Shared app state
 ./crates/agentctl/                       # Rust: CLI (events, verify-ledger)
   ├── Cargo.toml
   └── src/main.rs
-./crates/agentos-egress/                 # Rust: egress proxy
+./crates/osmoda-egress/                  # Rust: egress proxy
   ├── Cargo.toml
   └── src/main.rs
-./packages/agentos-bridge/               # TypeScript: OpenClaw plugin
+./crates/osmoda-keyd/                    # Rust: crypto wallet daemon
+  ├── Cargo.toml
+  └── src/
+      ├── main.rs                        # Entry + socket setup
+      ├── signer.rs                      # SignerBackend trait + LocalKeyBackend (ETH + SOL)
+      ├── policy.rs                      # JSON policy engine (daily limits, allowlists)
+      ├── receipt.rs                     # Receipt logging to agentd ledger
+      └── api.rs                         # Axum handlers (/wallet/*)
+./crates/osmoda-watch/                   # Rust: SafeSwitch + autopilot watchers
+  ├── Cargo.toml
+  └── src/
+      ├── main.rs                        # Entry + background loops
+      ├── switch.rs                      # SafeSwitch state machine + health checks
+      ├── watcher.rs                     # Autopilot watcher definitions + execution
+      └── api.rs                         # Axum handlers (/switch/*, /watcher/*)
+./crates/osmoda-routines/                # Rust: background automation engine
+  ├── Cargo.toml
+  └── src/
+      ├── main.rs                        # Entry + scheduler loop
+      ├── routine.rs                     # Routine definitions + action execution
+      ├── scheduler.rs                   # Cron parser + interval scheduler
+      └── api.rs                         # Axum handlers (/routine/*)
+./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 12 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 37 tools via api.registerTool()
   ├── agentd-client.ts                   # HTTP-over-Unix-socket client for agentd
+  ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
+  ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
+  ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
   ├── memory-engine.ts                   # ZVEC collection management (M1+)
   ├── memory-backend.ts                  # OpenClaw memory backend (M1+)
   └── voice-client.ts                    # Voice daemon client (M1+)
-./packages/agentos-system-skills/        # Skill collection package
+./packages/osmoda-system-skills/         # Skill collection package
 ./skills/
   ├── self-healing/SKILL.md              # Detect + diagnose + auto-fix failures
   ├── morning-briefing/SKILL.md          # Daily infrastructure health report
@@ -105,19 +153,21 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── install.sh                         # One-command installer (curl | bash)
   └── deploy-hetzner.sh                  # Push deploy from local to Hetzner
 ./docs/
-  ├── ARCHITECTURE.md                    # Architecture overview
-  ├── DEMO-SCRIPT.md                     # Product Hunt demo recording script
-  ├── AGENTOS-PRODUCT-HUNT-STRATEGY.md   # Launch strategy
+  ├── ARCHITECTURE.md                    # Architecture overview (all 6 daemons)
+  ├── STATUS.md                          # Honest maturity assessment per component
+  ├── DEMO-SCRIPT.md                     # Demo recording script
+  ├── GO-TO-MARKET.md                    # Launch strategy
   └── planning/                          # Archived planning docs
       ├── MASTER-PLAN.md
       ├── MEMORY-SYSTEM.md
-      └── MEMORY-LLM-INTEGRATION.md
+      ├── MEMORY-LLM-INTEGRATION.md
+      └── TRENDABILITY-ANALYSIS.md
 ```
 
 ## Tech stack
 
-- **Rust**: agentd, agentctl, egress proxy (axum, rusqlite, tokio, sha2, clap)
-- **TypeScript**: agentos-bridge OpenClaw plugin
+- **Rust**: agentd, agentctl, egress proxy, keyd, watch, routines (axum, rusqlite, tokio, sha2, clap, k256, ed25519-dalek, aes-gcm, sha3)
+- **TypeScript**: osmoda-bridge OpenClaw plugin
 - **Nix**: flakes, crane (Rust builds), flake-utils (multi-system), nixos-generators
 - **NixOS**: systemd services, nftables, bubblewrap
 - **Desktop**: Sway (Wayland), kitty, Firefox
@@ -127,11 +177,11 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 
 ```bash
 # Dev VM (the primary feedback loop)
-nix build .#nixosConfigurations.agentos-dev.config.system.build.vm
-./result/bin/run-agentos-dev-vm -m 4096 -smp 4
+nix build .#nixosConfigurations.osmoda-dev.config.system.build.vm
+./result/bin/run-osmoda-dev-vm -m 4096 -smp 4
 
 # ISO
-nix build .#nixosConfigurations.agentos-iso.config.system.build.isoImage
+nix build .#nixosConfigurations.osmoda-iso.config.system.build.isoImage
 
 # Validate
 nix flake check
@@ -141,16 +191,16 @@ cargo check --workspace
 cargo test --workspace
 
 # agentd standalone (development)
-cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/agentos
+cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
 ```
 
 ## Implementation order
 
 1. **flake.nix** — all inputs, nixosConfigurations for vm + iso
 2. **crates/agentd** — minimal: /health + /system/query(processes) + /events/log + hash chain
-3. **nix/modules/agentos.nix** — agentd + gateway as systemd services
+3. **nix/modules/osmoda.nix** — agentd + gateway as systemd services
 4. **nix/hosts/dev-vm.nix** — Sway desktop, auto-login, gateway running
-5. **packages/agentos-bridge** — register system_query + system_health as OpenClaw tools
+5. **packages/osmoda-bridge** — register system_query + system_health as OpenClaw tools
 6. **skills/system-monitor/SKILL.md** — first skill
 7. **templates/** — agent identity
 8. **BUILD VM AND TEST END-TO-END** — don't proceed until this works
@@ -167,6 +217,64 @@ POST /memory/ingest       { event: MemoryEvent } → { id }
 POST /memory/recall       { query: str, max_results: num, timeframe: str } → chunks[]
 POST /memory/store        { summary: str, detail: str, category: str, tags: str[] } → { id }
 GET  /memory/health       → { model_status, collection_size }
+GET  /agent/card           → AgentCard (EIP-8004)
+POST /agent/card/generate  { name, description, services[] } → AgentCard
+GET  /receipts             ?type=...&since=...&limit=N → Receipt[]
+POST /incident/create      { name } → IncidentWorkspace
+POST /incident/{id}/step   { action, result } → IncidentWorkspace
+GET  /incident/{id}        → IncidentWorkspace (with all steps)
+GET  /incidents            ?status=open → IncidentWorkspace[]
+POST /backup/create        → BackupCreateResponse { backup_id, path, size_bytes, created_at }
+GET  /backup/list          → BackupInfo[] { backup_id, path, size_bytes, created_at }
+POST /backup/restore       { backup_id } → BackupRestoreResponse { restored_from, status }
+```
+
+## osmoda-keyd API reference (socket: /run/osmoda/keyd.sock)
+
+```
+POST /wallet/create       { chain: "ethereum"|"solana", label: str } → { id, chain, address }
+GET  /wallet/list          → WalletInfo[]
+POST /wallet/sign          { wallet_id, payload: hex } → { signature: hex } (policy-gated)
+POST /wallet/send          { wallet_id, to, amount } → { signed_tx: hex } (policy-gated, no broadcast)
+POST /wallet/delete        { wallet_id } → { deleted: wallet_id }
+GET  /health               → { wallet_count, policy_loaded }
+```
+
+## osmoda-watch API reference (socket: /run/osmoda/watch.sock)
+
+```
+POST /switch/begin         { plan, ttl_secs, health_checks[] } → { id, previous_generation }
+GET  /switch/status/{id}   → SwitchSession
+POST /switch/commit/{id}   → SwitchSession (committed)
+POST /switch/rollback/{id} → SwitchSession (rolled back)
+POST /watcher/add          { name, check, interval_secs, actions[] } → Watcher
+GET  /watcher/list          → Watcher[]
+DEL  /watcher/remove/{id}  → { removed }
+GET  /health               → { active_switches, watchers }
+```
+
+## osmoda-routines API reference (socket: /run/osmoda/routines.sock)
+
+```
+POST /routine/add          { name, trigger, action } → Routine
+GET  /routine/list          → Routine[]
+DEL  /routine/remove/{id}  → { removed }
+POST /routine/trigger/{id} → { status, output }
+GET  /routine/history       → RoutineHistoryEntry[]
+GET  /health               → { routine_count, enabled_count }
+```
+
+## osmoda-voice API reference (socket: /run/osmoda/voice.sock)
+
+All processing is local. STT via whisper.cpp (MIT), TTS via piper-tts (MIT), audio via PipeWire.
+No data leaves the machine. No cloud APIs. No tracking.
+
+```
+GET  /voice/status          → { listening, whisper_model_loaded, piper_model_loaded }
+POST /voice/transcribe      { audio_path: "/path/to/file.wav" } → { text, duration_ms }
+POST /voice/speak           { text: "Hello" } → { audio_path, duration_ms } (plays via pw-play)
+POST /voice/record          { duration_secs?, transcribe? } → { audio_path, text?, transcribe_duration_ms? }
+POST /voice/listen          { enabled: bool } → { listening, previous }
 ```
 
 Future (M1+):
@@ -190,7 +298,7 @@ CREATE TABLE events (
   prev_hash TEXT NOT NULL,
   hash TEXT NOT NULL
 );
--- hash = SHA-256(id || ts || type || actor || payload || prev_hash)
+-- hash = SHA-256(id|ts|type|actor|payload|prev_hash)   -- pipe-delimited
 ```
 
 ## Memory system (M0 — simplified ZVEC)
@@ -206,13 +314,13 @@ CREATE TABLE events (
 - Contextual enrichment at ingestion (prepend context to chunks before embedding)
 
 ### Binding strategy (M0)
-Node.js `@zvec/zvec` in the agentos-bridge plugin. agentd handles ledger + watchers,
+Node.js `@zvec/zvec` in the osmoda-bridge plugin. agentd handles ledger + watchers,
 the plugin handles vector search. No Rust FFI complexity.
 
 ### Ground truth
 Markdown files remain source of truth (OpenClaw compatible).
 ZVEC indexes are derived — always rebuildable from files.
-Path: `/var/lib/agentos/memory/`
+Path: `/var/lib/osmoda/memory/`
 
 ### Deferred to M2+
 - Second tier (Hot + Archive split)

@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=osModa
+Description=osModa boot splash — dark, minimal, breathing animation
+ModuleName=script
+
+[script]
+ImageDir=/share/plymouth/themes/osmoda
+ScriptFile=/share/plymouth/themes/osmoda/osmoda.script

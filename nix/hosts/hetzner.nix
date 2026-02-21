@@ -1,4 +1,4 @@
-# AgentOS Hetzner VPS — headless cloud deployment
+# osModa Hetzner VPS — headless cloud deployment
 #
 # Deployment (tested approach — nixos-infect):
 #   1. Create Hetzner Cloud server with Ubuntu 24.04
@@ -14,7 +14,7 @@
 #   7. Apply this config via nixos-rebuild switch
 #
 # Alternative (requires local Nix):
-#   nix run github:nix-community/nixos-anywhere -- --flake .#agentos-hetzner root@<server-ip>
+#   nix run github:nix-community/nixos-anywhere -- --flake .#osmoda-hetzner root@<server-ip>
 #
 # Access:
 #   ssh -i ~/.ssh/id_ed25519 agent@<server-ip>
@@ -32,11 +32,11 @@
   ];
 
   # --- System Identity ---
-  networking.hostName = "agentos-cloud";
+  networking.hostName = "osmoda-cloud";
   system.stateVersion = "24.11";
 
-  # --- Enable AgentOS ---
-  services.agentos = {
+  # --- Enable osModa ---
+  services.osmoda = {
     enable = true;
     openclaw.enable = true;
     sandbox.enable = true;
@@ -97,13 +97,13 @@
   # --- User ---
   users.users.agent = {
     isNormalUser = true;
-    description = "AgentOS Admin";
+    description = "osModa Admin";
     extraGroups = [ "wheel" ];
     openssh.authorizedKeys.keys = [
       # Replace with your SSH public key:
       #   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
       #   cat ~/.ssh/id_ed25519.pub
-      "ssh-ed25519 AAAA_YOUR_PUBLIC_KEY_HERE agentos-hetzner"
+      "ssh-ed25519 AAAA_YOUR_PUBLIC_KEY_HERE osmoda-hetzner"
     ];
   };
 
@@ -120,7 +120,7 @@
   };
 
   users.users.root.openssh.authorizedKeys.keys = [
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRfgoK7tKkPUX49Et2CwJDIX7QHocySALiuTV2+3bHf agentos-hetzner"
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRfgoK7tKkPUX49Et2CwJDIX7QHocySALiuTV2+3bHf osmoda-hetzner"
   ];
 
   # --- Nix ---
