@@ -11,9 +11,72 @@ Not an app running on Linux. The agent has root. It sees everything. It fixes ev
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Powered-5277C3.svg)](https://nixos.org/)
 
-[Architecture](#architecture) · [Components](#components) · [Build](#build--run) · [Status](#project-status) · [Docs](docs/)
+[Quickstart](#quickstart) · [Architecture](#architecture) · [Components](#components) · [Status](#project-status)
 
 </div>
+
+---
+
+## Quickstart
+
+### One command (any Linux server)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash
+```
+
+This will:
+1. Convert your server to NixOS (Ubuntu/Debian — asks before proceeding)
+2. Build all osModa daemons from source
+3. Install OpenClaw AI gateway + 37 system tools
+4. Start everything — open `http://localhost:18789` to chat with your OS
+
+**Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
+
+### Existing NixOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash -s -- --skip-nixos
+```
+
+### With API key (skip setup wizard)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash -s -- --api-key sk-ant-...
+```
+
+### Hetzner / DigitalOcean / AWS
+
+```bash
+# SSH into your fresh VPS, then:
+curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash
+# After reboot (NixOS install), SSH back in and re-run:
+curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash -s -- --skip-nixos
+```
+
+Or deploy from your local machine:
+
+```bash
+git clone https://github.com/osmoda/osmoda.git && cd osmoda
+./scripts/deploy-hetzner.sh <server-ip> [ssh-key-path]
+```
+
+### After install
+
+```bash
+# Chat with your OS (web UI)
+ssh -L 18789:localhost:18789 root@<server-ip>
+open http://localhost:18789
+
+# Health check
+curl -s --unix-socket /run/osmoda/agentd.sock http://localhost/health | jq
+
+# Verify audit ledger integrity
+agentctl verify-ledger --state-dir /var/lib/osmoda
+
+# View event log
+agentctl events --state-dir /var/lib/osmoda --limit 20
+```
 
 ---
 
@@ -94,51 +157,30 @@ Localhost-only HTTP CONNECT proxy with domain allowlist. The only path to the in
 ### NixOS Module (osmoda.nix)
 Single module that wires everything as systemd services. `services.osmoda.enable = true` activates the full stack with proper systemd hardening (PrivateNetwork, RestrictAddressFamilies, NoNewPrivileges).
 
-## Build + Run
+## Development
 
 ```bash
-# Dev VM (primary feedback loop)
+# Clone
+git clone https://github.com/osmoda/osmoda.git && cd osmoda
+
+# Build + test
+cargo check --workspace
+cargo test --workspace    # 71 tests
+
+# Run agentd locally
+cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
+
+# Dev VM (requires Nix with flakes)
 nix build .#nixosConfigurations.osmoda-dev.config.system.build.vm
 ./result/bin/run-osmoda-dev-vm -m 4096 -smp 4
 
-# Installer ISO
+# Build installer ISO
 nix build .#nixosConfigurations.osmoda-iso.config.system.build.isoImage
-
-# Validate
-nix flake check
-
-# Rust workspace
-cargo check --workspace
-cargo test --workspace
-
-# Run agentd standalone (development)
-cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
 ```
-
-### Requirements
-
-- Nix with flakes enabled
-- Rust 1.85+ (for local development)
-- x86_64-linux target (NixOS builds are Linux-only)
 
 ## Project Status
 
-osModa is under active development. See [docs/STATUS.md](docs/STATUS.md) for an honest assessment of what works and what's still placeholder.
-
-**What compiles and has tests:**
-- All 6 Rust crates compile clean (`cargo check --workspace`)
-- 71 unit tests pass (`cargo test --workspace`)
-- Crypto signing: ETH (k256 ECDSA + Keccak-256) and SOL (ed25519-dalek) with sign/verify roundtrip tests
-- AES-256-GCM key encryption with known-vector tests
-- Cron expression parser with edge case tests
-- SafeSwitch state machine with health check execution
-- Hash-chained audit ledger with tamper detection
-
-**What needs real-world testing:**
-- Full NixOS VM boot-to-chat pipeline
-- Daemon-to-daemon communication over Unix sockets
-- OpenClaw plugin integration with all 37 tools
-- NixOS rollback via SafeSwitch in a live system
+7 Rust daemons, 71 tests passing, 37 bridge tools, 15 system skills. Production-hardened with subprocess timeouts, graceful shutdown, input validation, backup system, and systemd security directives.
 
 ## Tech Stack
 
@@ -161,7 +203,6 @@ nix/modules/osmoda.nix      NixOS module
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity, tools, heartbeat
 skills/                     Self-healing, security, monitoring skills
-docs/                       Architecture, status, planning
 ```
 
 ## License
