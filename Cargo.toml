@@ -14,7 +14,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/osmoda/osmoda"
+repository = "https://github.com/bolivian-peru/os-moda"
 
 [workspace.dependencies]
 anyhow = "1"

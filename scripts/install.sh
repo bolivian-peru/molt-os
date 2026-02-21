@@ -3,7 +3,7 @@
 # osModa Installer — One command to give your computer a brain
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | bash
 #
 # Or with options:
 #   curl -fsSL ... | bash -s -- --skip-nixos --api-key sk-ant-...
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 VERSION="0.1.0"
-REPO_URL="https://github.com/osmoda/osmoda.git"
+REPO_URL="https://github.com/bolivian-peru/os-moda.git"
 INSTALL_DIR="/opt/osmoda"
 STATE_DIR="/var/lib/osmoda"
 RUN_DIR="/run/osmoda"
@@ -455,5 +455,5 @@ info "  journalctl -u osmoda-agentd -f"
 info "  journalctl -u osmoda-gateway -f"
 echo ""
 info "Documentation: https://os.moda"
-info "Report issues: https://github.com/osmoda/osmoda/issues"
+info "Report issues: https://github.com/bolivian-peru/os-moda/issues"
 echo ""
