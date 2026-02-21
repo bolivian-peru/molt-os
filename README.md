@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/server-brain-os-moda.png" alt="osModa — AI-native operating system" width="100%"/>
+
 # osModa
 
 **Your server fixes itself at 3am. You sleep.**
@@ -14,6 +16,9 @@ An AI-native operating system built on NixOS. The agent isn't running *on* your 
 
 [Quickstart](#quickstart) · [Why NixOS?](#why-nixos) · [Architecture](#architecture) · [Components](#components) · [Contributing](#contributing)
 
+[![Telegram](https://img.shields.io/badge/Telegram-Join-blue?logo=telegram)](https://t.me/osmodasystems)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/G7bwet8B)
+
 </div>
 
 ---
@@ -26,10 +31,10 @@ Already running NixOS? Three lines:
 
 ```nix
 # flake.nix — add osModa as an input
-inputs.osmoda.url = "github:osmoda/osmoda";
+inputs.os-moda.url = "github:bolivian-peru/os-moda";
 
 # configuration.nix
-imports = [ osmoda.nixosModules.default ];
+imports = [ os-moda.nixosModules.default ];
 services.osmoda.enable = true;
 ```
 
@@ -41,7 +46,7 @@ sudo nixos-rebuild switch
 ### One command (any Linux server)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
 This will:
@@ -55,28 +60,28 @@ This will:
 ### Existing NixOS (without flake)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash -s -- --skip-nixos
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- --skip-nixos
 ```
 
 ### With API key (skip setup wizard)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash -s -- --api-key sk-ant-...
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- --api-key sk-ant-...
 ```
 
 ### Hetzner / DigitalOcean / AWS
 
 ```bash
 # SSH into your fresh VPS, then:
-curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 # After reboot (NixOS install), SSH back in and re-run:
-curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash -s -- --skip-nixos
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- --skip-nixos
 ```
 
 Or deploy from your local machine:
 
 ```bash
-git clone https://github.com/osmoda/osmoda.git && cd osmoda
+git clone https://github.com/bolivian-peru/os-moda.git && cd osmoda
 ./scripts/deploy-hetzner.sh <server-ip> [ssh-key-path]
 ```
 
@@ -183,7 +188,7 @@ Self-healing, morning briefing, security hardening, natural language NixOS confi
 ## Development
 
 ```bash
-git clone https://github.com/osmoda/osmoda.git && cd osmoda
+git clone https://github.com/bolivian-peru/os-moda.git && cd osmoda
 
 cargo check --workspace
 cargo test --workspace    # 71 tests
@@ -227,6 +232,8 @@ We're in early beta and actively looking for feedback. Every issue, bug report, 
 - **Bridge tools** — add tools in `packages/osmoda-bridge/index.ts`
 
 For larger changes, open an issue first so we can discuss the approach before you invest time.
+
+**Community:** [Telegram](https://t.me/osmodasystems) · [Discord](https://discord.gg/G7bwet8B)
 
 ## Tech Stack
 
