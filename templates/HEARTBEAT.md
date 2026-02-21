@@ -3,6 +3,10 @@
 Defines recurring tasks the agent performs automatically.
 Each task has a cadence, a description, and the tools it uses.
 
+**Implementation**: These routines are backed by `osmoda-routines` (socket: `/run/osmoda/routines.sock`).
+Default routines are loaded on startup. Use the `routine_add`, `routine_list`, and `routine_trigger`
+tools to manage routines at runtime.
+
 ## Health Check
 - **Cadence**: Every 5 minutes
 - **Tool**: `system_health`
@@ -18,8 +22,8 @@ Each task has a cadence, a description, and the tools it uses.
 - **Tool**: `service_status`
 - **Action**: Check that critical services are running. Log failures to event log.
 - **Critical services**:
-  - agentd
-  - openclaw-gateway
+  - osmoda-agentd
+  - osmoda-gateway
   - sshd
   - {{ADDITIONAL_SERVICES}}
 
@@ -43,7 +47,14 @@ Each task has a cadence, a description, and the tools it uses.
 - **Tool**: `network_info`
 - **Action**: Check for unexpected listening ports. Verify expected services are bound. Alert on changes.
 
+## Template Variables
+
+Template variables like `{{hostname}}`, `{{uptime}}`, `{{HEARTBEAT_ENABLED}}`, and `{{ADDITIONAL_SERVICES}}` are populated by the routines engine when scheduled tasks run. The engine pulls live data from agentd's `/health` endpoint and system state to fill these values at execution time.
+
 ## Configuration
 - **Enabled**: {{HEARTBEAT_ENABLED}}
 - **Log level**: {{HEARTBEAT_LOG_LEVEL}}
 - **Alert method**: Event log + next user interaction
+- **Engine**: osmoda-routines daemon (socket: `/run/osmoda/routines.sock`)
+- **Persistence**: Routine definitions stored in `/var/lib/osmoda/routines/routines.json`
+- **Management**: Use `routine_list` to view, `routine_add` to create, `routine_trigger` to run manually

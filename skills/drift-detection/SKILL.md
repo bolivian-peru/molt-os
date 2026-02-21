@@ -72,7 +72,7 @@ Drift Report:
 ## Why This Matters
 
 On Ubuntu, configuration drift is invisible and irreversible.
-On NixOS with AgentOS, you can:
+On NixOS with osModa, you can:
 1. **Detect** that something was changed manually
 2. **Reconcile** by adding it to the declarative config
 3. **Prove** with the audit ledger that nothing unauthorized happened

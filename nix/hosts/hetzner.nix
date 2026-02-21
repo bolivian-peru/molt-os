@@ -1,9 +1,9 @@
-# AgentOS Hetzner VPS — headless cloud deployment
+# osModa Hetzner VPS — headless cloud deployment
 #
 # Deployment (tested approach — nixos-infect):
 #   1. Create Hetzner Cloud server with Ubuntu 24.04
 #   2. Add your SSH key in Hetzner dashboard (Security > SSH Keys)
-#   3. SSH in: ssh -i .keys/agentos_hetzner root@<server-ip>
+#   3. SSH in: ssh -i .keys/osmoda_hetzner root@<server-ip>
 #   4. Run nixos-infect:
 #      curl -sL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect \
 #        | NIX_CHANNEL=nixos-unstable PROVIDER=hetznercloud bash -x
@@ -14,11 +14,11 @@
 #   7. Apply this config via nixos-rebuild switch
 #
 # Alternative (requires local Nix):
-#   nix run github:nix-community/nixos-anywhere -- --flake .#agentos-hetzner root@<server-ip>
+#   nix run github:nix-community/nixos-anywhere -- --flake .#osmoda-hetzner root@<server-ip>
 #
 # Access:
-#   ssh -i .keys/agentos_hetzner agent@<server-ip>
-#   ssh -i .keys/agentos_hetzner -L 18789:localhost:18789 agent@<server-ip>
+#   ssh -i .keys/osmoda_hetzner agent@<server-ip>
+#   ssh -i .keys/osmoda_hetzner -L 18789:localhost:18789 agent@<server-ip>
 #   Then open localhost:18789 in browser
 #
 # IMPORTANT: After nixos-infect, the boot loader is GRUB (not systemd-boot).
@@ -32,11 +32,11 @@
   ];
 
   # --- System Identity ---
-  networking.hostName = "agentos-cloud";
+  networking.hostName = "osmoda-cloud";
   system.stateVersion = "24.11";
 
-  # --- Enable AgentOS ---
-  services.agentos = {
+  # --- Enable osModa ---
+  services.osmoda = {
     enable = true;
     openclaw.enable = true;
     sandbox.enable = true;
@@ -97,13 +97,13 @@
   # --- User ---
   users.users.agent = {
     isNormalUser = true;
-    description = "AgentOS Admin";
+    description = "osModa Admin";
     extraGroups = [ "wheel" ];
     openssh.authorizedKeys.keys = [
       # Replace with your SSH public key:
-      #   ssh-keygen -t ed25519 -f .keys/agentos_hetzner -N ""
-      #   cat .keys/agentos_hetzner.pub
-      "ssh-ed25519 AAAA_YOUR_PUBLIC_KEY_HERE agentos-hetzner"
+      #   ssh-keygen -t ed25519 -f .keys/osmoda_hetzner -N ""
+      #   cat .keys/osmoda_hetzner.pub
+      "ssh-ed25519 AAAA_YOUR_PUBLIC_KEY_HERE osmoda-hetzner"
     ];
   };
 
@@ -120,7 +120,7 @@
   };
 
   users.users.root.openssh.authorizedKeys.keys = [
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRfgoK7tKkPUX49Et2CwJDIX7QHocySALiuTV2+3bHf agentos-hetzner"
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRfgoK7tKkPUX49Et2CwJDIX7QHocySALiuTV2+3bHf osmoda-hetzner"
   ];
 
   # --- Nix ---

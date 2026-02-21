@@ -33,13 +33,16 @@ result-*
 secrets/
 .keys/
 
+# Docs (kept locally, not published)
+docs/
+
 # Build artifacts
 *.o
 *.so
 *.dylib
 
 # Memory system runtime data
-/var/lib/agentos/
+/var/lib/osmoda/
 
 # Python
 __pycache__/

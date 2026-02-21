@@ -1,0 +1,37 @@
+{
+  "id": "osmoda-bridge",
+  "kind": "tools",
+  "name": "osModa Bridge",
+  "description": "37 system tools connecting OpenClaw to all osModa daemons (agentd, keyd, watch, routines, voice)",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "agentdSocket": {
+        "type": "string",
+        "default": "/run/osmoda/agentd.sock",
+        "description": "Path to agentd Unix socket"
+      },
+      "keydSocket": {
+        "type": "string",
+        "default": "/run/osmoda/keyd.sock",
+        "description": "Path to keyd Unix socket"
+      },
+      "watchSocket": {
+        "type": "string",
+        "default": "/run/osmoda/watch.sock",
+        "description": "Path to watch Unix socket"
+      },
+      "routinesSocket": {
+        "type": "string",
+        "default": "/run/osmoda/routines.sock",
+        "description": "Path to routines Unix socket"
+      },
+      "voiceSocket": {
+        "type": "string",
+        "default": "/run/osmoda/voice.sock",
+        "description": "Path to voice Unix socket"
+      }
+    }
+  }
+}

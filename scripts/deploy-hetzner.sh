@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy-hetzner.sh -- Deploy AgentOS to a Hetzner server
+# deploy-hetzner.sh -- Deploy osModa to a Hetzner server
 #
 # Usage:
 #   ./scripts/deploy-hetzner.sh <server-ip> [ssh-key-path]
@@ -9,7 +9,7 @@
 #   2. Installs NixOS via nixos-infect (if not already NixOS)
 #   3. Syncs the repo to the server via rsync
 #   4. Builds agentd + agentctl on the server
-#   5. Installs OpenClaw and sets up the agentos-bridge plugin
+#   5. Installs OpenClaw and sets up the osmoda-bridge plugin
 #   6. Installs workspace templates (AGENTS.md, SOUL.md, TOOLS.md, etc.)
 #   7. Starts the agentd systemd service
 #
@@ -27,9 +27,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REMOTE_USER="root"
-REMOTE_DIR="/opt/molt-os"
-AGENTOS_STATE="/var/lib/agentos"
-AGENTOS_RUN="/run/agentos"
+REMOTE_DIR="/opt/osmoda"
+OSMODA_STATE="/var/lib/osmoda"
+OSMODA_RUN="/run/osmoda"
 OPENCLAW_DIR="/root/.openclaw"
 WORKSPACE_DIR="/root/workspace"
 
@@ -54,6 +54,9 @@ die() {
   exit 1
 }
 
+# NOTE: StrictHostKeyChecking=accept-new trusts the host key on first connect
+# and rejects if it changes later. For higher security, pre-verify the host key
+# via the Hetzner console and use StrictHostKeyChecking=yes.
 ssh_cmd() {
   ssh -o ConnectTimeout=10 \
       -o StrictHostKeyChecking=accept-new \
@@ -145,9 +148,10 @@ log "Step 3: Syncing repository to ${SERVER_IP}:${REMOTE_DIR}..."
 
 ssh_cmd "mkdir -p ${REMOTE_DIR}"
 
-RSYNC_KEY_OPT=""
-if [ -n "$SSH_KEY_OPT" ]; then
-  RSYNC_KEY_OPT="-e 'ssh ${SSH_KEY_OPT}'"
+# Build rsync SSH command as an array (no eval needed)
+RSYNC_SSH_ARGS=("ssh" "-o" "ConnectTimeout=10" "-o" "StrictHostKeyChecking=accept-new")
+if [ -n "${SSH_KEY_OPT}" ]; then
+  RSYNC_SSH_ARGS+=("${SSH_KEY_OPT}")
 fi
 
 rsync -avz --delete \
@@ -157,7 +161,8 @@ rsync -avz --delete \
   --exclude 'dist' \
   --exclude '.direnv' \
   --exclude 'result' \
-  ${RSYNC_KEY_OPT:+$(eval echo "$RSYNC_KEY_OPT")} \
+  --exclude '.keys' \
+  -e "${RSYNC_SSH_ARGS[*]}" \
   "${REPO_ROOT}/" \
   "${REMOTE_USER}@${SERVER_IP}:${REMOTE_DIR}/"
 
@@ -181,60 +186,89 @@ fi
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
-cd /opt/molt-os
+cd /opt/osmoda
 
 echo "[deploy] Running cargo build --release..."
-cargo build --release --workspace 2>&1
+if ! cargo build --release --workspace 2>&1; then
+  echo "[deploy] ERROR: cargo build failed!"
+  exit 1
+fi
+
+# Verify binaries exist before copying
+for bin in agentd agentctl osmoda-egress; do
+  if [ ! -f "target/release/$bin" ]; then
+    echo "[deploy] ERROR: Binary not found after build: target/release/$bin"
+    exit 1
+  fi
+done
 
 echo "[deploy] Installing binaries..."
-cp target/release/agentd /usr/local/bin/agentd 2>/dev/null || true
-cp target/release/agentctl /usr/local/bin/agentctl 2>/dev/null || true
-cp target/release/agentos-egress /usr/local/bin/agentos-egress 2>/dev/null || true
+cp target/release/agentd /usr/local/bin/agentd
+cp target/release/agentctl /usr/local/bin/agentctl
+cp target/release/osmoda-egress /usr/local/bin/osmoda-egress
 
 echo "[deploy] Binaries installed."
-ls -la /usr/local/bin/agent* 2>/dev/null || true
+ls -la /usr/local/bin/agentd /usr/local/bin/agentctl /usr/local/bin/osmoda-egress
 REMOTE_BUILD
 
 log "Rust build complete."
 
 # ---------------------------------------------------------------------------
-# Step 5: Install OpenClaw + set up agentos-bridge plugin
+# Step 5: Install OpenClaw + set up osmoda-bridge plugin
 # ---------------------------------------------------------------------------
 
-log "Step 5: Setting up OpenClaw and agentos-bridge plugin..."
+log "Step 5: Setting up OpenClaw and osmoda-bridge plugin..."
 
 ssh_cmd bash <<'REMOTE_OPENCLAW'
 set -euo pipefail
 
-# Install OpenClaw if not present
-if ! command -v openclaw &>/dev/null; then
-  echo "[deploy] Installing OpenClaw..."
-  if command -v npm &>/dev/null; then
-    npm install -g openclaw
-  elif command -v nix-env &>/dev/null; then
-    echo "[deploy] npm not found. Attempting nix profile install..."
-    nix profile install nixpkgs#nodejs_22
-    npm install -g openclaw
-  else
-    echo "[deploy] WARNING: Cannot install OpenClaw -- no npm or nix available."
-    echo "[deploy] Install manually: npm install -g openclaw"
+# Ensure Node.js is available
+if ! command -v node &>/dev/null; then
+  echo "[deploy] Node.js not found, installing..."
+  if command -v nix-env &>/dev/null; then
+    nix-env -iA nixos.nodejs_22 2>/dev/null || nix profile install nixpkgs#nodejs_22
   fi
 fi
 
+# Install OpenClaw in a dedicated directory (avoids global npm issues on NixOS)
+OPENCLAW_DIR="/opt/openclaw"
+mkdir -p "$OPENCLAW_DIR"
+cd "$OPENCLAW_DIR"
+
+if [ ! -f package.json ]; then
+  npm init -y >/dev/null 2>&1
+fi
+
+echo "[deploy] Installing/updating OpenClaw..."
+npm install openclaw 2>&1 | tail -3
+
+# Make openclaw available system-wide
+mkdir -p /usr/local/bin
+ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
+mkdir -p /etc/profile.d
+printf 'export PATH="%s/node_modules/.bin:$PATH"\n' "$OPENCLAW_DIR" > /etc/profile.d/osmoda-openclaw.sh
+
+echo "[deploy] OpenClaw version: $(openclaw --version 2>/dev/null || echo 'installed')"
+
 # Set up plugin directory
-PLUGIN_DIR="/root/.openclaw/plugins/agentos-bridge"
-mkdir -p "$PLUGIN_DIR"
+PLUGIN_DIR="/root/.openclaw/plugins/osmoda-bridge"
+mkdir -p /root/.openclaw/plugins
 
 # Symlink the plugin from the repo
-echo "[deploy] Linking agentos-bridge plugin..."
+echo "[deploy] Linking osmoda-bridge plugin..."
 rm -rf "$PLUGIN_DIR"
-ln -sf /opt/molt-os/packages/agentos-bridge "$PLUGIN_DIR"
+ln -sf /opt/osmoda/packages/osmoda-bridge "$PLUGIN_DIR"
 
-echo "[deploy] Plugin linked: $PLUGIN_DIR -> /opt/molt-os/packages/agentos-bridge"
+echo "[deploy] Plugin linked: $PLUGIN_DIR -> /opt/osmoda/packages/osmoda-bridge"
 ls -la "$PLUGIN_DIR/" 2>/dev/null || true
 
-# Ensure OpenClaw config directory exists
-mkdir -p /root/.openclaw
+# Configure API key if present on server
+if [ -f /var/lib/osmoda/config/api-key ]; then
+  echo "[deploy] API key already configured."
+else
+  echo "[deploy] No API key found at /var/lib/osmoda/config/api-key"
+  echo "[deploy] Set it with: printf 'sk-ant-...' > /var/lib/osmoda/config/api-key && chmod 600 /var/lib/osmoda/config/api-key"
+fi
 
 echo "[deploy] OpenClaw plugin setup complete."
 REMOTE_OPENCLAW
@@ -254,17 +288,17 @@ WORKSPACE="/root/workspace"
 mkdir -p "$WORKSPACE"
 
 # Copy templates
-cp /opt/molt-os/templates/AGENTS.md "$WORKSPACE/AGENTS.md" 2>/dev/null || true
-cp /opt/molt-os/templates/SOUL.md "$WORKSPACE/SOUL.md" 2>/dev/null || true
-cp /opt/molt-os/templates/TOOLS.md "$WORKSPACE/TOOLS.md" 2>/dev/null || true
-cp /opt/molt-os/templates/IDENTITY.md "$WORKSPACE/IDENTITY.md" 2>/dev/null || true
-cp /opt/molt-os/templates/USER.md "$WORKSPACE/USER.md" 2>/dev/null || true
-cp /opt/molt-os/templates/HEARTBEAT.md "$WORKSPACE/HEARTBEAT.md" 2>/dev/null || true
+cp /opt/osmoda/templates/AGENTS.md "$WORKSPACE/AGENTS.md" 2>/dev/null || true
+cp /opt/osmoda/templates/SOUL.md "$WORKSPACE/SOUL.md" 2>/dev/null || true
+cp /opt/osmoda/templates/TOOLS.md "$WORKSPACE/TOOLS.md" 2>/dev/null || true
+cp /opt/osmoda/templates/IDENTITY.md "$WORKSPACE/IDENTITY.md" 2>/dev/null || true
+cp /opt/osmoda/templates/USER.md "$WORKSPACE/USER.md" 2>/dev/null || true
+cp /opt/osmoda/templates/HEARTBEAT.md "$WORKSPACE/HEARTBEAT.md" 2>/dev/null || true
 
 # Create state directories
-mkdir -p /var/lib/agentos/memory
-mkdir -p /var/lib/agentos/ledger
-mkdir -p /run/agentos
+mkdir -p /var/lib/osmoda/memory
+mkdir -p /var/lib/osmoda/ledger
+mkdir -p /run/osmoda
 
 echo "[deploy] Workspace templates installed to $WORKSPACE"
 ls -la "$WORKSPACE/"
@@ -282,19 +316,19 @@ ssh_cmd bash <<'REMOTE_SYSTEMD'
 set -euo pipefail
 
 # Create systemd service file for agentd
-cat > /etc/systemd/system/agentd.service <<'EOF'
+cat > /etc/systemd/system/osmoda-agentd.service <<'EOF'
 [Unit]
-Description=AgentOS Kernel Bridge Daemon
+Description=osModa Kernel Bridge Daemon
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/agentd --socket /run/agentos/agentd.sock --state-dir /var/lib/agentos
+ExecStart=/usr/local/bin/agentd --socket /run/osmoda/agentd.sock --state-dir /var/lib/osmoda
 Restart=always
 RestartSec=5
-RuntimeDirectory=agentos
-StateDirectory=agentos
+RuntimeDirectory=osmoda
+StateDirectory=osmoda
 Environment=RUST_LOG=info
 
 # agentd runs as root -- it IS the system
@@ -302,8 +336,8 @@ User=root
 Group=root
 
 # Ensure socket directory exists
-ExecStartPre=/bin/mkdir -p /run/agentos
-ExecStartPre=/bin/mkdir -p /var/lib/agentos
+ExecStartPre=/bin/mkdir -p /run/osmoda
+ExecStartPre=/bin/mkdir -p /var/lib/osmoda
 
 [Install]
 WantedBy=multi-user.target
@@ -311,18 +345,18 @@ EOF
 
 # Reload and start
 systemctl daemon-reload
-systemctl enable agentd.service
-systemctl restart agentd.service
+systemctl enable osmoda-agentd.service
+systemctl restart osmoda-agentd.service
 
-echo "[deploy] agentd service status:"
-systemctl status agentd.service --no-pager || true
+echo "[deploy] osmoda-agentd service status:"
+systemctl status osmoda-agentd.service --no-pager || true
 
 # Verify socket exists
 sleep 2
-if [ -S /run/agentos/agentd.sock ]; then
-  echo "[deploy] agentd socket is live at /run/agentos/agentd.sock"
+if [ -S /run/osmoda/agentd.sock ]; then
+  echo "[deploy] agentd socket is live at /run/osmoda/agentd.sock"
 else
-  echo "[deploy] WARNING: agentd socket not found. Check logs: journalctl -u agentd"
+  echo "[deploy] WARNING: agentd socket not found. Check logs: journalctl -u osmoda-agentd"
 fi
 REMOTE_SYSTEMD
 
@@ -338,13 +372,13 @@ log "Deployment complete!"
 echo "============================================="
 info "Server:     ${SERVER_IP}"
 info "Repo:       ${REMOTE_DIR}"
-info "State:      ${AGENTOS_STATE}"
-info "Socket:     ${AGENTOS_RUN}/agentd.sock"
-info "Plugin:     ~/.openclaw/plugins/agentos-bridge"
+info "State:      ${OSMODA_STATE}"
+info "Socket:     ${OSMODA_RUN}/agentd.sock"
+info "Plugin:     ~/.openclaw/plugins/osmoda-bridge"
 info "Workspace:  ${WORKSPACE_DIR}"
 echo ""
 info "Next steps:"
 info "  ssh root@${SERVER_IP}"
-info "  curl --unix-socket /run/agentos/agentd.sock http://localhost/health"
+info "  curl --unix-socket /run/osmoda/agentd.sock http://localhost/health"
 info "  openclaw  # start chatting with your OS"
 echo ""

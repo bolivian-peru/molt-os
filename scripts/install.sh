@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Thorox Installer — One command to give your server a brain
+# osModa Installer — One command to give your computer a brain
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/bolivian-peru/agent-os/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | bash
 #
 # Or with options:
 #   curl -fsSL ... | bash -s -- --skip-nixos --api-key sk-ant-...
@@ -12,7 +12,7 @@
 #   1. Converts your server to NixOS (via nixos-infect) — optional
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the agentos-bridge plugin (12 system tools)
+#   4. Sets up the osmoda-bridge plugin (12 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #   7. Opens the setup wizard at localhost:18789
@@ -24,10 +24,10 @@
 set -euo pipefail
 
 VERSION="0.1.0"
-REPO_URL="https://github.com/bolivian-peru/agent-os.git"
-INSTALL_DIR="/opt/agent-os"
-STATE_DIR="/var/lib/agentos"
-RUN_DIR="/run/agentos"
+REPO_URL="https://github.com/osmoda/osmoda.git"
+INSTALL_DIR="/opt/osmoda"
+STATE_DIR="/var/lib/osmoda"
+RUN_DIR="/run/osmoda"
 OPENCLAW_DIR="/opt/openclaw"
 WORKSPACE_DIR="/root/workspace"
 
@@ -41,10 +41,10 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-log()   { echo -e "${GREEN}[thorox]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[thorox]${NC} $*"; }
-error() { echo -e "${RED}[thorox]${NC} $*" >&2; }
-info()  { echo -e "${BLUE}[thorox]${NC} $*"; }
+log()   { echo -e "${GREEN}[osmoda]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[osmoda]${NC} $*"; }
+error() { echo -e "${RED}[osmoda]${NC} $*" >&2; }
+info()  { echo -e "${BLUE}[osmoda]${NC} $*"; }
 
 die() { error "$@"; exit 1; }
 
@@ -61,7 +61,7 @@ while [[ $# -gt 0 ]]; do
     --api-key)      API_KEY="$2"; shift 2 ;;
     --branch)       BRANCH="$2"; shift 2 ;;
     --help|-h)
-      echo "AgentOS Installer v${VERSION}"
+      echo "osModa Installer v${VERSION}"
       echo ""
       echo "Usage: curl -fsSL <url> | bash -s -- [options]"
       echo ""
@@ -81,8 +81,8 @@ done
 # ---------------------------------------------------------------------------
 echo ""
 echo -e "${BOLD}  ╔══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}  ║         ${BLUE}AgentOS Installer v${VERSION}${NC}${BOLD}          ║${NC}"
-echo -e "${BOLD}  ║   Your server is about to get a brain.   ║${NC}"
+echo -e "${BOLD}  ║         ${BLUE}osModa Installer v${VERSION}${NC}${BOLD}            ║${NC}"
+echo -e "${BOLD}  ║   Your computer is about to get a brain. ║${NC}"
 echo -e "${BOLD}  ╚══════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -112,7 +112,7 @@ fi
 # Check architecture
 ARCH=$(uname -m)
 if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "aarch64" ]; then
-  die "Unsupported architecture: $ARCH. AgentOS requires x86_64 or aarch64."
+  die "Unsupported architecture: $ARCH. osModa requires x86_64 or aarch64."
 fi
 
 log "Architecture: $ARCH"
@@ -134,8 +134,19 @@ if [ "$SKIP_NIXOS" = false ]; then
     echo ""
 
     # nixos-infect handles everything
+    # Auto-detect cloud provider from metadata endpoints
+    PROVIDER="generic"
+    if curl -sf -m 2 http://169.254.169.254/hetzner/v1/metadata >/dev/null 2>&1; then
+      PROVIDER="hetznercloud"
+    elif curl -sf -m 2 http://169.254.169.254/metadata/v1/ >/dev/null 2>&1; then
+      PROVIDER="digitalocean"
+    elif curl -sf -m 2 http://169.254.169.254/latest/meta-data/ >/dev/null 2>&1; then
+      PROVIDER="ec2"
+    fi
+    log "Detected cloud provider: $PROVIDER"
+
     curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect \
-      | NIX_CHANNEL=nixos-unstable PROVIDER=hetznercloud bash -x
+      | NIX_CHANNEL=nixos-unstable PROVIDER="$PROVIDER" bash -x
 
     # If we get here, infect didn't reboot (shouldn't happen)
     warn "nixos-infect complete. Please reboot and re-run this script with --skip-nixos"
@@ -191,14 +202,14 @@ log "Dependencies ready."
 # ---------------------------------------------------------------------------
 # Step 3: Clone/update the repo
 # ---------------------------------------------------------------------------
-log "Step 3: Getting AgentOS source..."
+log "Step 3: Getting osModa source..."
 
 if [ -d "$INSTALL_DIR/.git" ]; then
   log "Updating existing installation..."
   cd "$INSTALL_DIR"
   git pull origin "$BRANCH" || true
 else
-  log "Cloning AgentOS..."
+  log "Cloning osModa..."
   git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
@@ -211,11 +222,18 @@ log "Source ready at $INSTALL_DIR"
 log "Step 4: Building agentd (this takes 2-5 minutes on first build)..."
 
 cd "$INSTALL_DIR"
-cargo build --release --workspace 2>&1 | tail -5
+BUILD_LOG=$(mktemp /tmp/osmoda-build-XXXXXX.log)
+if ! cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
+  error "Build failed. Full output:"
+  cat "$BUILD_LOG"
+  rm -f "$BUILD_LOG"
+  die "Cargo build failed. See errors above."
+fi
+rm -f "$BUILD_LOG"
 
 # Create bin directory and symlinks
 mkdir -p "$INSTALL_DIR/bin"
-for binary in agentd agentctl agentos-egress; do
+for binary in agentd agentctl osmoda-egress; do
   if [ -f "target/release/$binary" ]; then
     ln -sf "$INSTALL_DIR/target/release/$binary" "$INSTALL_DIR/bin/$binary"
     log "Built: $binary"
@@ -223,9 +241,9 @@ for binary in agentd agentctl agentos-egress; do
 done
 
 # Add to PATH
-if ! grep -q "molt-os/bin" /etc/profile.d/agentos.sh 2>/dev/null; then
+if ! grep -q "osmoda/bin" /etc/profile.d/osmoda.sh 2>/dev/null; then
   mkdir -p /etc/profile.d
-  echo "export PATH=\"$INSTALL_DIR/bin:\$PATH\"" > /etc/profile.d/agentos.sh
+  echo "export PATH=\"$INSTALL_DIR/bin:\$PATH\"" > /etc/profile.d/osmoda.sh
 fi
 export PATH="$INSTALL_DIR/bin:$PATH"
 
@@ -245,19 +263,19 @@ if ! command -v openclaw &>/dev/null; then
   npm install openclaw 2>&1 | tail -3
   ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
   # NixOS: add to profile if /usr/local/bin doesn't work
-  echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/agentos.sh
+  echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
   export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
 fi
 
 log "OpenClaw installed."
 
 # ---------------------------------------------------------------------------
-# Step 6: Set up agentos-bridge plugin
+# Step 6: Set up osmoda-bridge plugin
 # ---------------------------------------------------------------------------
-log "Step 6: Setting up agentos-bridge plugin..."
+log "Step 6: Setting up osmoda-bridge plugin..."
 
-PLUGIN_SRC="$INSTALL_DIR/packages/agentos-bridge"
-PLUGIN_DST="/opt/molt-os/agentos-bridge-plugin"
+PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
+PLUGIN_DST="$INSTALL_DIR/osmoda-bridge-plugin"
 
 # Copy plugin files (not symlink — avoids path issues)
 mkdir -p "$PLUGIN_DST"
@@ -268,7 +286,7 @@ cp "$PLUGIN_SRC/openclaw.plugin.json" "$PLUGIN_DST/"
 # Configure OpenClaw
 mkdir -p /root/.openclaw
 openclaw config set gateway.auth.mode none 2>/dev/null || true
-openclaw config set plugins.allow '["agentos-bridge"]' 2>/dev/null || true
+openclaw config set plugins.allow '["osmoda-bridge"]' 2>/dev/null || true
 
 log "Bridge plugin installed with 12 system tools."
 
@@ -292,9 +310,13 @@ if [ -d "$INSTALL_DIR/skills" ]; then
   cp -r "$INSTALL_DIR/skills/"* "$WORKSPACE_DIR/skills/" 2>/dev/null || true
 fi
 
-# Create state directories
-mkdir -p "$STATE_DIR"/{memory,ledger,config}
+# Create state directories with secure permissions
+mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines}
 mkdir -p "$RUN_DIR"
+mkdir -p /var/backups/osmoda
+chmod 700 "$STATE_DIR/config"
+chmod 700 "$STATE_DIR/keyd"
+chmod 700 "$STATE_DIR/keyd/keys"
 
 log "Agent identity and skills installed."
 
@@ -303,9 +325,9 @@ log "Agent identity and skills installed."
 # ---------------------------------------------------------------------------
 if [ -n "$API_KEY" ]; then
   log "Step 8: Configuring API key..."
-  echo "$API_KEY" > "$STATE_DIR/config/api-key"
+  printf '%s\n' "$API_KEY" > "$STATE_DIR/config/api-key"
   chmod 600 "$STATE_DIR/config/api-key"
-  echo "ANTHROPIC_API_KEY=$API_KEY" > "$STATE_DIR/config/env"
+  printf 'ANTHROPIC_API_KEY=%s\n' "$API_KEY" > "$STATE_DIR/config/env"
   chmod 600 "$STATE_DIR/config/env"
   log "API key configured."
 else
@@ -319,22 +341,30 @@ fi
 log "Step 9: Starting services..."
 
 if [ "$OS_TYPE" = "nixos" ]; then
-  # On NixOS: we can't write to /etc/systemd directly in some configurations
-  # Try the direct path first, fall back to a wrapper script
-  if [ -d /etc/systemd/system ] && [ -w /etc/systemd/system ]; then
-    SYSTEMD_DIR="/etc/systemd/system"
-  else
-    SYSTEMD_DIR="/run/systemd/system"
-    mkdir -p "$SYSTEMD_DIR"
+  # On NixOS, services should be managed via osmoda.nix module, not imperative unit files.
+  # Start services directly if binaries exist, but don't write unit files.
+  log "NixOS detected. Use the osmoda.nix NixOS module for proper service management."
+  log "Starting agentd directly for now..."
+
+  mkdir -p "$RUN_DIR" "$STATE_DIR"
+  if [ -f "$INSTALL_DIR/bin/agentd" ]; then
+    "$INSTALL_DIR/bin/agentd" --socket "$RUN_DIR/agentd.sock" --state-dir "$STATE_DIR" &
+    AGENTD_PID=$!
+    log "agentd started (PID $AGENTD_PID). Add osmoda.nix module for persistent service."
   fi
+
+  # Skip to done
+  SKIP_SYSTEMD=true
 else
+  SKIP_SYSTEMD=false
   SYSTEMD_DIR="/etc/systemd/system"
 fi
 
+if [ "$SKIP_SYSTEMD" = false ]; then
 # agentd service
-cat > "$SYSTEMD_DIR/agentd.service" <<EOF
+cat > "$SYSTEMD_DIR/osmoda-agentd.service" <<EOF
 [Unit]
-Description=AgentOS System Daemon
+Description=osModa System Daemon
 After=network.target
 
 [Service]
@@ -351,11 +381,11 @@ WantedBy=multi-user.target
 EOF
 
 # OpenClaw gateway service
-cat > "$SYSTEMD_DIR/openclaw-gateway.service" <<EOF
+cat > "$SYSTEMD_DIR/osmoda-gateway.service" <<EOF
 [Unit]
-Description=OpenClaw AI Gateway
-After=network.target agentd.service
-Wants=agentd.service
+Description=osModa Gateway (OpenClaw)
+After=network.target osmoda-agentd.service
+Wants=osmoda-agentd.service
 
 [Service]
 Type=simple
@@ -371,8 +401,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable agentd.service
-systemctl start agentd.service
+systemctl enable osmoda-agentd.service
+systemctl start osmoda-agentd.service
 
 # Wait for agentd socket
 for i in $(seq 1 10); do
@@ -383,46 +413,47 @@ done
 if [ -S "$RUN_DIR/agentd.sock" ]; then
   log "agentd is running."
 else
-  warn "agentd socket not found yet. Check: journalctl -u agentd"
+  warn "agentd socket not found yet. Check: journalctl -u osmoda-agentd"
 fi
 
 # Start OpenClaw if API key is configured
 if [ -f "$STATE_DIR/config/api-key" ]; then
-  systemctl enable openclaw-gateway.service
-  systemctl start openclaw-gateway.service
+  systemctl enable osmoda-gateway.service
+  systemctl start osmoda-gateway.service
   log "OpenClaw gateway starting on port 18789..."
 else
   log "OpenClaw will start after you enter your API key."
 fi
+fi # end SKIP_SYSTEMD
 
 # ---------------------------------------------------------------------------
 # Done!
 # ---------------------------------------------------------------------------
 echo ""
 echo -e "${BOLD}  ╔══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}  ║       ${GREEN}AgentOS installed successfully!${NC}${BOLD}     ║${NC}"
+echo -e "${BOLD}  ║       ${GREEN}osModa installed successfully!${NC}${BOLD}      ║${NC}"
 echo -e "${BOLD}  ╚══════════════════════════════════════════╝${NC}"
 echo ""
-info "Your server now has a brain."
+info "Your computer now has a brain."
 echo ""
 
 if [ -f "$STATE_DIR/config/api-key" ]; then
-  info "Chat with your server:"
+  info "Chat with your system:"
   info "  Open http://localhost:18789 in your browser"
   info "  Or SSH tunnel: ssh -L 18789:localhost:18789 root@<this-ip>"
 else
   info "Next step — enter your Anthropic API key:"
   info "  Option 1: Open http://localhost:18789 (setup wizard)"
-  info "  Option 2: Run: agentos-setup"
+  info "  Option 2: Run: osmoda-setup"
   info "  Option 3: echo 'sk-ant-...' > $STATE_DIR/config/api-key"
 fi
 
 echo ""
 info "Useful commands:"
 info "  curl -s --unix-socket $RUN_DIR/agentd.sock http://l/health | jq"
-info "  journalctl -u agentd -f"
-info "  journalctl -u openclaw-gateway -f"
+info "  journalctl -u osmoda-agentd -f"
+info "  journalctl -u osmoda-gateway -f"
 echo ""
-info "Documentation: https://github.com/moltOS/molt-os"
-info "Report issues: https://github.com/moltOS/molt-os/issues"
+info "Documentation: https://os.moda"
+info "Report issues: https://github.com/osmoda/osmoda/issues"
 echo ""

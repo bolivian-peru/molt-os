@@ -1,26 +1,26 @@
-# Thorox Live ISO — Boot from USB, talk to your computer
+# osModa Live ISO — Boot from USB, talk to your computer
 #
 # Build (on a Linux machine or the Hetzner server):
-#   nix build .#nixosConfigurations.agentos-iso.config.system.build.isoImage
+#   nix build .#nixosConfigurations.osmoda-iso.config.system.build.isoImage
 #
 # Write to USB:
-#   dd if=result/iso/agentos-*.iso of=/dev/sdX bs=4M status=progress
+#   dd if=result/iso/osmoda-*.iso of=/dev/sdX bs=4M status=progress
 #
 # What happens when you boot:
-#   1. Plymouth splash (Thorox logo, breathing animation)
+#   1. Plymouth splash (osModa logo, breathing animation)
 #   2. Auto-login → Sway kiosk mode
 #   3. Firefox opens full-screen to setup wizard (localhost:18789)
 #   4. User connects WiFi, enters Anthropic API key
-#   5. Thorox is alive — start chatting with your computer
+#   5. osModa is alive — start chatting with your computer
 #
 { config, lib, pkgs, ... }:
 
 {
-  networking.hostName = "agentos-live";
+  networking.hostName = "osmoda-live";
   system.stateVersion = "24.11";
 
-  # --- Enable AgentOS (core + gateway + shell) ---
-  services.agentos = {
+  # --- Enable osModa (core + gateway + shell) ---
+  services.osmoda = {
     enable = true;
     openclaw.enable = true;
     sandbox.enable = false;
@@ -29,7 +29,7 @@
     plymouth.enable = true;
   };
 
-  # Silent boot params are set by agentos.nix when plymouth.enable = true
+  # Silent boot params are set by osmoda.nix when plymouth.enable = true
   # Adding vt.global_cursor_default=0 here (not in the module)
   boot.kernelParams = [ "vt.global_cursor_default=0" ];
 

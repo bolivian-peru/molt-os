@@ -1,11 +1,11 @@
-# AgentOS Server — Headless configuration
+# osModa Server — Headless configuration
 { config, lib, pkgs, ... }:
 
 {
-  networking.hostName = "agentos-server";
+  networking.hostName = "osmoda-server";
   system.stateVersion = "24.11";
 
-  services.agentos = {
+  services.osmoda = {
     enable = true;
     openclaw.enable = true;
     sandbox.enable = true;
@@ -18,7 +18,7 @@
 
   users.users.agent = {
     isNormalUser = true;
-    description = "AgentOS Service Account";
+    description = "osModa Service Account";
     extraGroups = [ "wheel" ];
     openssh.authorizedKeys.keys = [
       # Add your SSH public key here

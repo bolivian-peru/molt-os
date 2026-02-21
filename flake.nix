@@ -1,7 +1,7 @@
-# AgentOS (molt-os) — AI-Native Operating System
+# osModa — AI-Native Operating System
 # NixOS + OpenClaw = Agents as first-class OS citizens
 {
-  description = "AgentOS: AI-native operating system powered by OpenClaw on NixOS";
+  description = "osModa: AI-native operating system powered by OpenClaw on NixOS";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -44,7 +44,22 @@
 
   outputs = { self, nixpkgs, flake-utils, crane, nix-openclaw, nixos-generators, disko, agenix, home-manager }:
   let
-    # NixOS configurations (Linux only)
+    # Shared NixOS modules used by all configurations
+    sharedModules = [
+      ./nix/modules/osmoda.nix
+      ./nix/modules/osmoda-shell.nix
+      ./nix/modules/osmoda-setup.nix
+      ./nix/modules/osmoda-ui.nix
+      agenix.nixosModules.default
+      {
+        nixpkgs.overlays = [
+          nix-openclaw.overlays.default
+          self.overlays.default
+        ];
+      }
+    ];
+
+    # x86_64 pkgs + crane (for top-level packages and checks)
     linuxSystem = "x86_64-linux";
     linuxPkgs = import nixpkgs {
       system = linuxSystem;
@@ -57,61 +72,69 @@
 
     craneLibLinux = crane.mkLib linuxPkgs;
 
-    # Rust crate builds
-    commonArgs = {
+    # Shared Rust build args (used by checks only — overlay has its own)
+    checkArgs = {
       src = craneLibLinux.cleanCargoSource ./.;
       strictDeps = true;
-      buildInputs = with linuxPkgs; [ sqlite openssl ] ++ linuxPkgs.lib.optionals linuxPkgs.stdenv.isDarwin [
-        linuxPkgs.darwin.apple_sdk.frameworks.Security
-        linuxPkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-      ];
+      buildInputs = with linuxPkgs; [ sqlite openssl ];
       nativeBuildInputs = with linuxPkgs; [ pkg-config ];
     };
 
-    cargoArtifacts = craneLibLinux.buildDepsOnly commonArgs;
-
-    # Shared NixOS modules used by all configurations
-    sharedModules = [
-      ./nix/modules/agentos.nix
-      ./nix/modules/agentos-shell.nix
-      ./nix/modules/agentos-setup.nix
-      agenix.nixosModules.default
-      {
-        nixpkgs.overlays = [
-          nix-openclaw.overlays.default
-          self.overlays.default
-        ];
-      }
-    ];
+    cargoArtifacts = craneLibLinux.buildDepsOnly checkArgs;
   in
   {
     # --- Overlays ---
-    overlays.default = final: prev: {
-      agentos-agentd = craneLibLinux.buildPackage (commonArgs // {
-        inherit cargoArtifacts;
+    # Architecture-aware: builds Rust crates for whatever system it's applied to
+    overlays.default = final: prev: let
+      craneLib = crane.mkLib final;
+      src = craneLib.cleanCargoSource ./.;
+      commonArgs = {
+        inherit src;
+        strictDeps = true;
+        buildInputs = with final; [ sqlite openssl ];
+        nativeBuildInputs = with final; [ pkg-config ];
+      };
+      artifacts = craneLib.buildDepsOnly commonArgs;
+    in {
+      osmoda-agentd = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
         cargoExtraArgs = "-p agentd";
       });
-      agentos-agentctl = craneLibLinux.buildPackage (commonArgs // {
-        inherit cargoArtifacts;
+      osmoda-agentctl = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
         cargoExtraArgs = "-p agentctl";
       });
-      agentos-egress = craneLibLinux.buildPackage (commonArgs // {
-        inherit cargoArtifacts;
-        cargoExtraArgs = "-p agentos-egress";
+      osmoda-egress = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
+        cargoExtraArgs = "-p osmoda-egress";
       });
-      agentos-voice = craneLibLinux.buildPackage (commonArgs // {
-        inherit cargoArtifacts;
-        cargoExtraArgs = "-p agentos-voice";
+      osmoda-voice = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
+        cargoExtraArgs = "-p osmoda-voice";
       });
-      agentos-system-skills = final.callPackage ./packages/agentos-system-skills { };
-      agentos-plymouth-theme = final.callPackage ./nix/modules/plymouth-theme { };
+      osmoda-keyd = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
+        cargoExtraArgs = "-p osmoda-keyd";
+      });
+      osmoda-watch = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
+        cargoExtraArgs = "-p osmoda-watch";
+      });
+      osmoda-routines = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
+        cargoExtraArgs = "-p osmoda-routines";
+      });
+      osmoda-system-skills = final.callPackage ./packages/osmoda-system-skills { };
+      osmoda-plymouth-theme = final.callPackage ./nix/modules/plymouth-theme { };
     };
 
     # --- NixOS Configurations ---
     nixosConfigurations = {
+      # === x86_64 ===
+
       # Dev VM with Sway desktop + OpenClaw + agentd
-      agentos-dev = nixpkgs.lib.nixosSystem {
-        system = linuxSystem;
+      osmoda-dev = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
         modules = sharedModules ++ [
           ./nix/hosts/dev-vm.nix
           home-manager.nixosModules.home-manager
@@ -123,25 +146,49 @@
       };
 
       # Headless server
-      agentos-server = nixpkgs.lib.nixosSystem {
-        system = linuxSystem;
+      osmoda-server = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
         modules = sharedModules ++ [
           ./nix/hosts/server.nix
         ];
       };
 
       # Hetzner VPS (deploy via nixos-anywhere)
-      agentos-hetzner = nixpkgs.lib.nixosSystem {
-        system = linuxSystem;
+      osmoda-hetzner = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
         modules = sharedModules ++ [
           ./nix/hosts/hetzner.nix
           disko.nixosModules.disko
         ];
       };
 
-      # Installer ISO
-      agentos-iso = nixpkgs.lib.nixosSystem {
-        system = linuxSystem;
+      # Installer ISO (x86_64)
+      osmoda-iso = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = sharedModules ++ [
+          ./nix/hosts/iso.nix
+          "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+        ];
+      };
+
+      # === aarch64 (ARM — for M2 Mac via UTM, ARM servers) ===
+
+      # Dev VM (aarch64)
+      osmoda-dev-arm = nixpkgs.lib.nixosSystem {
+        system = "aarch64-linux";
+        modules = sharedModules ++ [
+          ./nix/hosts/dev-vm.nix
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.useGlobalPkgs = true;
+            home-manager.useUserPackages = true;
+          }
+        ];
+      };
+
+      # Installer ISO (aarch64)
+      osmoda-iso-arm = nixpkgs.lib.nixosSystem {
+        system = "aarch64-linux";
         modules = sharedModules ++ [
           ./nix/hosts/iso.nix
           "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
@@ -149,22 +196,25 @@
       };
     };
 
-    # --- Packages ---
+    # --- Packages (x86_64) ---
     packages.${linuxSystem} = {
-      agentd = linuxPkgs.agentos-agentd;
-      agentctl = linuxPkgs.agentos-agentctl;
-      egress = linuxPkgs.agentos-egress;
-      voice = linuxPkgs.agentos-voice;
-      default = linuxPkgs.agentos-agentd;
+      agentd = linuxPkgs.osmoda-agentd;
+      agentctl = linuxPkgs.osmoda-agentctl;
+      egress = linuxPkgs.osmoda-egress;
+      voice = linuxPkgs.osmoda-voice;
+      keyd = linuxPkgs.osmoda-keyd;
+      watch = linuxPkgs.osmoda-watch;
+      routines = linuxPkgs.osmoda-routines;
+      default = linuxPkgs.osmoda-agentd;
     };
 
-    # --- Checks ---
+    # --- Checks (x86_64) ---
     checks.${linuxSystem} = {
-      agentd-clippy = craneLibLinux.cargoClippy (commonArgs // {
+      osmoda-clippy = craneLibLinux.cargoClippy (checkArgs // {
         inherit cargoArtifacts;
         cargoClippyExtraArgs = "--all-targets -- --deny warnings";
       });
-      agentd-tests = craneLibLinux.cargoTest (commonArgs // {
+      osmoda-tests = craneLibLinux.cargoTest (checkArgs // {
         inherit cargoArtifacts;
       });
     };
@@ -189,7 +239,7 @@
           pkg-config
           sqlite
           openssl
-          # Node.js (for agentos-bridge plugin)
+          # Node.js (for osmoda-bridge plugin)
           nodejs_22
           pnpm
           # Nix tools
@@ -200,7 +250,7 @@
           pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
         ];
         shellHook = ''
-          echo "AgentOS development shell"
+          echo "osModa development shell"
           echo "  cargo check --workspace         - Check Rust code"
           echo "  cargo test --workspace          - Run tests"
           echo "  cargo run -p agentd -- --help   - Run agentd"

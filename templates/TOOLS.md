@@ -1,14 +1,14 @@
-# AgentOS Tool Reference
+# osModa Tool Reference
 
 ## agentd endpoints
 
-All communication with the system goes through agentd, a Rust daemon running on a Unix socket at `/run/agentos/agentd.sock`.
+All communication with the system goes through agentd, a Rust daemon running on a Unix socket at `/run/osmoda/agentd.sock`.
 
 ### GET /health
 Returns system health snapshot.
 ```json
 {
-  "hostname": "agentos-dev",
+  "hostname": "osmoda-dev",
   "uptime_seconds": 3600,
   "cpu_usage": [12.5, 8.3, 15.2, 10.1],
   "memory_total": 4294967296,
@@ -90,10 +90,10 @@ Explicitly store something in long-term memory.
 ### GET /memory/health
 Memory system status: embedding model readiness, collection size, state directory.
 
-## OpenClaw tools (registered by agentos-bridge)
+## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 12 tools available to the AI agent through OpenClaw.
-Registered via `api.registerTool()` factory pattern in `packages/agentos-bridge/index.ts`.
+These are the 37 tools available to the AI agent through OpenClaw.
+Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
 
@@ -109,9 +109,9 @@ Registered via `api.registerTool()` factory pattern in `packages/agentos-bridge/
 
 | Tool | Description |
 |------|-------------|
-| `shell_exec` | Execute a shell command and return stdout |
-| `file_read` | Read file contents from the filesystem |
-| `file_write` | Write content to a file (creates parent dirs if needed) |
+| `shell_exec` | Execute a shell command and return stdout. Timeout capped at 120s. Dangerous commands are logged to the audit ledger. |
+| `file_read` | Read file contents from the filesystem. Restricted to /var/lib/osmoda/, /etc/nixos/, /home/, /tmp/, /etc/, /var/log/. Rejects path traversal. |
+| `file_write` | Write content to a file (creates parent dirs if needed). Same path restrictions as file_read. Uses atomic writes (write to .tmp then rename). |
 | `directory_list` | List directory contents with types and sizes |
 
 ### systemd tools (service and log management)
@@ -126,3 +126,72 @@ Registered via `api.registerTool()` factory pattern in `packages/agentos-bridge/
 | Tool | Description |
 |------|-------------|
 | `network_info` | Network interfaces (ip addr) and listening ports (ss -tlnp) |
+
+### Wallet tools (via osmoda-keyd at `/run/osmoda/keyd.sock`)
+
+| Tool | Description |
+|------|-------------|
+| `wallet_create` | Create a new ETH or SOL wallet (encrypted, policy-gated) |
+| `wallet_list` | List all wallets with addresses, labels, and chains |
+| `wallet_sign` | Sign raw bytes with a wallet (policy-gated, daily limits) |
+| `wallet_send` | Build + sign a transaction (returns signed tx for external broadcast) |
+| `wallet_delete` | Permanently delete a wallet (removes key file, zeroizes cached key, updates index) |
+| `wallet_receipt` | Query wallet operation receipts from the audit ledger |
+
+### SafeSwitch tools (via osmoda-watch at `/run/osmoda/watch.sock`)
+
+| Tool | Description |
+|------|-------------|
+| `safe_switch_begin` | Start a deploy transaction with health checks + TTL + auto-rollback |
+| `safe_switch_status` | Check probation status of a switch session |
+| `safe_switch_commit` | Manually commit a switch session |
+| `safe_switch_rollback` | Manually rollback to the previous NixOS generation |
+
+### Watcher tools (via osmoda-watch)
+
+| Tool | Description |
+|------|-------------|
+| `watcher_add` | Add an autopilot watcher with escalation actions (restart → rollback → notify) |
+| `watcher_list` | List active watchers and their current health state |
+
+### Routines tools (via osmoda-routines at `/run/osmoda/routines.sock`)
+
+| Tool | Description |
+|------|-------------|
+| `routine_add` | Schedule a recurring background task (cron, interval, or event-based) |
+| `routine_list` | List all scheduled routines with run history |
+| `routine_trigger` | Manually trigger a routine to run immediately |
+
+### Identity tools (via agentd)
+
+| Tool | Description |
+|------|-------------|
+| `agent_card` | Get or generate the EIP-8004 Agent Card (identity + capabilities) |
+
+### Receipt + Incident tools (via agentd)
+
+| Tool | Description |
+|------|-------------|
+| `receipt_list` | Query structured receipts from the audit ledger |
+| `incident_create` | Create an incident workspace for structured troubleshooting |
+| `incident_step` | Add a step to an incident workspace (resumable — Shannon pattern) |
+
+### Backup tools (via agentd)
+
+| Tool | Description |
+|------|-------------|
+| `backup_create` | Create timestamped backup of all osModa state (SQLite WAL checkpoint + copy) |
+| `backup_list` | List available backups with IDs, sizes, and timestamps |
+
+### Voice tools (via osmoda-voice at `/run/osmoda/voice.sock`)
+
+100% local, open-source. STT via whisper.cpp, TTS via piper-tts, audio via PipeWire.
+No cloud APIs. No data leaves the machine.
+
+| Tool | Description |
+|------|-------------|
+| `voice_status` | Check voice daemon status: listening state, model availability |
+| `voice_speak` | Speak text aloud via piper-tts (local TTS, plays through PipeWire) |
+| `voice_transcribe` | Transcribe a WAV audio file to text via whisper.cpp (local STT) |
+| `voice_record` | Record audio from microphone via PipeWire, optionally transcribe |
+| `voice_listen` | Enable/disable continuous listening mode |

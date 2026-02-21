@@ -73,10 +73,10 @@ shell_exec({ command: "systemctl list-units --type=service --state=running --no-
 
 Generate a plain-English overview:
 ```
-Your Server — MoltOS (Hetzner CX22)
+Your Server — osModa (Hetzner CX22)
 
 Services running:
-  - agentd (AgentOS system daemon) — since boot
+  - agentd (osModa system daemon) — since boot
   - OpenClaw Gateway (AI agent interface) — port 18789
   - SSH (key-auth only) — port 22
   - nginx (reverse proxy) — ports 80, 443
