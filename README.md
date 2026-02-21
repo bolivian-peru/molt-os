@@ -2,22 +2,41 @@
 
 # osModa
 
-**The AI-native operating system.**
+**Your server fixes itself at 3am. You sleep.**
 
-A NixOS distribution where the AI agent *is* the operating system.
-Not an app running on Linux. The agent has root. It sees everything. It fixes everything.
+An AI-native operating system built on NixOS. The agent isn't running *on* your server — it *is* your server. Root access. Every process. Every file. Every config. All changes atomic, rollbackable, and logged to a tamper-proof audit ledger.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Powered-5277C3.svg)](https://nixos.org/)
+[![Tests](https://img.shields.io/badge/Tests-71%20passing-brightgreen.svg)]()
+[![Status](https://img.shields.io/badge/Status-Early%20Beta-orange.svg)]()
 
-[Quickstart](#quickstart) · [Architecture](#architecture) · [Components](#components) · [Status](#project-status)
+[Quickstart](#quickstart) · [Why NixOS?](#why-nixos) · [Architecture](#architecture) · [Components](#components) · [Contributing](#contributing)
 
 </div>
 
 ---
 
 ## Quickstart
+
+### NixOS (flake)
+
+Already running NixOS? Three lines:
+
+```nix
+# flake.nix — add osModa as an input
+inputs.osmoda.url = "github:osmoda/osmoda";
+
+# configuration.nix
+imports = [ osmoda.nixosModules.default ];
+services.osmoda.enable = true;
+```
+
+```bash
+sudo nixos-rebuild switch
+# Open http://localhost:18789 — talk to your server
+```
 
 ### One command (any Linux server)
 
@@ -33,7 +52,7 @@ This will:
 
 **Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
 
-### Existing NixOS
+### Existing NixOS (without flake)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/osmoda/osmoda/main/scripts/install.sh | sudo bash -s -- --skip-nixos
@@ -95,6 +114,17 @@ Every action the AI takes is recorded in an append-only, hash-chained audit ledg
 3:18 AM   47 seconds total downtime, zero human involvement
 ```
 
+## Why NixOS?
+
+Giving an AI root access to a mutable Linux system is terrifying. NixOS makes it safe:
+
+- **Atomic rebuilds** — every config change is a transaction. It works or it doesn't. No half-applied states.
+- **Instant rollback** — if the AI breaks something, `nixos-rebuild switch --rollback` restores the last working state in seconds. osModa's SafeSwitch does this automatically.
+- **Reproducible** — the entire system state is defined in `.nix` files. You can rebuild the exact same system on another machine from the config alone.
+- **Generations** — NixOS keeps a history of every system state. The AI can correlate "what changed" with "when things broke" by walking the generation timeline.
+
+Without NixOS, AI-driven system changes are a one-way door. With NixOS, every door has an undo button.
+
 ## Architecture
 
 osModa runs as a set of cooperating daemons, each communicating over Unix sockets. No TCP. No HTTP to the internet. Everything stays local.
@@ -136,34 +166,25 @@ Tamper-proof. Verifiable with `agentctl verify-ledger`.
 
 ## Components
 
-### agentd (Rust)
-The kernel bridge daemon. Runs as root. Exposes the entire system over a Unix socket API (`/run/osmoda/agentd.sock`). Provides: system health, structured queries, hash-chained event log, memory system (ingest/recall/store), EIP-8004 Agent Card identity, structured receipts, and incident workspaces.
+| Daemon | Role | Socket |
+|--------|------|--------|
+| **agentd** | System bridge, audit ledger, memory, Agent Card, backups | `/run/osmoda/agentd.sock` |
+| **osmoda-keyd** | ETH + SOL wallets, AES-256-GCM, policy engine. Zero network access | `/run/osmoda/keyd.sock` |
+| **osmoda-watch** | SafeSwitch deploys with auto-rollback, health watchers | `/run/osmoda/watch.sock` |
+| **osmoda-routines** | Cron/interval automation (health checks, log scans) | `/run/osmoda/routines.sock` |
+| **osmoda-egress** | Domain-filtered HTTP CONNECT proxy for sandboxed tools | `127.0.0.1:19999` |
+| **osmoda-voice** | Local STT (whisper.cpp) + TTS (piper) — no cloud APIs | `/run/osmoda/voice.sock` |
+| **osmoda-bridge** | OpenClaw plugin — 37 tools wiring all daemons to AI | TypeScript |
 
-### osmoda-keyd (Rust)
-Crypto wallet daemon for ETH and SOL. Runs with `PrivateNetwork=true` — zero network access. Private keys encrypted with AES-256-GCM. Policy engine enforces daily spend limits and signing caps. Proper Keccak-256 for Ethereum address derivation, ed25519-dalek for Solana. Key material zeroized on drop.
+### 15 System Skills
 
-### osmoda-watch (Rust)
-SafeSwitch deploy transactions and autopilot health watchers. Start a change with a TTL and health checks — if checks fail, auto-rollback to the previous NixOS generation. Watchers run deterministic health checks on interval with escalation: restart service, rollback generation, notify.
-
-### osmoda-routines (Rust)
-Background cron/interval/event automation engine. Runs scheduled tasks between conversations: health checks every 5 minutes, service monitoring every 10 minutes, log scans every 15 minutes. Cron expression parser, persistent routine definitions.
-
-### osmoda-bridge (TypeScript)
-OpenClaw plugin that wires all daemons to the AI. 37 tools registered via `api.registerTool()`: system management, wallets, SafeSwitch, watchers, routines, identity, receipts, incidents.
-
-### osmoda-egress (Rust)
-Localhost-only HTTP CONNECT proxy with domain allowlist. The only path to the internet for sandboxed Ring 2 tools.
-
-### NixOS Module (osmoda.nix)
-Single module that wires everything as systemd services. `services.osmoda.enable = true` activates the full stack with proper systemd hardening (PrivateNetwork, RestrictAddressFamilies, NoNewPrivileges).
+Self-healing, morning briefing, security hardening, natural language NixOS config, predictive resource alerts, drift detection, generation timeline debugging, flight recorder, Nix store optimizer, system monitor, package manager, config editor, file manager, network manager, service explorer.
 
 ## Development
 
 ```bash
-# Clone
 git clone https://github.com/osmoda/osmoda.git && cd osmoda
 
-# Build + test
 cargo check --workspace
 cargo test --workspace    # 71 tests
 
@@ -180,7 +201,32 @@ nix build .#nixosConfigurations.osmoda-iso.config.system.build.isoImage
 
 ## Project Status
 
-7 Rust daemons, 71 tests passing, 37 bridge tools, 15 system skills. Production-hardened with subprocess timeouts, graceful shutdown, input validation, backup system, and systemd security directives.
+Early beta. 7 Rust daemons, 71 tests passing, 37 bridge tools, 15 system skills. Production-hardened with subprocess timeouts, graceful shutdown, input validation, daily backups, and systemd security directives.
+
+**Working and tested:**
+- All 7 Rust daemons compile and pass tests
+- ETH + SOL crypto signing with known-vector verification
+- Hash-chained audit ledger with tamper detection
+- SafeSwitch state machine with auto-rollback
+- Cron scheduler, routine persistence, background automation
+- OpenClaw plugin loads and registers all 37 tools
+
+**Needs real-world testing:**
+- Full NixOS VM boot-to-chat pipeline
+- End-to-end daemon communication under load
+- NixOS rollback via SafeSwitch on a live system
+
+## Contributing
+
+We're in early beta and actively looking for feedback. Every issue, bug report, and idea helps.
+
+- **Bug reports** — open an issue, include logs if possible
+- **Feature ideas** — open an issue, describe the use case
+- **New skills** — add a `skills/<name>/SKILL.md` and open a PR
+- **NixOS module improvements** — `nix/modules/osmoda.nix` is the core
+- **Bridge tools** — add tools in `packages/osmoda-bridge/index.ts`
+
+For larger changes, open an issue first so we can discuss the approach before you invest time.
 
 ## Tech Stack
 
@@ -198,11 +244,12 @@ crates/osmoda-keyd/         Crypto wallet daemon (ETH + SOL)
 crates/osmoda-watch/        SafeSwitch + autopilot watchers
 crates/osmoda-routines/     Background automation engine
 crates/osmoda-egress/       Egress proxy
+crates/osmoda-voice/        Local voice (STT + TTS)
 packages/osmoda-bridge/     OpenClaw plugin (37 tools)
 nix/modules/osmoda.nix      NixOS module
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity, tools, heartbeat
-skills/                     Self-healing, security, monitoring skills
+skills/                     15 system skills
 ```
 
 ## License
@@ -213,7 +260,7 @@ MIT. See [LICENSE](LICENSE).
 
 <div align="center">
 
-**osModa** — the AI-native operating system.
+**osModa** — your server fixes itself at 3am. You sleep.
 
 Built with NixOS, Rust, and OpenClaw.
 
