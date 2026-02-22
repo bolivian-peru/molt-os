@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="assets/server-brain-os-moda.png" alt="osModa — AI-native operating system" width="100%"/>
-
 # osModa
 
 **Your server fixes itself at 3am. You sleep.**
