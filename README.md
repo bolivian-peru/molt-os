@@ -240,7 +240,7 @@ What's shipping next.
 - Prometheus metrics — `GET /metrics` endpoint for plugging into existing monitoring stacks
 - Configurable autonomy — three modes: `suggest` (explain), `supervised` (ask first), `autonomous` (act + log receipt)
 - Fleet coordination — manage multiple osModa machines from a single pane
-- Hedgehog mode — friendly assistant personality for when you want your server to feel less like a server
+- Moda — the spirit of the machine. A presence in the web UI that reflects system state at a glance. Calm when healthy. Dim when stressed. Never loud. You check on it in the morning and everything's already handled.
 
 See [discussions](https://github.com/bolivian-peru/os-moda/discussions) for what's being worked on and what's next.
 
