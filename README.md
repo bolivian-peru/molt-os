@@ -221,6 +221,29 @@ Early beta. 7 Rust daemons, 71 tests passing, 37 bridge tools, 15 system skills.
 - End-to-end daemon communication under load
 - NixOS rollback via SafeSwitch on a live system
 
+## Roadmap
+
+What's shipping next.
+
+**In progress:**
+- Vector memory engine (USearch backend) — semantic log search, incident correlation, real agent memory
+- Web dashboard — full browser-based OS management with built-in terminal
+- `POST /nix/rebuild` API — agent-triggered NixOS rebuilds through an audited endpoint
+- Persistent SafeSwitch sessions — survive daemon restarts during probation
+
+**Coming soon:**
+- Multi-model support — swap between Claude, Grok, Llama, or any local model as the agentic backend. One config change, not a rewrite
+- Encrypted filesystem — LUKS full-disk encryption baked into the NixOS module. Everything at rest is encrypted by default
+- Tor hidden service — access your osModa instance from anywhere via `.onion` address. No port forwarding, no public IP exposure
+- Web shell relay — local command line access through the browser. Manage your server from a phone if you have to
+- MCP protocol support — expose agentd via Model Context Protocol so any MCP-compatible agent can manage the system
+- Prometheus metrics — `GET /metrics` endpoint for plugging into existing monitoring stacks
+- Configurable autonomy — three modes: `suggest` (explain), `supervised` (ask first), `autonomous` (act + log receipt)
+- Fleet coordination — manage multiple osModa machines from a single pane
+- Hedgehog mode — friendly assistant personality for when you want your server to feel less like a server
+
+See [discussions](https://github.com/bolivian-peru/os-moda/discussions) for what's being worked on and what's next.
+
 ## Contributing
 
 We're in early beta and actively looking for feedback. Every issue, bug report, and idea helps.
