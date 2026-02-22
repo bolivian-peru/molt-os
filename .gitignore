@@ -36,6 +36,9 @@ secrets/
 # Docs (kept locally, not published)
 docs/
 
+# Apps (separate repos, not part of open source OS)
+apps/
+
 # Build artifacts
 *.o
 *.so

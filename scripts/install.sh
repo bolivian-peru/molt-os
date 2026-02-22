@@ -54,22 +54,28 @@ die() { error "$@"; exit 1; }
 SKIP_NIXOS=false
 API_KEY=""
 BRANCH="main"
+ORDER_ID=""
+CALLBACK_URL=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --skip-nixos)   SKIP_NIXOS=true; shift ;;
-    --api-key)      API_KEY="$2"; shift 2 ;;
-    --branch)       BRANCH="$2"; shift 2 ;;
+    --skip-nixos)     SKIP_NIXOS=true; shift ;;
+    --api-key)        API_KEY="$2"; shift 2 ;;
+    --branch)         BRANCH="$2"; shift 2 ;;
+    --order-id)       ORDER_ID="$2"; shift 2 ;;
+    --callback-url)   CALLBACK_URL="$2"; shift 2 ;;
     --help|-h)
       echo "osModa Installer v${VERSION}"
       echo ""
       echo "Usage: curl -fsSL <url> | bash -s -- [options]"
       echo ""
       echo "Options:"
-      echo "  --skip-nixos    Don't install NixOS (use on existing NixOS systems)"
-      echo "  --api-key KEY   Set Anthropic API key (skips setup wizard)"
-      echo "  --branch NAME   Git branch to install (default: main)"
-      echo "  --help          Show this help"
+      echo "  --skip-nixos        Don't install NixOS (use on existing NixOS systems)"
+      echo "  --api-key KEY       Set Anthropic API key (skips setup wizard)"
+      echo "  --branch NAME       Git branch to install (default: main)"
+      echo "  --order-id UUID     Spawn order ID (set by spawn.os.moda)"
+      echo "  --callback-url URL  Heartbeat callback URL (set by spawn.os.moda)"
+      echo "  --help              Show this help"
       exit 0
       ;;
     *) warn "Unknown option: $1"; shift ;;
@@ -320,6 +326,17 @@ chmod 700 "$STATE_DIR/keyd/keys"
 
 log "Agent identity and skills installed."
 
+# Store spawn config (if provisioned via spawn.os.moda)
+if [ -n "$ORDER_ID" ]; then
+  printf '%s\n' "$ORDER_ID" > "$STATE_DIR/config/order-id"
+  chmod 600 "$STATE_DIR/config/order-id"
+  log "Spawn order ID stored."
+  if [ -n "$CALLBACK_URL" ]; then
+    printf '%s\n' "$CALLBACK_URL" > "$STATE_DIR/config/callback-url"
+    chmod 600 "$STATE_DIR/config/callback-url"
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Step 8: Set up API key (if provided) or prep setup wizard
 # ---------------------------------------------------------------------------
@@ -400,6 +417,45 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 EOF
 
+# Heartbeat timer (phones home to spawn.os.moda)
+if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
+cat > "$SYSTEMD_DIR/osmoda-heartbeat.service" <<EOF
+[Unit]
+Description=osModa Heartbeat (phones home to spawn.os.moda)
+After=network-online.target osmoda-agentd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '\
+  OID=\$(cat $STATE_DIR/config/order-id 2>/dev/null) && \
+  CBURL=\$(cat $STATE_DIR/config/callback-url 2>/dev/null) && \
+  HEALTH=\$(curl -sf --unix-socket $RUN_DIR/agentd.sock http://l/health 2>/dev/null || echo "{}") && \
+  CPU=\$(echo "\$HEALTH" | grep -o "\"cpu\":[0-9.]*" | head -1 | cut -d: -f2) && \
+  RAM=\$(echo "\$HEALTH" | grep -o "\"ram\":[0-9.]*" | head -1 | cut -d: -f2) && \
+  DISK=\$(echo "\$HEALTH" | grep -o "\"disk\":[0-9.]*" | head -1 | cut -d: -f2) && \
+  UPTIME=\$(echo "\$HEALTH" | grep -o "\"uptime\":[0-9.]*" | head -1 | cut -d: -f2) && \
+  OC_READY=\$(systemctl is-active osmoda-gateway.service 2>/dev/null | grep -q "^active\$" && echo true || echo false) && \
+  curl -sf -X POST "\$CBURL" \
+    -H "Content-Type: application/json" \
+    -d "{\"order_id\":\"\$OID\",\"status\":\"alive\",\"setup_complete\":true,\"openclaw_ready\":\$OC_READY,\"health\":{\"cpu\":\${CPU:-0},\"ram\":\${RAM:-0},\"disk\":\${DISK:-0},\"uptime\":\${UPTIME:-0}}}" \
+  || true'
+EOF
+
+cat > "$SYSTEMD_DIR/osmoda-heartbeat.timer" <<EOF
+[Unit]
+Description=osModa Heartbeat Timer
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=5min
+AccuracySec=30
+
+[Install]
+WantedBy=timers.target
+EOF
+fi
+
 systemctl daemon-reload
 systemctl enable osmoda-agentd.service
 systemctl start osmoda-agentd.service
@@ -423,6 +479,13 @@ if [ -f "$STATE_DIR/config/api-key" ]; then
   log "OpenClaw gateway starting on port 18789..."
 else
   log "OpenClaw will start after you enter your API key."
+fi
+
+# Enable heartbeat timer if configured
+if [ -f "$SYSTEMD_DIR/osmoda-heartbeat.timer" ]; then
+  systemctl enable osmoda-heartbeat.timer
+  systemctl start osmoda-heartbeat.timer
+  log "Heartbeat timer started (every 5 min)."
 fi
 fi # end SKIP_SYSTEMD
 
@@ -457,3 +520,12 @@ echo ""
 info "Documentation: https://os.moda"
 info "Report issues: https://github.com/bolivian-peru/os-moda/issues"
 echo ""
+
+# Phone home on install completion (if spawned)
+if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
+  log "Phoning home to spawn.os.moda..."
+  curl -sf -X POST "$CALLBACK_URL" \
+    -H "Content-Type: application/json" \
+    -d "{\"order_id\":\"$ORDER_ID\",\"status\":\"alive\",\"setup_complete\":true}" \
+    || true
+fi
