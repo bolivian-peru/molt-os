@@ -13,6 +13,6 @@ stdenv.mkDerivation {
 
   meta = with lib; {
     description = "osModa system skills collection";
-    license = licenses.mit;
+    license = licenses.asl20;
   };
 }

@@ -8,7 +8,7 @@
 
 An AI-native operating system built on NixOS. The agent isn't running *on* your server — it *is* your server. Root access. Every process. Every file. Every config. All changes atomic, rollbackable, and logged to a tamper-proof audit ledger.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Powered-5277C3.svg)](https://nixos.org/)
 [![Tests](https://img.shields.io/badge/Tests-71%20passing-brightgreen.svg)]()
@@ -261,7 +261,7 @@ skills/                     15 system skills
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
 
 ---
 
