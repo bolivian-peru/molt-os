@@ -18,8 +18,8 @@ Last updated: 2026-02-23
 | Metric | Count |
 |--------|-------|
 | Rust crates | 8 (7 daemons + 1 CLI) |
-| Tests passing | 106 |
-| Bridge tools registered | 50 (verified: `grep -c registerTool index.ts` = 50) |
+| Tests passing | 110 |
+| Bridge tools registered | 54 (verified: `grep -c registerTool index.ts` = 54) |
 | System skills | 15 |
 | NixOS systemd services | 10 (agentd, gateway, keyd, watch, routines, voice, mesh, egress, cloudflared, tailscale-auth) |
 
@@ -108,7 +108,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | STT (whisper.cpp) | **Functional** | Subprocess invocation, 16kHz mono WAV input, 4-thread inference |
 | TTS (piper-tts) | **Functional** | Subprocess invocation, stdin text → WAV output, auto-play via pw-play |
 | `/voice/status` | **Solid** | Reports listening state, model availability |
-| `/voice/transcribe` | **Functional** | Accepts WAV path, returns text + duration |
+| `/voice/transcribe` | **Functional** | Accepts WAV path, returns text + duration; logs transcription to agentd /memory/ingest (best-effort) |
 | `/voice/speak` | **Functional** | Accepts text, synthesizes + plays audio, auto-cleans cache |
 | `/voice/record` | **Functional** | Records via PipeWire (pw-record), optional auto-transcribe |
 | `/voice/listen` | **Functional** | Enable/disable listening state toggle |
@@ -141,11 +141,15 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | `/identity/rotate` | **Functional** | Generates new keypairs, disconnects all peers (re-invite required) |
 | `/identity` GET | **Solid** | Returns current MeshPublicIdentity |
 | `/health` GET | **Solid** | peer_count, connected_count, identity_ready; tested |
-| MeshMessage serde | **Solid** | 10 variants, all roundtrip-tested |
+| MeshMessage serde | **Solid** | 5 variants (3 deleted), Chat has room_id for group rooms; all roundtrip-tested |
 | Wire framing | **Solid** | Length-prefixed encode/decode, empty payload edge case tested |
-| Audit logging | **Functional** | Logs mesh events to agentd ledger (connect, disconnect, send, receive) |
+| Recv/dispatch loop | **Functional** | Spawned per-connection after handshake; dispatches Heartbeat, HealthReport, Alert, Chat (DM + room), PqExchange |
+| Outbound connect | **Functional** | Spawned on invite/accept and reconnect; 3 retries with 0/5/15s backoff; 10s TCP timeout |
+| Dead-peer detection | **Functional** | 30s health loop; heartbeat probe on stale peers (>90s); reconnects Disconnected peers with known endpoints |
+| Group rooms | **Functional** | In-memory rooms with members + message history; room_id on Chat messages; 5 REST endpoints |
+| Audit logging | **Functional** | Logs to agentd ledger: connect, disconnect, message send/receive, health reports, alerts, DMs, room messages |
 | NixOS service | **Functional** | systemd unit, TCP 18800, hardening directives, state dir 0700 |
-| **Tests** | **26** | identity (5), handshake (3), messages (8+2), invite (3), peers (3), transport (2) |
+| **Tests** | **28** | identity (5), handshake (3), messages (7 + chat DM + room_id), invite (3), peers (3), transport (2), rooms (3) |
 | **Known limitation** | — | No persistent transport state across restarts — peers must re-invite after daemon restart |
 
 ### osmoda-egress — Egress Proxy
@@ -176,9 +180,9 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | routines-client.ts | **Functional** | HTTP-over-Unix-socket client for routines |
 | voice-client.ts | **Functional** | HTTP-over-Unix-socket client with status, speak, transcribe, record, listen |
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
-| Tool registrations | **Functional** | **50 tools** verified (`grep -c registerTool index.ts` = 50). Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **54 tools** verified (`grep -c registerTool index.ts` = 54). Not integration-tested against live daemons |
 
-### Tool breakdown (50 total)
+### Tool breakdown (54 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -194,7 +198,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | receipt (agentd) | 3 | receipt_list, incident_create, incident_step |
 | voice | 5 | voice_status, voice_speak, voice_transcribe, voice_record, voice_listen |
 | backup (agentd) | 2 | backup_create, backup_list |
-| mesh | 7 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health |
+| mesh | 11 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health, mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history |
 | safety | 4 | safety_rollback, safety_status, safety_panic, safety_restart |
 
 ---
@@ -264,15 +268,15 @@ cargo test --workspace
 
 | Crate | Tests | What's tested |
 |-------|-------|---------------|
-| agentd | 20 | Agent card, incidents (5), backup pruning (2), hash chain (4), FTS5 search (5), service discovery (4) |
+| agentd | 22 | Agent card, incidents (5), backup pruning (2), hash chain (4), FTS5 search (5), service discovery (4), memory recall (2) |
 | osmoda-keyd | 21 | ETH+SOL sign/verify, keccak256 vector, encryption roundtrip, Argon2 KDF, decimal policy (8 tests), wallet delete, persistence, cache eviction, label limit |
 | osmoda-watch | 18 | Switch state machine (3), watcher persistence (2), health check serde, input validation (12) |
 | osmoda-routines | 17 | Cron parser (6), persistence (2), validation (7), command timeout, defaults |
 | osmoda-voice | 4 | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
-| osmoda-mesh | 26 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (8+2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2) |
+| osmoda-mesh | 28 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2), room create/join/history (3) |
 | agentctl | 0 | — |
 | osmoda-egress | 0 | — |
-| **Total** | **106** | **All pass** |
+| **Total** | **110** | **All pass** |
 
 ---
 

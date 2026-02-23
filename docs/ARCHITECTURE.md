@@ -34,7 +34,7 @@ RING 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 50 tools registered                 │
+│   osmoda-bridge plugin → 54 tools registered                 │
 │   Memory Backend → ZVEC search → injects into prompt (M1+)  │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │

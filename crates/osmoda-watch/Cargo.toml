@@ -15,7 +15,7 @@ uuid.workspace = true
 tokio-util.workspace = true
 
 axum = { version = "0.8", features = ["json"] }
-hyper = "1"
+hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = "0.5"
 chrono = { version = "0.4", features = ["serde"] }

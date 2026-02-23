@@ -266,13 +266,17 @@ log "Build complete."
 # ---------------------------------------------------------------------------
 log "Step 5: Installing OpenClaw AI gateway..."
 
+if ! command -v npm &>/dev/null; then
+  die "npm is required but not found. Install Node.js (>= 18) and retry."
+fi
+
 if ! command -v openclaw &>/dev/null; then
   mkdir -p "$OPENCLAW_DIR"
   cd "$OPENCLAW_DIR"
   if [ ! -f package.json ]; then
     npm init -y >/dev/null 2>&1
   fi
-  npm install openclaw 2>&1 | tail -3
+  npm install openclaw 2>&1 | tail -3 || die "Failed to install OpenClaw via npm. Check network and npm permissions."
   ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
   # NixOS: add to profile if /usr/local/bin doesn't work
   echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
@@ -398,61 +402,19 @@ fi
 log "Step 9: Starting services..."
 
 if [ "$OS_TYPE" = "nixos" ]; then
-  # On NixOS, services should be managed via osmoda.nix module, not imperative unit files.
-  # Start services directly if binaries exist, but don't write unit files.
-  log "NixOS detected. Use the osmoda.nix NixOS module for persistent service management."
-  log "Starting all daemons directly..."
-
-  mkdir -p "$RUN_DIR" "$STATE_DIR"
-  mkdir -p "$STATE_DIR"/{keyd/keys,watch,routines,mesh}
-  chmod 700 "$STATE_DIR/keyd" "$STATE_DIR/keyd/keys" "$STATE_DIR/mesh"
-
-  # Kill any existing daemon instances
-  pkill -f "agentd.*--socket" 2>/dev/null || true
-  pkill -f "osmoda-keyd" 2>/dev/null || true
-  pkill -f "osmoda-watch" 2>/dev/null || true
-  pkill -f "osmoda-routines" 2>/dev/null || true
-  pkill -f "osmoda-mesh" 2>/dev/null || true
-  rm -f "$RUN_DIR"/*.sock
-  sleep 1
-
-  # Start agentd (everything depends on this)
-  if [ -f "$INSTALL_DIR/bin/agentd" ]; then
-    nohup "$INSTALL_DIR/bin/agentd" --socket "$RUN_DIR/agentd.sock" --state-dir "$STATE_DIR" > /var/log/osmoda-agentd.log 2>&1 &
-    log "agentd started (PID $!)."
-    sleep 2
-  fi
-
-  # Start keyd
-  if [ -f "$INSTALL_DIR/bin/osmoda-keyd" ]; then
-    nohup "$INSTALL_DIR/bin/osmoda-keyd" --socket "$RUN_DIR/keyd.sock" --data-dir "$STATE_DIR/keyd" --policy-file "$STATE_DIR/keyd/policy.json" --agentd-socket "$RUN_DIR/agentd.sock" > /var/log/osmoda-keyd.log 2>&1 &
-    log "osmoda-keyd started (PID $!)."
-  fi
-
-  # Start watch
-  if [ -f "$INSTALL_DIR/bin/osmoda-watch" ]; then
-    nohup "$INSTALL_DIR/bin/osmoda-watch" --socket "$RUN_DIR/watch.sock" --agentd-socket "$RUN_DIR/agentd.sock" --data-dir "$STATE_DIR/watch" > /var/log/osmoda-watch.log 2>&1 &
-    log "osmoda-watch started (PID $!)."
-  fi
-
-  # Start routines
-  if [ -f "$INSTALL_DIR/bin/osmoda-routines" ]; then
-    nohup "$INSTALL_DIR/bin/osmoda-routines" --socket "$RUN_DIR/routines.sock" --agentd-socket "$RUN_DIR/agentd.sock" --routines-dir "$STATE_DIR/routines" > /var/log/osmoda-routines.log 2>&1 &
-    log "osmoda-routines started (PID $!)."
-  fi
-
-  # Start mesh
-  if [ -f "$INSTALL_DIR/bin/osmoda-mesh" ]; then
-    nohup "$INSTALL_DIR/bin/osmoda-mesh" --socket "$RUN_DIR/mesh.sock" --data-dir "$STATE_DIR/mesh" --agentd-socket "$RUN_DIR/agentd.sock" --listen-port 18800 > /var/log/osmoda-mesh.log 2>&1 &
-    log "osmoda-mesh started (PID $!)."
-  fi
-
-  # Skip systemd unit file creation
-  SKIP_SYSTEMD=true
-else
-  SKIP_SYSTEMD=false
-  SYSTEMD_DIR="/etc/systemd/system"
+  # On NixOS, the recommended path is the osmoda.nix NixOS module.
+  # But for install.sh bootstrap (e.g. fresh cloud server), write real systemd
+  # unit files to /etc/systemd/system/ — they work on NixOS alongside the module.
+  log "NixOS detected. Writing systemd unit files for persistent daemon management..."
+  log "For production use, prefer: services.osmoda.enable = true in configuration.nix"
 fi
+
+SKIP_SYSTEMD=false
+SYSTEMD_DIR="/etc/systemd/system"
+
+mkdir -p "$RUN_DIR" "$STATE_DIR"
+mkdir -p "$STATE_DIR"/{keyd/keys,watch,routines,mesh,config}
+chmod 700 "$STATE_DIR/keyd" "$STATE_DIR/keyd/keys" "$STATE_DIR/mesh"
 
 if [ "$SKIP_SYSTEMD" = false ]; then
 # agentd service
@@ -489,6 +451,12 @@ RestartSec=5
 WorkingDirectory=$WORKSPACE_DIR
 EnvironmentFile=-$STATE_DIR/config/env
 Environment=NODE_ENV=production
+Environment=OSMODA_SOCKET=$RUN_DIR/agentd.sock
+Environment=OSMODA_KEYD_SOCKET=$RUN_DIR/keyd.sock
+Environment=OSMODA_WATCH_SOCKET=$RUN_DIR/watch.sock
+Environment=OSMODA_ROUTINES_SOCKET=$RUN_DIR/routines.sock
+Environment=OSMODA_VOICE_SOCKET=$RUN_DIR/voice.sock
+Environment=OSMODA_MESH_SOCKET=$RUN_DIR/mesh.sock
 
 [Install]
 WantedBy=multi-user.target

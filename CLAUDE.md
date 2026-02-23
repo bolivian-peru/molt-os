@@ -28,7 +28,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (50 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (54 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
@@ -39,6 +39,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    backup_create, backup_list,
    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers,
    mesh_peer_send, mesh_peer_disconnect, mesh_health,
+   mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history,
    safety_rollback, safety_status, safety_panic, safety_restart.
 
 3. **osmoda-egress** (Rust) — localhost-only HTTP CONNECT proxy. Domain allowlist
@@ -149,7 +150,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 45 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 54 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines

@@ -56,8 +56,6 @@ struct VoiceState {
     piper_bin: String,
     piper_model: String,
     data_dir: PathBuf,
-    /// Will be used in M1 for forwarding transcriptions to agentd.
-    #[allow(dead_code)]
     agentd_socket: String,
 }
 
@@ -121,6 +119,36 @@ struct VoiceStatus {
     piper_model: String,
 }
 
+// === Agentd logging helper ===
+
+/// POST to agentd /memory/ingest over Unix socket. Best-effort — never blocks caller.
+async fn agentd_post(socket_path: &str, body: &str) -> anyhow::Result<()> {
+    use http_body_util::Full;
+    use hyper::body::Bytes;
+    use hyper::Request;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixStream;
+
+    let stream = UnixStream::connect(socket_path).await?;
+    let io = TokioIo::new(stream);
+
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            tracing::debug!(error = %e, "agentd connection closed");
+        }
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/memory/ingest")
+        .header("Content-Type", "application/json")
+        .body(Full::new(Bytes::from(body.to_string())))?;
+
+    let _resp = sender.send_request(req).await?;
+    Ok(())
+}
+
 // === Handlers ===
 
 async fn voice_status(State(state): State<SharedVoiceState>) -> Json<VoiceStatus> {
@@ -141,8 +169,25 @@ async fn voice_transcribe(
     Json(req): Json<TranscribeRequest>,
 ) -> Result<Json<TranscribeResponse>, (axum::http::StatusCode, String)> {
     let s = state.lock().await;
+    let agentd_socket = s.agentd_socket.clone();
     match stt::transcribe(&s.whisper_bin, &s.whisper_model, &req.audio_path).await {
-        Ok(result) => Ok(Json(result)),
+        Ok(result) => {
+            // Log transcription to agentd — best-effort, non-blocking
+            let body = serde_json::json!({
+                "source": "osmoda-voice",
+                "content": result.text,
+                "category": "voice.transcription",
+                "tags": ["voice", "transcription"],
+            });
+            if let Ok(body_str) = serde_json::to_string(&body) {
+                tokio::spawn(async move {
+                    if let Err(e) = agentd_post(&agentd_socket, &body_str).await {
+                        tracing::debug!(error = %e, "failed to log transcription to agentd (non-fatal)");
+                    }
+                });
+            }
+            Ok(Json(result))
+        }
         Err(e) => Err((
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("transcription failed: {e}"),
@@ -175,6 +220,7 @@ async fn voice_record(
     let data_dir = s.data_dir.clone();
     let whisper_bin = s.whisper_bin.clone();
     let whisper_model = s.whisper_model.clone();
+    let agentd_socket = s.agentd_socket.clone();
     drop(s); // Release lock during recording
 
     // Record audio clip via PipeWire
@@ -196,6 +242,21 @@ async fn voice_record(
     if should_transcribe {
         match stt::transcribe(&whisper_bin, &whisper_model, &audio_path).await {
             Ok(result) => {
+                // Log transcription to agentd — best-effort
+                let body = serde_json::json!({
+                    "source": "osmoda-voice",
+                    "content": result.text,
+                    "category": "voice.transcription",
+                    "tags": ["voice", "transcription", "record"],
+                });
+                if let Ok(body_str) = serde_json::to_string(&body) {
+                    let sock = agentd_socket.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = agentd_post(&sock, &body_str).await {
+                            tracing::debug!(error = %e, "failed to log record transcription to agentd (non-fatal)");
+                        }
+                    });
+                }
                 response.text = Some(result.text);
                 response.transcribe_duration_ms = Some(result.duration_ms);
             }

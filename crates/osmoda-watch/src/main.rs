@@ -47,6 +47,42 @@ pub struct WatchState {
     pub data_dir: String,
 }
 
+/// POST an event to agentd /events/log over Unix socket. Best-effort — never blocks caller.
+pub async fn agentd_post_event(socket_path: &str, event_type: &str, payload: &str) -> anyhow::Result<()> {
+    use http_body_util::Full;
+    use hyper::body::Bytes;
+    use hyper::Request;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::UnixStream;
+
+    let body = serde_json::json!({
+        "source": "osmoda-watch",
+        "content": payload,
+        "category": event_type,
+        "tags": ["watch", event_type],
+    });
+    let body_str = serde_json::to_string(&body)?;
+
+    let stream = UnixStream::connect(socket_path).await?;
+    let io = TokioIo::new(stream);
+
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            tracing::debug!(error = %e, "agentd connection closed");
+        }
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/memory/ingest")
+        .header("Content-Type", "application/json")
+        .body(Full::new(Bytes::from(body_str)))?;
+
+    let _resp = sender.send_request(req).await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -167,10 +203,25 @@ async fn watcher_loop(state: Arc<Mutex<WatchState>>, check_interval: u64, cancel
             }
             _ = interval.tick() => {
                 let mut st = state.lock().await;
+                let agentd_socket = st.agentd_socket.clone();
                 for watcher in &mut st.watchers {
                     let actions = watcher::run_watcher_cycle(watcher).await;
-                    for action in actions {
+                    for action in &actions {
                         tracing::info!(watcher = %watcher.name, action = %action, "watcher action");
+                    }
+                    // Log escalation events to agentd (best-effort)
+                    if !actions.is_empty() {
+                        let watcher_name = watcher.name.clone();
+                        let payload = serde_json::json!({
+                            "watcher": watcher_name,
+                            "actions": actions.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
+                        }).to_string();
+                        let sock = agentd_socket.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = agentd_post_event(&sock, "watch.watcher.escalation", &payload).await {
+                                tracing::debug!(error = %e, "failed to log watcher escalation to agentd (non-fatal)");
+                            }
+                        });
                     }
                 }
             }
@@ -190,6 +241,7 @@ async fn switch_probation_loop(state: Arc<Mutex<WatchState>>, cancel: Cancellati
             }
             _ = interval.tick() => {
                 let mut st = state.lock().await;
+                let agentd_socket = st.agentd_socket.clone();
                 let active_ids: Vec<String> = st
                     .switches
                     .values()
@@ -216,9 +268,39 @@ async fn switch_probation_loop(state: Arc<Mutex<WatchState>>, cancel: Cancellati
                                 "health check failed, rolling back"
                             );
 
-                            if let Err(e) = switch::rollback_generation().await {
+                            // Log rollback.triggered to agentd (best-effort)
+                            let payload = serde_json::json!({
+                                "switch_id": id,
+                                "reason": "health_check_failure",
+                                "failures": failures,
+                            }).to_string();
+                            let sock = agentd_socket.clone();
+                            let id_for_log = id.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = agentd_post_event(&sock, "watch.rollback.triggered", &payload).await {
+                                    tracing::debug!(error = %e, switch_id = %id_for_log, "failed to log rollback.triggered (non-fatal)");
+                                }
+                            });
+
+                            let rollback_result = switch::rollback_generation().await;
+                            let rollback_ok = rollback_result.is_ok();
+                            if let Err(e) = rollback_result {
                                 tracing::error!(error = %e, "auto-rollback failed");
                             }
+
+                            // Log rollback.result to agentd (best-effort)
+                            let result_payload = serde_json::json!({
+                                "switch_id": id,
+                                "success": rollback_ok,
+                                "generation": session.previous_generation,
+                            }).to_string();
+                            let sock2 = agentd_socket.clone();
+                            let id_for_log2 = id.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = agentd_post_event(&sock2, "watch.rollback.result", &result_payload).await {
+                                    tracing::debug!(error = %e, switch_id = %id_for_log2, "failed to log rollback.result (non-fatal)");
+                                }
+                            });
 
                             if let Some(s) = st.switches.get_mut(&id) {
                                 s.status = SwitchStatus::RolledBack {
@@ -243,11 +325,43 @@ async fn switch_probation_loop(state: Arc<Mutex<WatchState>>, cancel: Cancellati
                             };
                         }
                     } else {
-                        // Auto-rollback
+                        // Auto-rollback on TTL expiry
                         tracing::warn!(switch_id = %id, "TTL expired, checks failed — auto-rollback");
-                        if let Err(e) = switch::rollback_generation().await {
+
+                        // Log rollback.triggered to agentd (best-effort)
+                        let payload = serde_json::json!({
+                            "switch_id": id,
+                            "reason": "ttl_expired_with_failures",
+                            "failures": failures,
+                        }).to_string();
+                        let sock = agentd_socket.clone();
+                        let id_for_log = id.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = agentd_post_event(&sock, "watch.rollback.triggered", &payload).await {
+                                tracing::debug!(error = %e, switch_id = %id_for_log, "failed to log rollback.triggered (non-fatal)");
+                            }
+                        });
+
+                        let rollback_result = switch::rollback_generation().await;
+                        let rollback_ok = rollback_result.is_ok();
+                        if let Err(e) = rollback_result {
                             tracing::error!(error = %e, "auto-rollback failed");
                         }
+
+                        // Log rollback.result to agentd (best-effort)
+                        let result_payload = serde_json::json!({
+                            "switch_id": id,
+                            "success": rollback_ok,
+                            "generation": session.previous_generation,
+                        }).to_string();
+                        let sock2 = agentd_socket.clone();
+                        let id_for_log2 = id.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = agentd_post_event(&sock2, "watch.rollback.result", &result_payload).await {
+                                tracing::debug!(error = %e, switch_id = %id_for_log2, "failed to log rollback.result (non-fatal)");
+                            }
+                        });
+
                         if let Some(s) = st.switches.get_mut(&id) {
                             s.status = SwitchStatus::RolledBack {
                                 reason: format!("TTL expired with failures: {}", failures.join("; ")),

@@ -241,9 +241,8 @@ fn cmd_stats(state_dir: &PathBuf) -> Result<()> {
 }
 
 fn cmd_health(socket: &PathBuf) -> Result<()> {
-    // For now, print a message about connecting to the socket
-    // Full HTTP-over-Unix-socket client will be added when we have hyper client setup
-    println!("Checking agentd health at {}...", socket.display());
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
 
     if !socket.exists() {
         anyhow::bail!(
@@ -252,6 +251,26 @@ fn cmd_health(socket: &PathBuf) -> Result<()> {
         );
     }
 
-    println!("Socket exists. Use `curl --unix-socket {} http://localhost/health` to query.", socket.display());
+    let mut stream = UnixStream::connect(socket)
+        .with_context(|| format!("Failed to connect to agentd at {}", socket.display()))?;
+
+    // HTTP/1.0 so server closes connection after response (no keep-alive needed)
+    stream.write_all(b"GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n")
+        .context("Failed to send health request")?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response)
+        .context("Failed to read health response")?;
+
+    // Strip HTTP headers — body starts after first blank line
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b)
+        .unwrap_or(&response);
+
+    let val: serde_json::Value = serde_json::from_str(body)
+        .with_context(|| format!("Failed to parse health response: {body}"))?;
+
+    println!("{}", serde_json::to_string_pretty(&val)?);
     Ok(())
 }

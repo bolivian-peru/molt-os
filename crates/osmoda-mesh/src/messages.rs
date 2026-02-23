@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::identity::MeshPublicIdentity;
-
 /// Severity levels for mesh alerts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -32,28 +30,9 @@ pub enum MeshMessage {
     Chat {
         from: String,
         text: String,
-    },
-    LedgerSync {
-        events: Vec<serde_json::Value>,
-        since: String,
-    },
-    Command {
-        id: String,
-        command: String,
-        args: serde_json::Value,
-    },
-    CommandResponse {
-        command_id: String,
-        status: String,
-        result: serde_json::Value,
-    },
-    PeerAnnounce {
-        identity: MeshPublicIdentity,
-    },
-    KeyRotation {
-        new_noise_pubkey: String,
-        new_mlkem_ek: String,
-        signature: String,
+        /// None = direct message; Some(id) = group room message
+        #[serde(skip_serializing_if = "Option::is_none")]
+        room_id: Option<String>,
     },
     PqExchange {
         /// base64-encoded ML-KEM ciphertext
@@ -148,59 +127,41 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_roundtrip_chat() {
+    fn test_serde_roundtrip_chat_dm() {
         let msg = MeshMessage::Chat {
             from: "admin".to_string(),
             text: "hello peer".to_string(),
+            room_id: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
+        // room_id should be absent when None
+        assert!(!json.contains("room_id"), "room_id should be absent for DMs");
         let decoded: MeshMessage = serde_json::from_str(&json).unwrap();
         match decoded {
-            MeshMessage::Chat { from, text } => {
+            MeshMessage::Chat { from, text, room_id } => {
                 assert_eq!(from, "admin");
                 assert_eq!(text, "hello peer");
+                assert!(room_id.is_none());
             }
             _ => panic!("wrong variant"),
         }
     }
 
     #[test]
-    fn test_serde_roundtrip_command() {
-        let msg = MeshMessage::Command {
-            id: "cmd-1".to_string(),
-            command: "health_check".to_string(),
-            args: serde_json::json!({"verbose": true}),
+    fn test_chat_with_room_id() {
+        let msg = MeshMessage::Chat {
+            from: "agent-a".to_string(),
+            text: "hello room".to_string(),
+            room_id: Some("room-123".to_string()),
         };
         let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("room_id"), "room_id should be present");
         let decoded: MeshMessage = serde_json::from_str(&json).unwrap();
         match decoded {
-            MeshMessage::Command { id, command, args } => {
-                assert_eq!(id, "cmd-1");
-                assert_eq!(command, "health_check");
-                assert_eq!(args["verbose"], true);
-            }
-            _ => panic!("wrong variant"),
-        }
-    }
-
-    #[test]
-    fn test_serde_roundtrip_command_response() {
-        let msg = MeshMessage::CommandResponse {
-            command_id: "cmd-1".to_string(),
-            status: "ok".to_string(),
-            result: serde_json::json!({"output": "all good"}),
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        let decoded: MeshMessage = serde_json::from_str(&json).unwrap();
-        match decoded {
-            MeshMessage::CommandResponse {
-                command_id,
-                status,
-                result,
-            } => {
-                assert_eq!(command_id, "cmd-1");
-                assert_eq!(status, "ok");
-                assert_eq!(result["output"], "all good");
+            MeshMessage::Chat { from, text, room_id } => {
+                assert_eq!(from, "agent-a");
+                assert_eq!(text, "hello room");
+                assert_eq!(room_id, Some("room-123".to_string()));
             }
             _ => panic!("wrong variant"),
         }

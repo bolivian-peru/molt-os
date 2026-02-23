@@ -344,6 +344,11 @@ in {
       environment = {
         NODE_ENV = "production";
         OSMODA_SOCKET = cfg.agentd.socketPath;
+        OSMODA_KEYD_SOCKET = cfg.keyd.socketPath;
+        OSMODA_WATCH_SOCKET = cfg.watch.socketPath;
+        OSMODA_ROUTINES_SOCKET = cfg.routines.socketPath;
+        OSMODA_VOICE_SOCKET = cfg.voice.socketPath;
+        OSMODA_MESH_SOCKET = cfg.mesh.socketPath;
         HOME = cfg.stateDir;
       };
     };
@@ -489,7 +494,8 @@ in {
       description = "osModa Voice Daemon (STT + TTS)";
       wantedBy = [ "multi-user.target" ];
       after = [ "osmoda-agentd.service" "pipewire.service" ];
-      requires = [ "osmoda-agentd.service" "pipewire.service" ];
+      requires = [ "osmoda-agentd.service" ];
+      wants = [ "pipewire.service" ];
 
       serviceConfig = {
         Type = "simple";
@@ -560,6 +566,8 @@ in {
     # ===== BACKUP TIMER =====
     systemd.services.osmoda-backup = {
       description = "osModa daily backup";
+      after = [ "osmoda-agentd.service" ];
+      requires = [ "osmoda-agentd.service" ];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${pkgs.curl}/bin/curl -s --unix-socket ${cfg.agentd.socketPath} http://localhost/backup/create -X POST";
@@ -573,6 +581,7 @@ in {
         OnCalendar = "*-*-* 03:00:00";
         Persistent = true;
         RandomizedDelaySec = "15min";
+        Unit = "osmoda-backup.service";
       };
     };
 

@@ -14,7 +14,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 axum = { version = "0.8", features = ["json"] }
-hyper = "1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 tower = "0.5"
 uuid.workspace = true
 

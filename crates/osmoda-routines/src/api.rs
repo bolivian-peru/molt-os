@@ -109,6 +109,7 @@ pub async fn routine_trigger_handler(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
     let mut st = state.lock().await;
+    let agentd_socket = st.agentd_socket.clone();
     let routine = st
         .routines
         .iter_mut()
@@ -126,7 +127,7 @@ pub async fn routine_trigger_handler(
     // Release the lock before executing
     drop(st);
 
-    let result = crate::routine::execute_action(&action).await;
+    let result = crate::routine::execute_action(&action, &agentd_socket).await;
     match &result {
         Ok(output) => {
             tracing::info!(routine = %name, "manual trigger succeeded");

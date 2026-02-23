@@ -3,8 +3,9 @@ use serde::Serialize;
 
 /// Logs mesh operations to the agentd ledger via HTTP-over-Unix-socket.
 /// Same pattern as keyd/receipt.rs.
+#[derive(Clone)]
 pub struct ReceiptLogger {
-    agentd_socket: String,
+    pub agentd_socket: String,
 }
 
 #[derive(Debug, Serialize)]

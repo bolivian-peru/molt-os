@@ -2,7 +2,7 @@
 
 Last updated: 2026-02-23
 
-Current state: 97 tests passing, 7 Rust daemons + 1 CLI, 45 bridge tools, 15 skills.
+Current state: 110 tests passing, 8 Rust crates (7 daemons + 1 CLI), 54 bridge tools, 15 skills.
 This document covers what's being added next, in priority order.
 
 ---
@@ -142,51 +142,74 @@ services.osmoda.channels.discord = {
 
 ---
 
-## Sprint 2 — Intelligence + Reliability (Next Week)
+## Sprint 2 — Ecosystem + Payments (Next Week)
 
-### 5. Service Discovery Tool
+### 5. osmoda-mcpd — MCP Server Manager
 
-**What it does:** The AI asks "what's running on this server?" and gets a real answer — not a hardcoded list of things we thought might be there. Discovers running services, listening ports, API endpoints.
+**What it does:** Makes any MCP server a first-class osModa capability. The AI gets web scraping, database access, GitHub tools, and any other MCP server without writing a single line of bridge code.
 
-**Tool:** `system_discover`
+**Design:** see `docs/MCP-ECOSYSTEM.md`
 
-```json
-{
-  "found": [
-    { "name": "nginx", "port": 80, "pid": 1234, "health_url": "http://localhost/health" },
-    { "name": "postgres", "port": 5432, "pid": 5678 },
-    { "name": "redis", "port": 6379, "pid": 9012 },
-    { "name": "my-api", "port": 3000, "pid": 3456, "detected_as": "node" }
-  ]
-}
+Small Rust daemon that manages MCP server processes (starts, restarts, health monitors), generates OpenClaw config entries for each, and routes outbound traffic through the egress proxy.
+
+**NixOS config:**
+```nix
+services.osmoda.mcp.servers = {
+  scrapling.enable = true;
+  scrapling.allowedDomains = [ "*.github.com" ];
+  postgres.enable = true;
+  github.enable = true;
+  github.secretFile = "/var/lib/osmoda/secrets/github-token";
+};
 ```
 
-**Why this matters:** Right now osModa knows about the services we hardcoded into AGENTS.md. If you install nginx after setup, the AI doesn't "see" it unless you tell it. With service discovery, the AI genuinely knows what's on your machine — scanning `ss -tlnp`, reading `/etc/systemd/system/`, checking `/proc`.
-
-Inspired by RosClaw's `ros2-introspect` tool — the robot AI dynamically discovers what capabilities the robot has. Same principle: OS AI dynamically discovers what's running.
-
-**Files:** `crates/agentd/src/api/` (new `discovery.rs`, ~150 LOC), `packages/osmoda-bridge/index.ts` (~30 LOC)
+**Files:** `crates/osmoda-mcpd/` (~400 LOC), `nix/modules/osmoda.nix` (~60 LOC)
 
 ---
 
-### 6. FTS5 Memory Recall
+### 6. x402 OS-Native Micropayments
 
-**What it does:** Makes `memory_recall` actually return results. Currently returns empty — ZVEC vector search is unimplemented. Replace with SQLite FTS5 keyword search over the ledger.
+**What it does:** When any daemon or MCP server makes an HTTP request and gets a `402 Payment Required`, osmoda-egress intercepts it, osmoda-keyd signs a USDC payment (ERC-3009) within policy, retries the request, logs to ledger. Fully transparent — callers see a normal 200 response.
 
-**Reality check:** Full vector search (ZVEC, nomic embeddings) is correct long-term. But the infrastructure adds 500MB+ and significant complexity. FTS5 is built into SQLite, zero dependencies, handles keyword search well for event recall.
+**Design:** see `docs/X402.md`
+
+osModa already has ETH wallets (osmoda-keyd), a policy engine (daily limits, per-domain), and an HTTP proxy (osmoda-egress). x402 wires them together.
+
+**NixOS config:**
+```nix
+services.osmoda.keyd.x402 = {
+  enable = true;
+  dailyBudgetUsd = "1.00";
+  allowedDomains = [ "api.quicknode.com" "api.anthropic.com" ];
+};
+```
+
+**Files:** `crates/osmoda-keyd/src/api.rs` (~100 LOC), `crates/osmoda-egress/src/main.rs` (~80 LOC), bridge tools (~40 LOC)
+
+---
+
+### 7. Semantic Memory (usearch + fastembed)
+
+**What it does:** Upgrades `memory_recall` from keyword-only (FTS5, already live) to hybrid keyword + semantic search. Catches queries like "times the server struggled" even when logs say "high load" or "cpu spike".
+
+**Why not ZVEC, why not PageIndex:**
+- ZVEC: 500MB+ model, Python sidecar, significant complexity
+- PageIndex: cloud API, data leaves the machine (violates principle #3)
+
+**The right stack:** `fastembed-rs` (pure Rust, ~22MB all-MiniLM model, ONNX runtime) + `usearch` (in-process C++ vector search, Rust bindings). Zero new daemons. Zero Python. Runs fully inside agentd.
 
 **What changes:**
-- Add FTS5 virtual table to `ledger.rs`: indexed on `type + actor + payload`
-- Implement `memory_recall` as BM25-ranked FTS5 query
-- Bridge `memory_recall` tool returns real results
+- agentd gains two new Cargo deps: `fastembed` + `usearch`
+- Model downloads to `/var/lib/osmoda/memory/model/` on first boot (22MB)
+- `memory/ingest` embeds events in background (non-blocking, FTS5 is immediate)
+- `memory/recall` runs FTS5 first, then usearch, RRF-merges ranked results
+- FTS5 remains live fallback while model loads
 
-**Later:** When ZVEC is ready, FTS5 becomes the hybrid complement (BM25 + vector via RRF), not a replacement.
-
-**Files:** `crates/agentd/src/ledger.rs` (~40 LOC), `crates/agentd/src/api/memory.rs` (~50 LOC)
+**Files:** `crates/agentd/Cargo.toml` (+2 deps), `crates/agentd/src/api/memory.rs` (~100 LOC)
 
 ---
 
-### 7. Zod Config Validation in Bridge
+### 9. Zod Config Validation in Bridge
 
 **What it does:** Validates all bridge configuration (socket paths, timeouts, env vars) at startup with clear error messages. Learned from RosClaw — they validate plugin config via Zod schema before the plugin loads.
 
@@ -389,19 +412,22 @@ osModa web UI (same as SSH tunnel, but browser-native)
 | # | Feature | Sprint | Effort | Impact |
 |---|---------|--------|--------|--------|
 | — | **osmoda-mesh P2P** | **DONE** | **3 days** | **Encrypted server-to-server, PQ-safe** |
+| — | **FTS5 memory recall** | **DONE** | — | **Memory recall works (BM25 keyword search)** |
+| — | **Service discovery** | **DONE** | — | **AI sees all running services dynamically** |
 | 1 | Cloudflare Tunnel integration | 1 | 0.5 day | Home server users can access from anywhere |
 | 2 | Tailscale integration | 1 | 0.5 day | Team/VPN mesh access |
 | 3 | Safety slash commands | 1 | 1 day | Production safety net |
 | 4 | Discord channel | 1 | 0.5 day | Developer audience |
-| 5 | Service discovery tool | 2 | 2 days | AI genuinely knows what's on the machine |
-| 6 | FTS5 memory recall | 2 | 1 day | Memory actually works |
-| 7 | Zod config validation | 2 | 0.5 day | Developer experience, fail-fast |
-| 8 | Mobile status dashboard | 3 | 1 day | Quick phone health check |
-| 9 | Daily Telegram briefing | 3 | 1 day | Proactive awareness |
-| 10 | Multi-server management | 4 | 1 week | Fleet view, AI queries all servers at once |
-| 11 | Spawn peer discovery | 4 | 3 days | Auto-connect provisioned servers via mesh |
-| 12 | A2UI live dashboard | 4 | 1 week | Product differentiator, native apps |
-| 13 | WebRTC via spawn.os.moda | 5 | 2 weeks | Browser-native access, no install |
+| 5 | osmoda-mcpd MCP manager | 2 | 2 days | Any MCP server becomes an OS capability |
+| 6 | x402 OS-native payments | 2 | 2 days | AI pays for APIs autonomously within policy |
+| 7 | Semantic memory (usearch) | 2 | 2 days | Hybrid BM25 + vector recall |
+| 8 | Zod config validation | 2 | 0.5 day | Developer experience, fail-fast |
+| 9 | Mobile status dashboard | 3 | 1 day | Quick phone health check |
+| 10 | Daily Telegram briefing | 3 | 1 day | Proactive awareness |
+| 11 | Multi-server management | 4 | 1 week | Fleet view, AI queries all servers at once |
+| 12 | Spawn peer discovery | 4 | 3 days | Auto-connect provisioned servers via mesh |
+| 13 | A2UI live dashboard | 4 | 1 week | Product differentiator, native apps |
+| 14 | WebRTC via spawn.os.moda | 5 | 2 weeks | Browser-native access, no install |
 
 ---
 
@@ -422,3 +448,7 @@ These come from RosClaw analysis + code-simplifier philosophy:
 6. **Narrow tools over wide tools** — A `service_discover` tool that returns structured data is better than `shell_exec ls /proc`. Structure enables AI reasoning; raw output requires more prompt tokens.
 
 7. **Cryptography is not optional** — osmoda-mesh ships with post-quantum key exchange by default. Security degrades gracefully (if PQ breaks, classical protects), never silently.
+
+8. **MCP over bespoke integrations** — New capabilities come via MCP servers managed by osmoda-mcpd, not new bridge code. osmoda-bridge is the OS layer. Everything else is a managed MCP server.
+
+9. **Payments are OS infrastructure** — x402 micropayments belong in osmoda-egress + osmoda-keyd, not in application code. The AI pays for API calls the same way the OS handles syscalls: transparently, within policy, with an audit trail.

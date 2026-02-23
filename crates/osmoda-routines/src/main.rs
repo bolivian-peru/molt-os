@@ -157,7 +157,8 @@ async fn scheduler_loop(state: Arc<Mutex<RoutinesState>>, cancel: CancellationTo
                     .map(|(i, _)| i)
                     .collect();
 
-                // Execute due routines (clone action to release lock)
+                // Execute due routines (clone action + socket to release lock)
+                let agentd_socket = st.agentd_socket.clone();
                 let actions: Vec<(usize, String, routine::RoutineAction)> = due
                     .iter()
                     .filter_map(|&i| {
@@ -171,7 +172,7 @@ async fn scheduler_loop(state: Arc<Mutex<RoutinesState>>, cancel: CancellationTo
                 drop(st);
 
                 for (idx, name, action) in actions {
-                    let result = routine::execute_action(&action).await;
+                    let result = routine::execute_action(&action, &agentd_socket).await;
                     match &result {
                         Ok(output) => {
                             tracing::debug!(routine = %name, output_len = output.len(), "routine completed");

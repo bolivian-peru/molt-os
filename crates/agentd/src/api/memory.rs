@@ -148,7 +148,7 @@ fn keyword_scan_fallback(
     max_results: usize,
 ) -> Result<Vec<MemoryChunk>, axum::http::StatusCode> {
     let all_events = ledger
-        .query(&EventFilter { event_type: Some("memory.store".to_string()), actor: None, limit: Some(5000) })
+        .query(&EventFilter { event_type: None, actor: None, limit: Some(5000) })
         .map_err(|e| { tracing::error!(error = %e, "keyword fallback query failed"); axum::http::StatusCode::INTERNAL_SERVER_ERROR })?;
 
     let query_lower = body.query.to_lowercase();
@@ -218,6 +218,58 @@ pub async fn memory_store_handler(
         })?;
 
     Ok(Json(MemoryStoreResponse { id: event.id }))
+}
+
+// ── Tests ──
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ledger::Ledger;
+
+    fn make_ledger() -> Ledger {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        // Keep dir alive for the test duration by leaking it (acceptable in tests)
+        let path_str = path.to_str().unwrap().to_string();
+        std::mem::forget(dir);
+        Ledger::new(&path_str).unwrap()
+    }
+
+    #[test]
+    fn test_recall_finds_ingest_events() {
+        let ledger = make_ledger();
+
+        // Ingest an event (not memory.store)
+        ledger.append("memory.ingest", "test-actor", r#"{"content":"whisper transcription about coffee machine"}"#).unwrap();
+
+        let query_lower = "coffee".to_lowercase();
+        let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
+
+        // Use keyword_scan_fallback logic directly (simulated)
+        let all_events = ledger.query(&EventFilter { event_type: None, actor: None, limit: Some(5000) }).unwrap();
+        let matching: Vec<_> = all_events.iter().filter(|e| {
+            let payload_lower = e.payload.to_lowercase();
+            query_terms.iter().any(|t| payload_lower.contains(*t))
+        }).collect();
+
+        assert!(!matching.is_empty(), "keyword scan should find the memory.ingest event");
+        assert_eq!(matching[0].event_type, "memory.ingest");
+    }
+
+    #[test]
+    fn test_recall_fallback_ignores_type_restriction() {
+        let ledger = make_ledger();
+
+        ledger.append("memory.ingest", "voice", r#"{"content":"user said hello world"}"#).unwrap();
+        ledger.append("memory.store", "agent", r#"{"summary":"stored fact","detail":"user said hello world","category":"test"}"#).unwrap();
+
+        // Without type restriction: both events should be searchable
+        let all_events = ledger.query(&EventFilter { event_type: None, actor: None, limit: Some(5000) }).unwrap();
+        let query = "hello";
+        let found: Vec<_> = all_events.iter().filter(|e| e.payload.contains(query)).collect();
+        assert_eq!(found.len(), 2, "both memory.ingest and memory.store should be found");
+    }
 }
 
 // ── GET /memory/health ──

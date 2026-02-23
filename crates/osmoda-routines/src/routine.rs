@@ -121,7 +121,7 @@ impl Routine {
 }
 
 /// Execute a routine action. Returns output string.
-pub async fn execute_action(action: &RoutineAction) -> Result<String, String> {
+pub async fn execute_action(action: &RoutineAction, agentd_socket: &str) -> Result<String, String> {
     match action {
         RoutineAction::HealthCheck => {
             // Simple health check — run system health via shell
@@ -169,7 +169,7 @@ pub async fn execute_action(action: &RoutineAction) -> Result<String, String> {
             })
         }
         RoutineAction::MemoryMaintenance => {
-            memory_maintenance().await
+            memory_maintenance(agentd_socket).await
         }
         RoutineAction::Command { cmd, args } => {
             validate_command(cmd)?;
@@ -213,8 +213,7 @@ pub async fn execute_action(action: &RoutineAction) -> Result<String, String> {
 
 /// Consolidate recent ledger events into a memory summary.
 /// Fetches recent events from agentd, counts by type, and stores a summary.
-async fn memory_maintenance() -> Result<String, String> {
-    let socket = "/run/osmoda/agentd.sock";
+async fn memory_maintenance(socket: &str) -> Result<String, String> {
 
     // Fetch recent events from agentd
     let events_json = agentd_get(socket, "/events/log?limit=50").await.map_err(|e| {
@@ -386,7 +385,7 @@ mod tests {
             cmd: "/bin/sleep".to_string(),
             args: vec!["60".to_string()],
         };
-        let result = execute_action(&action).await;
+        let result = execute_action(&action, "/run/osmoda/agentd.sock").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("timed out"));
     }

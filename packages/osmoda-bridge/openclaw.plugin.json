@@ -2,7 +2,7 @@
   "id": "osmoda-bridge",
   "kind": "tools",
   "name": "osModa Bridge",
-  "description": "45 system tools connecting OpenClaw to all osModa daemons (agentd, keyd, watch, routines, voice, mesh)",
+  "description": "54 system tools connecting OpenClaw to all osModa daemons (agentd, keyd, watch, routines, voice, mesh)",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",

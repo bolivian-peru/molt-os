@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 50 tools registered:
+ * 54 tools registered:
  *   agentd:  system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:  shell_exec, file_read, file_write, directory_list (4)
  *   systemd: service_status, journal_logs (2)
@@ -17,7 +17,8 @@
  *   receipt: receipt_list, incident_create, incident_step (3, via agentd)
  *   voice:   voice_status, voice_speak, voice_transcribe, voice_record, voice_listen (5, via osmoda-voice)
  *   backup:  backup_create, backup_list (2, via agentd)
- *   mesh:    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health (7, via osmoda-mesh)
+ *   mesh:    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health,
+ *            mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history (11, via osmoda-mesh)
  *   safety:  safety_rollback, safety_status, safety_panic, safety_restart (4, direct shell)
  */
 
@@ -1162,6 +1163,96 @@ export default function register(api: any) {
       }
     },
   }), { names: ["mesh_health"] });
+
+  // --- mesh_room_create ---
+  api.registerTool(() => ({
+    name: "mesh_room_create",
+    label: "Mesh Room Create",
+    description: "Create a named group room for multi-peer communication over the encrypted mesh network.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Room name" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("POST", "/room/create", { name: params.name }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_room_create"] });
+
+  // --- mesh_room_join ---
+  api.registerTool(() => ({
+    name: "mesh_room_join",
+    label: "Mesh Room Join",
+    description: "Add a connected peer to a group room so they receive room messages.",
+    parameters: {
+      type: "object",
+      properties: {
+        room_id: { type: "string", description: "Room ID to join" },
+        peer_id: { type: "string", description: "Peer instance ID to add to the room" },
+      },
+      required: ["room_id", "peer_id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("POST", "/room/join", { room_id: params.room_id, peer_id: params.peer_id }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_room_join"] });
+
+  // --- mesh_room_send ---
+  api.registerTool(() => ({
+    name: "mesh_room_send",
+    label: "Mesh Room Send",
+    description: "Send a message to all connected members of a group room. Primary tool for multi-agent group communication.",
+    parameters: {
+      type: "object",
+      properties: {
+        room_id: { type: "string", description: "Room ID to send to" },
+        text: { type: "string", description: "Message text to broadcast to the room" },
+      },
+      required: ["room_id", "text"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("POST", "/room/send", { room_id: params.room_id, text: params.text }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_room_send"] });
+
+  // --- mesh_room_history ---
+  api.registerTool(() => ({
+    name: "mesh_room_history",
+    label: "Mesh Room History",
+    description: "Retrieve recent messages from a group room. Use for context injection before responding in a group conversation.",
+    parameters: {
+      type: "object",
+      properties: {
+        room_id: { type: "string", description: "Room ID to fetch history for" },
+        limit: { type: "number", description: "Max messages to return (default 50)" },
+      },
+      required: ["room_id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const p = new URLSearchParams();
+        p.set("room_id", String(params.room_id));
+        if (params.limit) p.set("limit", String(params.limit));
+        return { output: await meshRequest("GET", "/room/history?" + p.toString()) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_room_history"] });
 
   // =========================================================================
   // Safety commands — bypass AI, direct system action
