@@ -245,7 +245,7 @@ rm -f "$BUILD_LOG"
 
 # Create bin directory and symlinks
 mkdir -p "$INSTALL_DIR/bin"
-for binary in agentd agentctl osmoda-egress; do
+for binary in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice; do
   if [ -f "target/release/$binary" ]; then
     ln -sf "$INSTALL_DIR/target/release/$binary" "$INSTALL_DIR/bin/$binary"
     log "Built: $binary"
