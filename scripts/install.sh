@@ -287,18 +287,19 @@ log "OpenClaw installed."
 log "Step 6: Setting up osmoda-bridge plugin..."
 
 PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
-PLUGIN_DST="$INSTALL_DIR/osmoda-bridge-plugin"
+PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
 
-# Copy plugin files (not symlink — avoids path issues)
-mkdir -p "$PLUGIN_DST"
-cp "$PLUGIN_SRC"/*.ts "$PLUGIN_DST/"
-cp "$PLUGIN_SRC"/*.json "$PLUGIN_DST/"
+# Copy plugin to OpenClaw extensions (chown root — OpenClaw blocks non-root plugins)
+mkdir -p /root/.openclaw/extensions
+rm -rf "$PLUGIN_DST"
+cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
+chown -R root:root "$PLUGIN_DST"
 
-# Register plugin with OpenClaw
+# Configure OpenClaw
 mkdir -p /root/.openclaw
 openclaw config set gateway.mode local 2>/dev/null || true
 openclaw config set gateway.auth.mode none 2>/dev/null || true
-openclaw plugins install --link "$PLUGIN_DST" 2>/dev/null || true
+openclaw config set plugins.allow '["osmoda-bridge", "device-pair", "memory-core", "phone-control", "talk-voice"]' 2>/dev/null || true
 
 log "Bridge plugin installed with 50 system tools."
 
@@ -359,23 +360,17 @@ if [ -n "$API_KEY" ]; then
   printf 'ANTHROPIC_API_KEY=%s\n' "$API_KEY" > "$STATE_DIR/config/env"
   chmod 600 "$STATE_DIR/config/env"
 
-  # Write OpenClaw auth-profiles.json (the format OpenClaw actually reads)
+  # Write OpenClaw auth-profiles.json
+  # Auto-detects: sk-ant-oat01- = OAuth token, sk-ant-api03- = API key
   mkdir -p /root/.openclaw/agents/main/agent
   if command -v node &>/dev/null; then
     node -e "
       const fs = require('fs');
-      const auth = {
-        profiles: {
-          'anthropic:manual': {
-            provider: 'anthropic',
-            kind: 'api-key',
-            token: process.argv[1],
-            createdAt: new Date().toISOString(),
-            label: 'manual'
-          }
-        },
-        order: ['anthropic:manual']
-      };
+      const key = process.argv[1];
+      const isOAuth = key.startsWith('sk-ant-oat');
+      const auth = isOAuth
+        ? { type: 'token', provider: 'anthropic', token: key }
+        : { type: 'api_key', provider: 'anthropic', key: key };
       fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
     " "$API_KEY"
   fi

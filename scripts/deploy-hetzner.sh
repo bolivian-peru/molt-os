@@ -251,17 +251,16 @@ printf 'export PATH="%s/node_modules/.bin:$PATH"\n' "$OPENCLAW_DIR" > /etc/profi
 
 echo "[deploy] OpenClaw version: $(openclaw --version 2>/dev/null || echo 'installed')"
 
-# Set up plugin directory
-PLUGIN_DIR="/root/.openclaw/plugins/osmoda-bridge"
-mkdir -p /root/.openclaw/plugins
+# Copy plugin to OpenClaw extensions directory (not symlink — avoids ownership issues)
+# OpenClaw blocks plugins with non-root ownership on NixOS
+PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
+mkdir -p /root/.openclaw/extensions
+rm -rf "$PLUGIN_DST"
+cp -r /opt/osmoda/packages/osmoda-bridge "$PLUGIN_DST"
+chown -R root:root "$PLUGIN_DST"
 
-# Symlink the plugin from the repo
-echo "[deploy] Linking osmoda-bridge plugin..."
-rm -rf "$PLUGIN_DIR"
-ln -sf /opt/osmoda/packages/osmoda-bridge "$PLUGIN_DIR"
-
-echo "[deploy] Plugin linked: $PLUGIN_DIR -> /opt/osmoda/packages/osmoda-bridge"
-ls -la "$PLUGIN_DIR/" 2>/dev/null || true
+echo "[deploy] Plugin installed to $PLUGIN_DST"
+ls -la "$PLUGIN_DST/" 2>/dev/null || true
 
 # Configure API key if present on server
 if [ -f /var/lib/osmoda/config/api-key ]; then
@@ -372,38 +371,31 @@ sleep 1
 rm -f "$RUN_DIR"/*.sock
 
 # -------------------------------------------------------
-# Register plugin with OpenClaw
+# Configure OpenClaw
 # -------------------------------------------------------
 if command -v openclaw &>/dev/null; then
-  openclaw plugins install --link /opt/osmoda/packages/osmoda-bridge 2>&1 || true
-  echo "[deploy] osmoda-bridge plugin registered."
-
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw config set gateway.auth.mode none 2>/dev/null || true
+  openclaw config set plugins.allow '["osmoda-bridge", "device-pair", "memory-core", "phone-control", "talk-voice"]' 2>/dev/null || true
+  echo "[deploy] OpenClaw configured."
 fi
 
 # -------------------------------------------------------
-# Configure API key if present
+# Configure API key / OAuth token if present
+# Auto-detects: sk-ant-oat01- = OAuth token, sk-ant-api03- = API key
 # -------------------------------------------------------
 if [ -f "$STATE_DIR/config/api-key" ]; then
   API_KEY=$(cat "$STATE_DIR/config/api-key")
   mkdir -p /root/.openclaw/agents/main/agent
   node -e "
     const fs = require('fs');
-    const auth = {
-      profiles: {
-        'anthropic:manual': {
-          provider: 'anthropic',
-          kind: 'api-key',
-          token: process.argv[1],
-          createdAt: new Date().toISOString(),
-          label: 'manual'
-        }
-      },
-      order: ['anthropic:manual']
-    };
+    const key = process.argv[1];
+    const isOAuth = key.startsWith('sk-ant-oat');
+    const auth = isOAuth
+      ? { type: 'token', provider: 'anthropic', token: key }
+      : { type: 'api_key', provider: 'anthropic', key: key };
     fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
-    console.log('[deploy] API key configured in auth-profiles.json');
+    console.log('[deploy] Configured as ' + (isOAuth ? 'OAuth token' : 'API key'));
   " "$API_KEY"
 fi
 
