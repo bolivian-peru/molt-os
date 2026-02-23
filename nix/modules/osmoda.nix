@@ -135,6 +135,27 @@ in {
       listenAddr = mkOption { type = types.str; default = "0.0.0.0"; description = "TCP listen address for peer connections"; };
     };
 
+    # --- MCP Server Manager ---
+    mcp = {
+      enable = mkEnableOption "osModa MCP server manager";
+      socketPath = mkOption { type = types.str; default = "/run/osmoda/mcpd.sock"; description = "mcpd Unix socket path"; };
+      servers = mkOption {
+        type = types.attrsOf (types.submodule {
+          options = {
+            enable = mkEnableOption "this MCP server";
+            command = mkOption { type = types.str; description = "Command to run the MCP server"; };
+            args = mkOption { type = types.listOf types.str; default = []; description = "Command arguments"; };
+            env = mkOption { type = types.attrsOf types.str; default = {}; description = "Environment variables"; };
+            transport = mkOption { type = types.str; default = "stdio"; description = "Transport type (stdio)"; };
+            allowedDomains = mkOption { type = types.listOf types.str; default = []; description = "Domains allowed through egress proxy"; };
+            secretFile = mkOption { type = types.nullOr types.path; default = null; description = "Path to secret file (injected as env var)"; };
+          };
+        });
+        default = {};
+        description = "MCP servers to manage";
+      };
+    };
+
     # --- Agent Identity (EIP-8004) ---
     agentCard = {
       enable = mkEnableOption "EIP-8004 Agent Card";
@@ -349,6 +370,7 @@ in {
         OSMODA_ROUTINES_SOCKET = cfg.routines.socketPath;
         OSMODA_VOICE_SOCKET = cfg.voice.socketPath;
         OSMODA_MESH_SOCKET = cfg.mesh.socketPath;
+        OSMODA_MCPD_SOCKET = cfg.mcp.socketPath;
         HOME = cfg.stateDir;
       };
     };
@@ -489,6 +511,49 @@ in {
       };
     };
 
+    # ===== MCP SERVER MANAGER =====
+    systemd.services.osmoda-mcpd = mkIf cfg.mcp.enable (let
+      # Generate mcp-servers.json from NixOS options
+      enabledServers = filterAttrs (name: srv: srv.enable) cfg.mcp.servers;
+      mcpServersJson = pkgs.writeText "mcp-servers.json" (builtins.toJSON (
+        mapAttrsToList (name: srv: {
+          inherit name;
+          command = srv.command;
+          args = srv.args;
+          env = srv.env;
+          transport = srv.transport;
+          allowed_domains = srv.allowedDomains;
+          secret_file = if srv.secretFile != null then toString srv.secretFile else null;
+        }) enabledServers
+      ));
+      # Merge all servers' allowedDomains for egress
+      allMcpDomains = concatLists (mapAttrsToList (_: srv: srv.allowedDomains) enabledServers);
+    in {
+      description = "osModa MCP Server Manager";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "osmoda-agentd.service" "osmoda-egress.service" ];
+      requires = [ "osmoda-agentd.service" ];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = concatStringsSep " " [
+          "${pkgs.osmoda-mcpd}/bin/osmoda-mcpd"
+          "--socket ${cfg.mcp.socketPath}"
+          "--config ${mcpServersJson}"
+          "--state-dir ${cfg.stateDir}/mcp"
+          "--agentd-socket ${cfg.agentd.socketPath}"
+          "--egress-port ${toString cfg.sandbox.egressProxy.port}"
+          "--output-config ${cfg.stateDir}/mcp/openclaw-mcp.json"
+        ];
+        Restart = "always";
+        RestartSec = 3;
+        RuntimeDirectory = "osmoda";
+        StateDirectory = "osmoda";
+        ProtectKernelTunables = true;
+        LockPersonality = true;
+      };
+    });
+
     # ===== VOICE DAEMON =====
     systemd.services.osmoda-voice = mkIf cfg.voice.enable {
       description = "osModa Voice Daemon (STT + TTS)";
@@ -587,7 +652,7 @@ in {
 
     # ===== WORKSPACE SETUP =====
     system.activationScripts.osmoda-workspace = ''
-      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,secrets}
+      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,secrets}
       mkdir -p ${cfg.stateDir}/workspace/skills
       mkdir -p /var/backups/osmoda
 

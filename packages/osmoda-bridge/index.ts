@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 54 tools registered:
+ * 58 tools registered:
  *   agentd:  system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:  shell_exec, file_read, file_write, directory_list (4)
  *   systemd: service_status, journal_logs (2)
@@ -19,6 +19,7 @@
  *   backup:  backup_create, backup_list (2, via agentd)
  *   mesh:    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health,
  *            mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history (11, via osmoda-mesh)
+ *   mcp:     mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart (4, via osmoda-mcpd)
  *   safety:  safety_rollback, safety_status, safety_panic, safety_restart (4, direct shell)
  */
 
@@ -31,6 +32,7 @@ import { watchRequest } from "./watch-client";
 import { routinesRequest } from "./routines-client";
 import { VoiceClient } from "./voice-client";
 import { meshRequest } from "./mesh-client";
+import { mcpdRequest } from "./mcpd-client";
 
 // ---------------------------------------------------------------------------
 // agentd Unix socket HTTP client
@@ -1253,6 +1255,88 @@ export default function register(api: any) {
       }
     },
   }), { names: ["mesh_room_history"] });
+
+  // =========================================================================
+  // MCP tools (via osmoda-mcpd — MCP server lifecycle management)
+  // =========================================================================
+
+  // --- mcp_servers ---
+  api.registerTool(() => ({
+    name: "mcp_servers",
+    label: "MCP Servers",
+    description: "List all managed MCP servers with status, pid, restart count, and allowed domains.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await mcpdRequest("GET", "/servers") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mcp_servers"] });
+
+  // --- mcp_server_start ---
+  api.registerTool(() => ({
+    name: "mcp_server_start",
+    label: "MCP Server Start",
+    description: "Start a stopped MCP server by name.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "MCP server name to start" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await mcpdRequest("POST", `/server/${params.name}/start`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mcp_server_start"] });
+
+  // --- mcp_server_stop ---
+  api.registerTool(() => ({
+    name: "mcp_server_stop",
+    label: "MCP Server Stop",
+    description: "Stop a running MCP server by name.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "MCP server name to stop" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await mcpdRequest("POST", `/server/${params.name}/stop`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mcp_server_stop"] });
+
+  // --- mcp_server_restart ---
+  api.registerTool(() => ({
+    name: "mcp_server_restart",
+    label: "MCP Server Restart",
+    description: "Restart an MCP server (stop + start). Increments restart count.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "MCP server name to restart" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await mcpdRequest("POST", `/server/${params.name}/restart`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mcp_server_restart"] });
 
   // =========================================================================
   // Safety commands — bypass AI, direct system action

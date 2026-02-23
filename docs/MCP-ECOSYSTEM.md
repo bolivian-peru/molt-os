@@ -2,9 +2,9 @@
 
 ## The core is done. This is the expansion layer.
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
-The eight daemons are built. 54 tools are registered. The OS works. What comes next is not more custom tools — it's **MCP as the integration layer** that makes every capability in the MCP ecosystem available to your AI without writing another line of bridge code.
+Nine daemons are built. 58 tools are registered. The OS works. osmoda-mcpd is live — it manages MCP server lifecycle from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an OS capability without writing another line of bridge code.
 
 ---
 
@@ -34,7 +34,7 @@ osmoda-bridge stays exactly what it is: the OS tools layer (system, ledger, memo
 OpenClaw Gateway (:18789)
   │
   ├── osmoda-bridge (Kind: "tools") ← THE OS
-  │     54 tools: agentd, keyd, watch, routines, mesh, voice
+  │     58 tools: agentd, keyd, watch, routines, mesh, voice, mcpd
   │     Unix sockets, root access, NixOS mutations
   │
   └── MCP Servers (managed by osmoda-mcpd)

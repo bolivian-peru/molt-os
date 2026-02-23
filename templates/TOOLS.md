@@ -97,7 +97,7 @@ Memory system status: embedding model readiness, collection size, state director
 
 ## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 50 tools available to the AI agent through OpenClaw.
+These are the 58 tools available to the AI agent through OpenClaw.
 Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
@@ -232,6 +232,21 @@ No central server. Invite-based pairing.
 | `mesh_peer_send` | Send an encrypted message to a connected peer (chat, alert, health report, command) |
 | `mesh_peer_disconnect` | Disconnect and remove a mesh peer |
 | `mesh_health` | Check mesh daemon health: peer count, connected count, identity status |
+| `mesh_room_create` | Create a named group room for multi-peer communication |
+| `mesh_room_join` | Add a connected peer to a group room |
+| `mesh_room_send` | Send a message to all connected members of a group room |
+| `mesh_room_history` | Retrieve recent messages from a group room |
+
+### MCP tools (via osmoda-mcpd at `/run/osmoda/mcpd.sock`)
+
+MCP server lifecycle management. Any MCP server declared in NixOS config becomes available to the AI.
+
+| Tool | Description |
+|------|-------------|
+| `mcp_servers` | List all managed MCP servers with status, pid, restart count, and allowed domains |
+| `mcp_server_start` | Start a stopped MCP server by name |
+| `mcp_server_stop` | Stop a running MCP server by name |
+| `mcp_server_restart` | Restart an MCP server (stop + start) |
 
 ### Safety tools (direct shell — bypass AI)
 

@@ -2,16 +2,16 @@
 
 ## Overview
 
-osModa is a NixOS distribution where the AI agent IS the operating system interface. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), background automation (routines), and P2P encrypted server-to-server communication (mesh).
+osModa is a NixOS distribution where the AI agent IS the operating system interface. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), background automation (routines), P2P encrypted server-to-server communication (mesh), local voice (voice), and MCP server lifecycle management (mcpd).
 
 Local inter-daemon communication happens over Unix sockets. osmoda-mesh adds TCP port 18800 for peer-to-peer connections between osModa instances.
 
 ## Trust Rings
 
 ```
-RING 0: OpenClaw + agentd + keyd + watch + routines + mesh
+RING 0: OpenClaw + agentd + keyd + watch + routines + mesh + voice + mcpd
   Full system access. Root-equivalent. See and control everything.
-  Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines, mesh
+  Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines, mesh, voice, mcpd
 
 RING 1: Approved Apps
   Sandboxed with declared capabilities. No root, no arbitrary filesystem.
@@ -34,7 +34,7 @@ RING 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 54 tools registered                 │
+│   osmoda-bridge plugin → 58 tools registered                 │
 │   Memory Backend → ZVEC search → injects into prompt (M1+)  │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -124,6 +124,26 @@ mesh also listens on TCP :18800 for peer-to-peer connections
 - **Messages**: 10 typed variants (Heartbeat, HealthReport, Alert, Chat, LedgerSync, Command, CommandResponse, PeerAnnounce, KeyRotation, PqExchange). All encrypted on the wire.
 - **Hardening**: Keys zeroized on Drop, all key files 0600, graceful shutdown with CancellationToken across all background loops.
 
+### osmoda-voice — Local Voice Pipeline
+
+- **Socket**: `/run/osmoda/voice.sock`
+- **State**: `/var/lib/osmoda/voice/`
+- **Role**: 100% local speech-to-text and text-to-speech. No cloud APIs, no data leaves the machine.
+- **STT**: whisper.cpp (MIT license), configurable model, 16kHz mono WAV input.
+- **TTS**: piper-tts (MIT license), ONNX models, audio output via PipeWire.
+- **Hardening**: Graceful shutdown, subprocess timeouts on model inference.
+
+### osmoda-mcpd — MCP Server Manager
+
+- **Socket**: `/run/osmoda/mcpd.sock`
+- **State**: `/var/lib/osmoda/mcp/`
+- **Role**: Lifecycle manager for MCP (Model Context Protocol) servers. Starts, monitors, restarts MCP server processes. Generates OpenClaw MCP config from NixOS options.
+- **Not a proxy**: OpenClaw connects to MCP servers directly via stdio. mcpd manages the process lifecycle only.
+- **Security**: Servers with `allowedDomains` get `HTTP_PROXY` injected to route traffic through osmoda-egress. Secret files injected as env vars.
+- **Monitoring**: 10-second health check loop detects crashed servers and auto-restarts.
+- **Audit**: All server lifecycle events (start, stop, crash, restart) logged to agentd ledger.
+- **NixOS config**: Declare MCP servers in `services.osmoda.mcp.servers` and they become available to the AI.
+
 ## Data Flow
 
 1. **User sends message** via web chat, Telegram, or WhatsApp → OpenClaw Gateway
@@ -197,6 +217,8 @@ osModa is a NixOS module (`services.osmoda`). One `enable = true` activates:
 - osmoda-keyd service (PrivateNetwork, RestrictAddressFamilies)
 - osmoda-watch service (root, for nixos-rebuild access)
 - osmoda-routines service (systemd hardening)
+- osmoda-voice service (requires PipeWire for audio I/O)
+- osmoda-mcpd service (MCP server lifecycle, depends on agentd + egress)
 - Egress proxy (DynamicUser, domain-filtered)
 - Messaging channels (Telegram, WhatsApp — env vars injected into gateway)
 - Remote access (Cloudflare Tunnel, Tailscale — optional)
@@ -307,5 +329,7 @@ spawn.os.moda is the commercial provisioning service (separate private repo). It
 - **routines**: systemd hardening (NoNewPrivileges, ProtectKernelTunables). Runs scheduled tasks only.
 - **egress**: Domain allowlist. Only Ring 2 tools route through it.
 - **mesh**: Noise_XX + ML-KEM-768 hybrid PQ. All peer traffic encrypted. Invite-based pairing, no global registry. Keys zeroized on shutdown.
+- **voice**: Local-only processing. No cloud APIs, no network calls. whisper.cpp + piper-tts, both MIT-licensed.
+- **mcpd**: Lifecycle manager only — doesn't proxy MCP traffic. Injects egress proxy for domain-restricted servers. Secret files read from disk, never stored in Nix config.
 - **Local sockets**: Unix domain sockets with restrictive file permissions (0600/0660).
 - **Mesh TCP**: Port 18800. All traffic encrypted (Noise_XX transport mode). No plaintext ever on the wire.

@@ -28,7 +28,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (54 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (58 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
@@ -40,6 +40,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers,
    mesh_peer_send, mesh_peer_disconnect, mesh_health,
    mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history,
+   mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart,
    safety_rollback, safety_status, safety_panic, safety_restart.
 
 3. **osmoda-egress** (Rust) — localhost-only HTTP CONNECT proxy. Domain allowlist
@@ -66,12 +67,16 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    TCP listener at port 18800. Noise_XX (X25519/ChaChaPoly/BLAKE2s) + ML-KEM-768 hybrid post-quantum.
    Invite-based pairing, no central server. Ed25519 identity signatures.
 
-9. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
+9. **osmoda-mcpd** (Rust) — MCP server manager daemon. Unix socket at `/run/osmoda/mcpd.sock`.
+   Manages MCP server lifecycle: start, monitor, restart, configure. Generates OpenClaw MCP
+   config from NixOS options. Any MCP server becomes an OS capability via NixOS config.
+
+10. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
    file-manager, network-manager, service-explorer.
 
-10. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
+11. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
    Generates OpenClaw config file from NixOS options (channels, auth, plugins).
    Channel options: `channels.telegram` and `channels.whatsapp` — config generation
    and credential management; actual connections handled by OpenClaw.
@@ -147,15 +152,23 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── peers.rs                       # Peer storage + connection state
       ├── api.rs                         # Axum handlers (/invite/*, /peer/*, /identity, /health)
       └── receipt.rs                     # Audit logging to agentd ledger
+./crates/osmoda-mcpd/                    # Rust: MCP server manager daemon
+  ├── Cargo.toml
+  └── src/
+      ├── main.rs                        # Entry + socket setup + manager loop
+      ├── server.rs                      # MCP server process management
+      ├── api.rs                         # Axum handlers (/health, /servers, /server/*)
+      └── receipt.rs                     # Audit logging to agentd ledger
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 54 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 58 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
   ├── voice-client.ts                    # Voice daemon client
-  └── mesh-client.ts                     # HTTP-over-Unix-socket client for mesh
+  ├── mesh-client.ts                     # HTTP-over-Unix-socket client for mesh
+  └── mcpd-client.ts                     # HTTP-over-Unix-socket client for mcpd
 ./packages/osmoda-system-skills/         # Skill collection package
 ./skills/
   ├── self-healing/SKILL.md              # Detect + diagnose + auto-fix failures
@@ -184,7 +197,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── install.sh                         # One-command installer (curl | bash)
   └── deploy-hetzner.sh                  # Push deploy from local to Hetzner
 ./docs/
-  ├── ARCHITECTURE.md                    # Architecture overview (all 7 daemons)
+  ├── ARCHITECTURE.md                    # Architecture overview (all 9 daemons)
   ├── STATUS.md                          # Honest maturity assessment per component
   ├── DEMO-SCRIPT.md                     # Demo recording script
   ├── GO-TO-MARKET.md                    # Launch strategy
@@ -324,6 +337,21 @@ DEL  /peer/{id}            → { disconnected: peer_id }
 POST /identity/rotate      → { new_instance_id, new_pubkeys }
 GET  /identity             → MeshPublicIdentity
 GET  /health               → { peer_count, connected_count, identity_ready }
+```
+
+## osmoda-mcpd API reference (socket: /run/osmoda/mcpd.sock)
+
+MCP server lifecycle management. Starts, monitors, restarts MCP servers.
+Generates OpenClaw MCP config from NixOS options.
+
+```
+GET  /health               → { server_count, running_count, servers: [{name, status, pid, uptime}] }
+GET  /servers              → ServerListEntry[]
+GET  /server/{name}        → ServerListEntry
+POST /server/{name}/start  → { status: "started", name }
+POST /server/{name}/stop   → { status: "stopped", name }
+POST /server/{name}/restart → { status: "restarted", name }
+POST /reload               → { status: "reloaded", removed, started, total }
 ```
 
 Future (M1+):
