@@ -18,10 +18,10 @@ Last updated: 2026-02-23
 | Metric | Count |
 |--------|-------|
 | Rust crates | 8 (7 daemons + 1 CLI) |
-| Tests passing | 97 |
-| Bridge tools registered | 45 (verified: `grep -c registerTool index.ts` = 45) |
+| Tests passing | 106 |
+| Bridge tools registered | 50 (verified: `grep -c registerTool index.ts` = 50) |
 | System skills | 15 |
-| NixOS systemd services | 8 (agentd, gateway, keyd, watch, routines, voice, mesh, egress) |
+| NixOS systemd services | 10 (agentd, gateway, keyd, watch, routines, voice, mesh, egress, cloudflared, tailscale-auth) |
 
 ---
 
@@ -36,7 +36,7 @@ Last updated: 2026-02-23
 | `/events/log` endpoint | **Solid** | Hash-chained SQLite ledger, filter by type/actor/limit |
 | Hash-chain ledger | **Solid** | SHA-256 chain (pipe-delimited format), verifiable with agentctl |
 | `/memory/ingest` | **Functional** | Stores events to ledger; ZVEC vector search not yet wired |
-| `/memory/recall` | **Scaffold** | Returns empty results — ZVEC binding deferred to M1 |
+| `/memory/recall` | **Solid** | FTS5 BM25-ranked full-text search with Porter stemming; falls back to keyword scan if FTS5 fails |
 | `/memory/store` | **Functional** | Stores to ledger; no vector indexing yet |
 | `/memory/health` | **Functional** | Reports model status and collection size |
 | `/agent/card` | **Solid** | Serves/generates EIP-8004 card; serialization roundtrip tested |
@@ -48,7 +48,9 @@ Last updated: 2026-02-23
 | Graceful shutdown | **Solid** | Handles SIGTERM/SIGINT with clean resource cleanup |
 | Input validation | **Solid** | Path traversal rejection, payload size limits, type checking |
 | Subprocess timeouts | **Solid** | All subprocess calls capped with configurable timeouts |
-| **Tests** | **11** | agent card, incidents (create/get/steps/list/not-found), backup (prune), hash chain (integrity/collision/flush/schema) |
+| `/system/discover` | **Solid** | Parses `ss -tlnp` + `systemctl list-units`, detects known service types, cross-references with sysinfo; 4 tests |
+| FTS5 search | **Solid** | Porter stemming, BM25 ranking, auto-sync trigger, backfill migration; 5 tests |
+| **Tests** | **20** | agent card, incidents (5), backup (2), hash chain (4), FTS5 (5), discovery (4) |
 
 ### osmoda-keyd — Crypto Wallet Daemon
 
@@ -174,13 +176,13 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | routines-client.ts | **Functional** | HTTP-over-Unix-socket client for routines |
 | voice-client.ts | **Functional** | HTTP-over-Unix-socket client with status, speak, transcribe, record, listen |
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
-| Tool registrations | **Functional** | **45 tools** verified (`grep -c registerTool index.ts` = 45). Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **50 tools** verified (`grep -c registerTool index.ts` = 50). Not integration-tested against live daemons |
 
-### Tool breakdown (45 total)
+### Tool breakdown (50 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
-| agentd | 5 | system_health, system_query, event_log, memory_store, memory_recall |
+| agentd | 6 | system_health, system_query, system_discover, event_log, memory_store, memory_recall |
 | system | 4 | shell_exec, file_read, file_write, directory_list |
 | systemd | 2 | service_status, journal_logs |
 | network | 1 | network_info |
@@ -193,6 +195,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | voice | 5 | voice_status, voice_speak, voice_transcribe, voice_record, voice_listen |
 | backup (agentd) | 2 | backup_create, backup_list |
 | mesh | 7 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health |
+| safety | 4 | safety_rollback, safety_status, safety_panic, safety_restart |
 
 ---
 
@@ -200,7 +203,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| osmoda.nix module | **Functional** | Options + 8 systemd services + channels + mesh defined |
+| osmoda.nix module | **Functional** | Options + 10 systemd services + channels + mesh + remote access defined |
 | osmoda-agentd service | **Functional** | Runs as root, state dir at /var/lib/osmoda |
 | osmoda-keyd service | **Functional** | PrivateNetwork=true, RestrictAddressFamilies=AF_UNIX |
 | osmoda-watch service | **Functional** | Runs as root (needs nixos-rebuild access) |
@@ -211,6 +214,8 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | OpenClaw gateway service | **Functional** | Depends on agentd, config file generated from NixOS options |
 | Channel config (Telegram) | **Functional** | `channels.telegram.enable`, botTokenFile, allowedUsers |
 | Channel config (WhatsApp) | **Functional** | `channels.whatsapp.enable`, credentialDir, allowedNumbers |
+| Remote access (Cloudflare) | **Functional** | `remoteAccess.cloudflare.enable`, quick tunnel or credentialed, systemd service |
+| Remote access (Tailscale) | **Functional** | `remoteAccess.tailscale.enable`, auto-auth oneshot, forwards to NixOS built-in |
 | Firewall rules | **Functional** | Mesh port (18800) opened conditionally when mesh.enable = true |
 | flake.nix overlays | **Functional** | 8 Rust packages built via crane |
 | dev-vm.nix | **Functional** | QEMU VM with Sway desktop |
@@ -237,7 +242,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 2. **No network from keyd**: By design. keyd has `PrivateNetwork=true`. Signed transactions must be broadcast by the caller.
 
-3. **Memory system is M0**: ZVEC vector search is not wired. Memory recall returns empty. Only ledger-based storage works.
+3. **Memory system is M0**: ZVEC vector search is not wired. Memory recall uses FTS5 BM25-ranked full-text search (with keyword fallback). Semantic search deferred to M1.
 
 4. **SafeSwitch doesn't execute the change**: `switch/begin` records the session but the caller must apply the NixOS change. The daemon manages the health-check/rollback lifecycle after the change.
 
@@ -259,7 +264,7 @@ cargo test --workspace
 
 | Crate | Tests | What's tested |
 |-------|-------|---------------|
-| agentd | 11 | Agent card serialization, incidents (create/get/steps/list/not-found), backup pruning, hash chain (integrity/collision/flush/schema) |
+| agentd | 20 | Agent card, incidents (5), backup pruning (2), hash chain (4), FTS5 search (5), service discovery (4) |
 | osmoda-keyd | 21 | ETH+SOL sign/verify, keccak256 vector, encryption roundtrip, Argon2 KDF, decimal policy (8 tests), wallet delete, persistence, cache eviction, label limit |
 | osmoda-watch | 18 | Switch state machine (3), watcher persistence (2), health check serde, input validation (12) |
 | osmoda-routines | 17 | Cron parser (6), persistence (2), validation (7), command timeout, defaults |
@@ -267,7 +272,7 @@ cargo test --workspace
 | osmoda-mesh | 26 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (8+2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2) |
 | agentctl | 0 | — |
 | osmoda-egress | 0 | — |
-| **Total** | **97** | **All pass** |
+| **Total** | **106** | **All pass** |
 
 ---
 

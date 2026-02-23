@@ -79,7 +79,18 @@ impl Ledger {
             CREATE TABLE IF NOT EXISTS schema_version (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 version INTEGER NOT NULL
-            );",
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+                type, actor, payload,
+                content=events, content_rowid=id,
+                tokenize='porter unicode61'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS events_fts_insert AFTER INSERT ON events BEGIN
+                INSERT INTO events_fts(rowid, type, actor, payload)
+                VALUES (new.id, new.type, new.actor, new.payload);
+            END;",
         )
         .context("failed to create tables")?;
 
@@ -106,7 +117,7 @@ impl Ledger {
     }
 
     /// Current schema version. Increment when making breaking changes.
-    const CURRENT_SCHEMA_VERSION: i64 = 2;
+    const CURRENT_SCHEMA_VERSION: i64 = 3;
 
     /// Run any pending migrations.
     fn migrate(&mut self) -> Result<()> {
@@ -123,6 +134,12 @@ impl Ledger {
             // Re-hash all events with the new delimiter format.
             tracing::info!("migrating ledger from schema v{version} to v2 (pipe-delimited hashes)");
             self.rehash_chain()?;
+        }
+
+        if version < 3 {
+            // Migration to v3: backfill FTS5 index from existing events
+            tracing::info!("migrating ledger to v3: backfilling FTS5 index");
+            self.backfill_fts()?;
         }
 
         if version < Self::CURRENT_SCHEMA_VERSION {
@@ -163,6 +180,73 @@ impl Ledger {
         tx.commit().context("failed to commit rehash")?;
         tracing::info!(events = rows.len(), "ledger rehash complete");
         Ok(())
+    }
+
+    /// Backfill FTS5 index from existing events.
+    fn backfill_fts(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "INSERT OR IGNORE INTO events_fts(rowid, type, actor, payload)
+             SELECT id, type, actor, payload FROM events;"
+        ).context("failed to backfill FTS5 index")?;
+        tracing::info!("FTS5 backfill complete");
+        Ok(())
+    }
+
+    /// Sanitize an FTS5 query: escape special chars and wrap terms in quotes.
+    pub fn sanitize_fts_query(query: &str) -> String {
+        query
+            .split_whitespace()
+            .map(|term| {
+                let clean: String = term.chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
+                    .collect();
+                if clean.is_empty() {
+                    return String::new();
+                }
+                format!("\"{clean}\"")
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    }
+
+    /// Full-text search over events using FTS5 with BM25 ranking.
+    /// Returns events sorted by relevance. Falls back to keyword scan on FTS5 failure.
+    pub fn fts_search(&self, query: &str, limit: usize) -> Result<Vec<(Event, f64)>> {
+        let fts_query = Self::sanitize_fts_query(query);
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let sql = "SELECT e.id, e.ts, e.type, e.actor, e.payload, e.prev_hash, e.hash,
+                          bm25(events_fts) as rank
+                   FROM events_fts
+                   JOIN events e ON e.id = events_fts.rowid
+                   WHERE events_fts MATCH ?1
+                   ORDER BY rank
+                   LIMIT ?2";
+
+        let mut stmt = self.conn.prepare(sql)
+            .context("failed to prepare FTS5 query")?;
+
+        let results = stmt
+            .query_map(params![fts_query, limit as i64], |row| {
+                let rank: f64 = row.get(7)?;
+                Ok((Event {
+                    id: row.get(0)?,
+                    ts: row.get(1)?,
+                    event_type: row.get(2)?,
+                    actor: row.get(3)?,
+                    payload: row.get(4)?,
+                    prev_hash: row.get(5)?,
+                    hash: row.get(6)?,
+                }, -rank)) // bm25() returns negative scores, negate for positive relevance
+            })
+            .context("FTS5 query failed")?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to collect FTS5 results")?;
+
+        Ok(results)
     }
 
     /// Flush WAL to main database file. Call on graceful shutdown.
@@ -666,6 +750,55 @@ mod tests {
             .expect("should not error on missing incident");
 
         assert!(incident.is_none());
+    }
+
+    #[test]
+    fn test_fts_search_basic() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+
+        ledger.append("memory.store", "agentd", r#"{"summary":"nginx crashed with OOM","detail":"nginx ran out of memory"}"#).unwrap();
+        ledger.append("memory.store", "agentd", r#"{"summary":"postgres backup completed","detail":"daily backup finished"}"#).unwrap();
+        ledger.append("memory.store", "agentd", r#"{"summary":"user login from SSH","detail":"admin connected via SSH"}"#).unwrap();
+
+        let results = ledger.fts_search("nginx memory", 10).unwrap();
+        assert!(!results.is_empty(), "should find nginx-related events");
+        assert!(results[0].0.payload.contains("nginx"), "most relevant result should mention nginx");
+    }
+
+    #[test]
+    fn test_fts_search_empty_query() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+        ledger.append("test", "actor", "payload").unwrap();
+
+        let results = ledger.fts_search("", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_fts_search_no_match() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+        ledger.append("test", "actor", r#"{"summary":"hello world"}"#).unwrap();
+
+        let results = ledger.fts_search("zzzznonexistent", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_sanitize_fts_query() {
+        assert_eq!(Ledger::sanitize_fts_query("nginx crash"), "\"nginx\" OR \"crash\"");
+        assert_eq!(Ledger::sanitize_fts_query(""), "");
+        assert_eq!(Ledger::sanitize_fts_query("!!!"), "");
+        assert_eq!(Ledger::sanitize_fts_query("hello-world"), "\"hello-world\"");
+    }
+
+    #[test]
+    fn test_fts_porter_stemming() {
+        let ledger = Ledger::new(":memory:").expect("failed to create in-memory ledger");
+        ledger.append("test", "actor", r#"{"summary":"the service is running normally"}"#).unwrap();
+
+        // "run" should match "running" via Porter stemming
+        let results = ledger.fts_search("run", 10).unwrap();
+        assert!(!results.is_empty(), "Porter stemming should match 'run' to 'running'");
     }
 }
 

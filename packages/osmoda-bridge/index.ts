@@ -4,8 +4,8 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 45 tools registered:
- *   agentd:  system_health, system_query, event_log, memory_store, memory_recall (5)
+ * 50 tools registered:
+ *   agentd:  system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:  shell_exec, file_read, file_write, directory_list (4)
  *   systemd: service_status, journal_logs (2)
  *   network: network_info (1)
@@ -18,6 +18,7 @@
  *   voice:   voice_status, voice_speak, voice_transcribe, voice_record, voice_listen (5, via osmoda-voice)
  *   backup:  backup_create, backup_list (2, via agentd)
  *   mesh:    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health (7, via osmoda-mesh)
+ *   safety:  safety_rollback, safety_status, safety_panic, safety_restart (4, direct shell)
  */
 
 import * as http from "node:http";
@@ -146,6 +147,21 @@ export default function register(api: any) {
       }
     },
   }), { names: ["system_query"] });
+
+  // --- system_discover ---
+  api.registerTool(() => ({
+    name: "system_discover",
+    label: "Service Discovery",
+    description: "Discover all running services: listening ports, systemd units, process info. Detects known service types (nginx, postgres, redis, node, etc.).",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("GET", "/system/discover") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["system_discover"] });
 
   // --- event_log ---
   api.registerTool(() => ({
@@ -1146,4 +1162,74 @@ export default function register(api: any) {
       }
     },
   }), { names: ["mesh_health"] });
+
+  // =========================================================================
+  // Safety commands — bypass AI, direct system action
+  // =========================================================================
+
+  // --- safety_rollback ---
+  api.registerTool(() => ({
+    name: "safety_rollback",
+    label: "Emergency Rollback",
+    description: "SAFETY COMMAND: Immediately rollback NixOS to the previous generation. Bypasses AI — runs nixos-rebuild --rollback switch directly.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      agentdRequest("POST", "/memory/ingest", {
+        event: { category: "safety", subcategory: "rollback", actor: "user.direct", summary: "Emergency rollback triggered" },
+      }).catch(() => {});
+      return { output: runShell("nixos-rebuild --rollback switch 2>&1", 120000) };
+    },
+  }), { names: ["safety_rollback"] });
+
+  // --- safety_status ---
+  api.registerTool(() => ({
+    name: "safety_status",
+    label: "System Status",
+    description: "SAFETY COMMAND: Raw system health dump. Tries agentd first, falls back to shell if agentd is down.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("GET", "/health") };
+      } catch {
+        const fallback = [
+          "--- agentd unreachable, shell fallback ---",
+          runShell("uptime"),
+          runShell("free -h"),
+          runShell("df -h /"),
+          runShell("systemctl is-active osmoda-agentd osmoda-gateway || true"),
+        ].join("\n");
+        return { output: fallback };
+      }
+    },
+  }), { names: ["safety_status"] });
+
+  // --- safety_panic ---
+  api.registerTool(() => ({
+    name: "safety_panic",
+    label: "Panic Stop",
+    description: "SAFETY COMMAND: Stop all osModa services except agentd, then rollback NixOS. Use when the system is in a bad state.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      agentdRequest("POST", "/memory/ingest", {
+        event: { category: "safety", subcategory: "panic", actor: "user.direct", summary: "Panic stop triggered" },
+      }).catch(() => {});
+      const stopResult = runShell("systemctl stop osmoda-gateway osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh 2>&1 || true");
+      const rollbackResult = runShell("nixos-rebuild --rollback switch 2>&1", 120000);
+      return { output: `Services stopped:\n${stopResult}\nRollback:\n${rollbackResult}` };
+    },
+  }), { names: ["safety_panic"] });
+
+  // --- safety_restart ---
+  api.registerTool(() => ({
+    name: "safety_restart",
+    label: "Restart Gateway",
+    description: "SAFETY COMMAND: Restart the OpenClaw gateway service.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      agentdRequest("POST", "/memory/ingest", {
+        event: { category: "safety", subcategory: "restart", actor: "user.direct", summary: "Gateway restart triggered" },
+      }).catch(() => {});
+      return { output: runShell("systemctl restart osmoda-gateway 2>&1") };
+    },
+  }), { names: ["safety_restart"] });
 }

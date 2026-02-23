@@ -40,6 +40,11 @@ Query any system state. Returns structured JSON.
 - `hostname` — system hostname
 - `uptime` — system uptime in seconds
 
+### GET /system/discover
+Discover all running services on the system. Returns listening ports, systemd units, and detected service types.
+
+Response includes: `{ found: [{ name, pid, port, protocol, detected_as, health_url, systemd_unit, memory_bytes, cpu_usage }], total_listening_ports, total_systemd_services }`
+
 ### GET /events/log
 Query the hash-chained audit log.
 
@@ -92,7 +97,7 @@ Memory system status: embedding model readiness, collection size, state director
 
 ## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 45 tools available to the AI agent through OpenClaw.
+These are the 50 tools available to the AI agent through OpenClaw.
 Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
@@ -101,6 +106,7 @@ Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/i
 |------|-------------|
 | `system_health` | System health snapshot: CPU, RAM, disk, load average, uptime |
 | `system_query` | Query system state: processes, services, network, disk, kernel params |
+| `system_discover` | Discover all running services: listening ports, systemd units, known service types (nginx, postgres, redis, node, etc.) |
 | `event_log` | Query the append-only hash-chained audit log |
 | `memory_store` | Store important information in long-term OS memory |
 | `memory_recall` | Search OS memory for past events, diagnoses, configs, errors |
@@ -226,3 +232,14 @@ No central server. Invite-based pairing.
 | `mesh_peer_send` | Send an encrypted message to a connected peer (chat, alert, health report, command) |
 | `mesh_peer_disconnect` | Disconnect and remove a mesh peer |
 | `mesh_health` | Check mesh daemon health: peer count, connected count, identity status |
+
+### Safety tools (direct shell — bypass AI)
+
+Emergency controls that execute immediately without AI involvement. The user always has a way out.
+
+| Tool | Description |
+|------|-------------|
+| `safety_rollback` | EMERGENCY: Immediate `nixos-rebuild --rollback switch` |
+| `safety_status` | Raw system health dump. Tries agentd, falls back to shell if agentd is down |
+| `safety_panic` | Stop all osModa services (except agentd) + rollback NixOS |
+| `safety_restart` | Restart the OpenClaw gateway service |

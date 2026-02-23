@@ -91,6 +91,8 @@ async fn main() {
         .route("/incident/{id}/step", post(api::receipts::incident_step_handler))
         .route("/incident/{id}", get(api::receipts::incident_get_handler))
         .route("/incidents", get(api::receipts::incidents_list_handler))
+        // Discovery
+        .route("/system/discover", get(api::discovery::system_discover_handler))
         // Backup
         .route("/backup/create", post(api::backup::backup_create_handler))
         .route("/backup/list", get(api::backup::backup_list_handler))

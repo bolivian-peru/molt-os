@@ -28,9 +28,9 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (45 tools): system_health, system_query,
-   event_log, memory_store, memory_recall, shell_exec, file_read, file_write,
-   directory_list, service_status, journal_logs, network_info,
+   `api.registerTool()` factory pattern (50 tools): system_health, system_query,
+   system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
+   file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
    safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback,
    watcher_add, watcher_list, routine_add, routine_list, routine_trigger,
@@ -38,7 +38,8 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    voice_status, voice_speak, voice_transcribe, voice_record, voice_listen,
    backup_create, backup_list,
    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers,
-   mesh_peer_send, mesh_peer_disconnect, mesh_health.
+   mesh_peer_send, mesh_peer_disconnect, mesh_health,
+   safety_rollback, safety_status, safety_panic, safety_restart.
 
 3. **osmoda-egress** (Rust) — localhost-only HTTP CONNECT proxy. Domain allowlist
    per capability token. Only path to internet for sandboxed tools.
@@ -241,6 +242,7 @@ cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
 ```
 GET  /health              → { cpu, ram, disk, load, uptime }
 POST /system/query        { query: str, args: obj } → JSON result
+GET  /system/discover     → { found: [{ name, pid, port, detected_as, ... }], total_listening_ports, total_systemd_services }
 GET  /events/log          ?type=...&actor=...&limit=N → events[]
 POST /memory/ingest       { event: MemoryEvent } → { id }
 POST /memory/recall       { query: str, max_results: num, timeframe: str } → chunks[]

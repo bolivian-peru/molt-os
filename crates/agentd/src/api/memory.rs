@@ -86,115 +86,100 @@ pub async fn memory_recall_handler(
     Json(body): Json<MemoryRecallRequest>,
 ) -> Result<Json<MemoryRecallResponse>, axum::http::StatusCode> {
     let ledger = state.ledger.lock().await;
+    let max_results = body.max_results.unwrap_or(10).min(100);
 
-    // Query all memory events (both ingest and store types)
-    // Cap internal scan to 5000 events per type (10000 total max)
-    let ingest_events = ledger
-        .query(&EventFilter {
-            event_type: Some("memory.ingest".to_string()),
-            actor: None,
-            limit: Some(5000),
-        })
-        .map_err(|e| {
-            tracing::error!(error = %e, "failed to query memory ingest events");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Try FTS5 first, fall back to keyword scan if it fails
+    let fts_results = ledger.fts_search(&body.query, max_results * 2);
 
-    let store_events = ledger
-        .query(&EventFilter {
-            event_type: Some("memory.store".to_string()),
-            actor: None,
-            limit: Some(5000),
-        })
-        .map_err(|e| {
-            tracing::error!(error = %e, "failed to query memory store events");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let chunks = match fts_results {
+        Ok(results) if !results.is_empty() => {
+            let mut chunks: Vec<MemoryChunk> = Vec::new();
+            // Normalize BM25 scores to 0.0-1.0 range
+            let max_score = results.iter().map(|(_, s)| *s).fold(0.0_f64, f64::max);
 
-    let all_events = ingest_events
-        .into_iter()
-        .chain(store_events.into_iter())
-        .collect::<Vec<_>>();
+            for (event, score) in &results {
+                if let Some(ref tf) = body.timeframe {
+                    if !event.ts.starts_with(tf) {
+                        continue;
+                    }
+                }
 
-    let total_searched = all_events.len();
-    let max_results = body.max_results.unwrap_or(10).min(100); // Cap at 100
-    let query_lower = body.query.to_lowercase();
-    let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
+                let relevance = if max_score > 0.0 { score / max_score } else { 0.0 };
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&event.payload).unwrap_or(json!({}));
 
-    let mut chunks: Vec<MemoryChunk> = Vec::new();
+                let content = parsed.get("content").and_then(|c| c.as_str())
+                    .or_else(|| parsed.get("detail").and_then(|d| d.as_str()))
+                    .or_else(|| parsed.get("summary").and_then(|s| s.as_str()))
+                    .unwrap_or(&event.payload)
+                    .to_string();
 
-    for event in &all_events {
-        // Apply timeframe filter if specified (prefix match: "2026-02" matches February 2026)
-        if let Some(ref tf) = body.timeframe {
-            if !event.ts.starts_with(tf) {
-                continue;
+                let category = parsed.get("category").and_then(|c| c.as_str()).map(|s| s.to_string());
+                let tags = parsed.get("tags").and_then(|t| {
+                    t.as_array().map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                });
+
+                chunks.push(MemoryChunk { id: event.id, ts: event.ts.clone(), content, category, tags, relevance });
             }
+            chunks.truncate(max_results);
+            chunks
         }
-
-        let payload_lower = event.payload.to_lowercase();
-
-        // Compute a simple text-match relevance score
-        let matching_terms = query_terms
-            .iter()
-            .filter(|term| payload_lower.contains(**term))
-            .count();
-
-        if matching_terms == 0 {
-            continue;
+        Ok(_) => Vec::new(), // FTS5 returned nothing
+        Err(e) => {
+            // FTS5 failed — fall back to keyword scan
+            tracing::warn!(error = %e, "FTS5 search failed, falling back to keyword scan");
+            keyword_scan_fallback(&ledger, &body, max_results)?
         }
+    };
 
-        let relevance = matching_terms as f64 / query_terms.len() as f64;
-
-        // Parse the payload to extract structured fields
-        let parsed: serde_json::Value =
-            serde_json::from_str(&event.payload).unwrap_or(json!({}));
-
-        let content = parsed
-            .get("content")
-            .and_then(|c| c.as_str())
-            .or_else(|| parsed.get("detail").and_then(|d| d.as_str()))
-            .or_else(|| parsed.get("summary").and_then(|s| s.as_str()))
-            .unwrap_or(&event.payload)
-            .to_string();
-
-        let category = parsed
-            .get("category")
-            .and_then(|c| c.as_str())
-            .map(|s| s.to_string());
-
-        let tags = parsed.get("tags").and_then(|t| {
-            t.as_array().map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            })
-        });
-
-        chunks.push(MemoryChunk {
-            id: event.id,
-            ts: event.ts.clone(),
-            content,
-            category,
-            tags,
-            relevance,
-        });
-    }
-
-    // Sort by relevance descending, then by id descending (newest first)
-    chunks.sort_by(|a, b| {
-        b.relevance
-            .partial_cmp(&a.relevance)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(b.id.cmp(&a.id))
-    });
-
-    chunks.truncate(max_results);
+    let total_searched = ledger.event_count().unwrap_or(0) as usize;
 
     Ok(Json(MemoryRecallResponse {
         query: body.query,
         chunks,
         total_searched,
     }))
+}
+
+/// Fallback keyword scan when FTS5 is unavailable.
+fn keyword_scan_fallback(
+    ledger: &crate::ledger::Ledger,
+    body: &MemoryRecallRequest,
+    max_results: usize,
+) -> Result<Vec<MemoryChunk>, axum::http::StatusCode> {
+    let all_events = ledger
+        .query(&EventFilter { event_type: Some("memory.store".to_string()), actor: None, limit: Some(5000) })
+        .map_err(|e| { tracing::error!(error = %e, "keyword fallback query failed"); axum::http::StatusCode::INTERNAL_SERVER_ERROR })?;
+
+    let query_lower = body.query.to_lowercase();
+    let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
+    let mut chunks: Vec<MemoryChunk> = Vec::new();
+
+    for event in &all_events {
+        if let Some(ref tf) = body.timeframe {
+            if !event.ts.starts_with(tf) { continue; }
+        }
+        let payload_lower = event.payload.to_lowercase();
+        let matching = query_terms.iter().filter(|t| payload_lower.contains(**t)).count();
+        if matching == 0 { continue; }
+
+        let relevance = matching as f64 / query_terms.len() as f64;
+        let parsed: serde_json::Value = serde_json::from_str(&event.payload).unwrap_or(json!({}));
+        let content = parsed.get("content").and_then(|c| c.as_str())
+            .or_else(|| parsed.get("detail").and_then(|d| d.as_str()))
+            .or_else(|| parsed.get("summary").and_then(|s| s.as_str()))
+            .unwrap_or(&event.payload).to_string();
+        let category = parsed.get("category").and_then(|c| c.as_str()).map(|s| s.to_string());
+        let tags = parsed.get("tags").and_then(|t| {
+            t.as_array().map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        });
+
+        chunks.push(MemoryChunk { id: event.id, ts: event.ts.clone(), content, category, tags, relevance });
+    }
+
+    chunks.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal).then(b.id.cmp(&a.id)));
+    chunks.truncate(max_results);
+    Ok(chunks)
 }
 
 // ── POST /memory/store ──

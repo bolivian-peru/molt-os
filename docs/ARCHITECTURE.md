@@ -34,7 +34,7 @@ RING 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 45 tools registered                 │
+│   osmoda-bridge plugin → 50 tools registered                 │
 │   Memory Backend → ZVEC search → injects into prompt (M1+)  │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -74,6 +74,8 @@ mesh also listens on TCP :18800 for peer-to-peer connections
 - **State**: `/var/lib/osmoda/`
 - **Role**: Central daemon. Provides system queries, audit ledger, memory endpoints, Agent Card (EIP-8004), receipts, and incident workspaces.
 - **Ledger**: Append-only SQLite with SHA-256 hash chaining (pipe-delimited format). Every event references the previous hash. Chain verifiable with `agentctl verify-ledger`.
+- **FTS5**: Full-text search index over all events with Porter stemming and BM25 ranking. Auto-synced via trigger on insert. Powers `memory/recall`.
+- **Service Discovery**: `GET /system/discover` — parses `ss -tlnp` and `systemctl list-units` to find all running services, listening ports, and systemd units. Detects known service types (nginx, postgres, redis, node, etc.).
 - **Backup**: Daily systemd timer backs up SQLite state with WAL checkpointing. 7-day retention with automatic cleanup.
 - **Hardening**: Graceful shutdown (SIGTERM/SIGINT), subprocess timeout protection, input validation with path traversal rejection.
 
@@ -197,6 +199,7 @@ osModa is a NixOS module (`services.osmoda`). One `enable = true` activates:
 - osmoda-routines service (systemd hardening)
 - Egress proxy (DynamicUser, domain-filtered)
 - Messaging channels (Telegram, WhatsApp — env vars injected into gateway)
+- Remote access (Cloudflare Tunnel, Tailscale — optional)
 - Workspace activation (skills, templates)
 - Firewall defaults (nothing exposed)
 
@@ -215,6 +218,28 @@ services.osmoda.channels.whatsapp.enable = true;
 services.osmoda.channels.whatsapp.allowedNumbers = [ "+1234567890" ];
 ```
 
+## Remote Access
+
+osModa supports two remote access methods, both configured as NixOS options:
+
+### Cloudflare Tunnel
+Exposes the gateway through Cloudflare's network. Quick tunnel mode requires no account — just `enable = true` and you get a random trycloudflare.com URL. For production, use your own tunnel with credentials.
+
+```nix
+services.osmoda.remoteAccess.cloudflare.enable = true;
+# Optional: own tunnel
+services.osmoda.remoteAccess.cloudflare.credentialFile = "/var/lib/osmoda/secrets/cf-creds.json";
+services.osmoda.remoteAccess.cloudflare.tunnelId = "abc123";
+```
+
+### Tailscale
+Joins the server to your Tailscale network. With an auth key file, login is automatic and headless.
+
+```nix
+services.osmoda.remoteAccess.tailscale.enable = true;
+services.osmoda.remoteAccess.tailscale.authKeyFile = "/var/lib/osmoda/secrets/tailscale-key";
+```
+
 **How it works:**
 1. NixOS module generates an OpenClaw config JSON from channel options
 2. Config file is passed to the gateway via `--config`
@@ -231,16 +256,17 @@ services.osmoda.channels.whatsapp.allowedNumbers = [ "+1234567890" ];
 
 ## Memory Architecture (M0)
 
-M0 uses ledger-based storage only. ZVEC vector search is designed but not yet wired.
+M0 uses ledger-based storage with FTS5 full-text search. ZVEC vector search is designed but not yet wired.
 
 ```
 User message → OpenClaw → Memory Backend search()
                               │
+                              ├─ SQLite FTS5 BM25 keyword search           [LIVE]
+                              │   Porter stemming, unicode tokenization
+                              │   Falls back to keyword scan if FTS5 fails
                               ├─ Embed query (local nomic model, 768-dim)  [M1+]
                               ├─ ZVEC semantic search                       [M1+]
-                              ├─ SQLite FTS5 BM25 keyword search           [M1+]
-                              ├─ RRF hybrid merge                          [M1+]
-                              └─ Returns empty in M0
+                              └─ RRF hybrid merge                          [M1+]
 
 Ground truth: Markdown files at /var/lib/osmoda/memory/
 ZVEC indexes are derived and always rebuildable.

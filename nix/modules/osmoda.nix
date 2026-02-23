@@ -147,6 +147,37 @@ in {
       enable = mkOption { type = types.bool; default = true; description = "Enable osModa custom chat UI (fronts the OpenClaw gateway)"; };
     };
 
+    # --- Remote Access ---
+    remoteAccess = {
+      cloudflare = {
+        enable = mkEnableOption "Cloudflare Tunnel for remote access";
+        credentialFile = mkOption {
+          type = types.nullOr types.path;
+          default = null;
+          description = "Path to cloudflared tunnel credentials JSON. If null, uses trycloudflare.com quick tunnel.";
+        };
+        hostname = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "Public hostname for the tunnel. If null, trycloudflare.com assigns a random URL.";
+        };
+        tunnelId = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "Tunnel ID from 'cloudflared tunnel create'. Required when using credential file.";
+        };
+      };
+
+      tailscale = {
+        enable = mkEnableOption "Tailscale VPN for remote access";
+        authKeyFile = mkOption {
+          type = types.nullOr types.path;
+          default = null;
+          description = "Path to file containing Tailscale auth key for headless login.";
+        };
+      };
+    };
+
     # --- Messaging Channels ---
     channels = {
       telegram = {
@@ -176,6 +207,7 @@ in {
           description = "Phone numbers allowed to interact (E.164 format, e.g. +1234567890). Empty = no restriction.";
         };
       };
+
     };
 
     # --- Boot Splash ---
@@ -254,6 +286,10 @@ in {
       pkgs.openai-whisper-cpp
       pkgs.piper-tts
       pkgs.pipewire
+    ] ++ optionals cfg.remoteAccess.cloudflare.enable [
+      pkgs.cloudflared
+    ] ++ optionals cfg.remoteAccess.tailscale.enable [
+      pkgs.tailscale
     ];
 
     # ===== AGENTD SERVICE =====
@@ -475,6 +511,41 @@ in {
 
       environment = {
         OSMODA_SOCKET = cfg.agentd.socketPath;
+      };
+    };
+
+    # ===== CLOUDFLARE TUNNEL =====
+    systemd.services.osmoda-cloudflared = mkIf cfg.remoteAccess.cloudflare.enable {
+      description = "osModa Cloudflare Tunnel";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network-online.target" "osmoda-gateway.service" ];
+      wants = [ "network-online.target" ];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart =
+          if cfg.remoteAccess.cloudflare.credentialFile != null && cfg.remoteAccess.cloudflare.tunnelId != null
+          then "${pkgs.cloudflared}/bin/cloudflared tunnel --credentials-file ${toString cfg.remoteAccess.cloudflare.credentialFile} run ${cfg.remoteAccess.cloudflare.tunnelId}"
+          else "${pkgs.cloudflared}/bin/cloudflared tunnel --url http://localhost:${toString gatewayPort}";
+        Restart = "always";
+        RestartSec = 10;
+        DynamicUser = true;
+      };
+    };
+
+    # ===== TAILSCALE =====
+    services.tailscale.enable = mkIf cfg.remoteAccess.tailscale.enable true;
+
+    systemd.services.osmoda-tailscale-auth = mkIf (cfg.remoteAccess.tailscale.enable && cfg.remoteAccess.tailscale.authKeyFile != null) {
+      description = "osModa Tailscale auto-authentication";
+      after = [ "tailscaled.service" ];
+      requires = [ "tailscaled.service" ];
+      wantedBy = [ "multi-user.target" ];
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${pkgs.tailscale}/bin/tailscale up --auth-key=file:${toString cfg.remoteAccess.tailscale.authKeyFile}";
       };
     };
 
