@@ -12,7 +12,7 @@
 #   1. Converts your server to NixOS (via nixos-infect) — optional
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the osmoda-bridge plugin (12 system tools)
+#   4. Sets up the osmoda-bridge plugin (37 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #   7. Opens the setup wizard at localhost:18789
@@ -511,6 +511,11 @@ else
   info "  Option 3: echo 'sk-ant-...' > $STATE_DIR/config/api-key"
 fi
 
+echo ""
+info "Messaging channels (optional — requires OpenClaw channel support):"
+info "  Telegram: Create a bot via @BotFather, save token to $STATE_DIR/secrets/telegram-bot-token"
+info "            Then add to configuration.nix: services.osmoda.channels.telegram.enable = true;"
+info "  Guide:    https://github.com/bolivian-peru/os-moda/blob/main/docs/CHANNELS.md"
 echo ""
 info "Useful commands:"
 info "  curl -s --unix-socket $RUN_DIR/agentd.sock http://l/health | jq"

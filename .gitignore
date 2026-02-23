@@ -33,8 +33,10 @@ result-*
 secrets/
 .keys/
 
-# Docs (kept locally, not published)
-docs/
+# Internal planning docs (not published)
+docs/planning/
+docs/SPRINT-*
+docs/DEPLOY-*
 
 # Apps (separate repos, not part of open source OS)
 apps/

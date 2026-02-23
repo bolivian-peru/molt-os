@@ -179,6 +179,21 @@ Tamper-proof. Verifiable with `agentctl verify-ledger`.
 | **osmoda-voice** | Local STT (whisper.cpp) + TTS (piper) — no cloud APIs | `/run/osmoda/voice.sock` |
 | **osmoda-bridge** | OpenClaw plugin — 37 tools wiring all daemons to AI | TypeScript |
 
+### Messaging Channels
+
+Talk to your server from Telegram or WhatsApp (requires OpenClaw channel support):
+
+```nix
+# Telegram
+services.osmoda.channels.telegram.enable = true;
+services.osmoda.channels.telegram.botTokenFile = "/var/lib/osmoda/secrets/telegram-bot-token";
+
+# WhatsApp
+services.osmoda.channels.whatsapp.enable = true;
+```
+
+See [docs/CHANNELS.md](docs/CHANNELS.md) for setup guide.
+
 ### 15 System Skills
 
 Self-healing, morning briefing, security hardening, natural language NixOS config, predictive resource alerts, drift detection, generation timeline debugging, flight recorder, Nix store optimizer, system monitor, package manager, config editor, file manager, network manager, service explorer.
