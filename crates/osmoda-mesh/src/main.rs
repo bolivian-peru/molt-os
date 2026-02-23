@@ -321,13 +321,12 @@ async fn tcp_accept_loop(
                                     let peer_id = result.peer_identity.instance_id.clone();
                                     tracing::info!(peer_id = %peer_id, "peer handshake completed");
 
-                                    let connection = Arc::new(MeshConnection {
-                                        peer_id: peer_id.clone(),
-                                        transport: Arc::new(Mutex::new(result.transport)),
-                                        stream: Arc::new(Mutex::new(stream)),
-                                        phase: transport::TransportPhase::Connected,
-                                        pq_rekey_material: result.pq_rekey_material,
-                                    });
+                                    let connection = Arc::new(MeshConnection::new(
+                                        peer_id.clone(),
+                                        stream,
+                                        result.transport,
+                                        result.pq_rekey_material,
+                                    ));
 
                                     let peer_noise_pubkey = result.peer_identity.noise_static_pubkey.clone();
                                     let peer_mlkem_key = result.peer_identity.mlkem_encap_key.clone();
@@ -622,13 +621,12 @@ pub async fn initiate_outbound_connection(
                 let connected_peer_id = result.peer_identity.instance_id.clone();
                 tracing::info!(peer_id = %connected_peer_id, "outbound handshake completed");
 
-                let connection = Arc::new(MeshConnection {
-                    peer_id: connected_peer_id.clone(),
-                    transport: Arc::new(Mutex::new(result.transport)),
-                    stream: Arc::new(Mutex::new(stream)),
-                    phase: transport::TransportPhase::Connected,
-                    pq_rekey_material: result.pq_rekey_material,
-                });
+                let connection = Arc::new(MeshConnection::new(
+                    connected_peer_id.clone(),
+                    stream,
+                    result.transport,
+                    result.pq_rekey_material,
+                ));
 
                 let conn_clone = connection.clone();
                 let logger = {
