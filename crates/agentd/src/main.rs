@@ -110,6 +110,14 @@ async fn main() {
     // Bind to Unix socket
     let listener = UnixListener::bind(&args.socket).expect("failed to bind Unix socket");
 
+    // Restrict socket permissions (owner-only access)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&args.socket, std::fs::Permissions::from_mode(0o600))
+            .expect("failed to set socket permissions");
+    }
+
     tracing::info!(socket = %args.socket, "agentd listening");
 
     // Serve
