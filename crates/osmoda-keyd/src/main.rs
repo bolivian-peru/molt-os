@@ -61,6 +61,10 @@ async fn main() {
     // Initialize key backend
     std::fs::create_dir_all(&args.data_dir).expect("failed to create data directory");
 
+    // Harden permissions on startup — fix any files left at 644 by older versions
+    #[cfg(unix)]
+    harden_permissions(Path::new(&args.data_dir));
+
     let signer =
         LocalKeyBackend::new(Path::new(&args.data_dir)).expect("failed to initialize key backend");
 
@@ -114,6 +118,41 @@ async fn main() {
     // State will be dropped, triggering LocalKeyBackend::drop() which zeroizes keys
     tracing::info!("osmoda-keyd shutting down, zeroizing cached keys");
     tracing::info!("osmoda-keyd shutdown complete");
+}
+
+/// Fix permissions on all keyd data files. Ensures .enc keys, wallets.json,
+/// policy.json, master.key, and master.salt are all 0600. Directories get 0700.
+#[cfg(unix)]
+fn harden_permissions(data_dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let set_mode = |path: &Path, mode: u32| {
+        if path.exists() {
+            if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)) {
+                tracing::warn!(path = %path.display(), error = %e, "failed to set permissions");
+            }
+        }
+    };
+
+    // Directories: 0700
+    set_mode(data_dir, 0o700);
+    set_mode(&data_dir.join("keys"), 0o700);
+
+    // Sensitive files: 0600
+    for name in &["master.key", "master.salt", "wallets.json", "policy.json"] {
+        set_mode(&data_dir.join(name), 0o600);
+    }
+
+    // All encrypted key files: 0600
+    if let Ok(entries) = std::fs::read_dir(data_dir.join("keys")) {
+        for entry in entries.flatten() {
+            if entry.path().extension().is_some_and(|ext| ext == "enc") {
+                set_mode(&entry.path(), 0o600);
+            }
+        }
+    }
+
+    tracing::info!("file permissions hardened");
 }
 
 async fn shutdown_signal() {
