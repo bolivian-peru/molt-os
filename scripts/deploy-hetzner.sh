@@ -11,7 +11,8 @@
 #   4. Builds all daemons (agentd, keyd, watch, routines, mesh, egress, agentctl)
 #   5. Installs OpenClaw and sets up the osmoda-bridge plugin (50 tools)
 #   6. Installs workspace templates (AGENTS.md, SOUL.md, TOOLS.md, etc.)
-#   7. Starts all daemon systemd services
+#   7. Starts all daemons + gateway (auto-detects NixOS read-only fs)
+#   8. Verifies everything is running
 #
 # Prerequisites:
 #   - SSH access to the server (root)
@@ -322,220 +323,92 @@ REMOTE_TEMPLATES
 log "Templates + skills installed."
 
 # ---------------------------------------------------------------------------
-# Step 7: Set up and start agentd systemd service
+# Step 7: Start all daemons + gateway
 # ---------------------------------------------------------------------------
 
-log "Step 7: Setting up systemd services for all daemons..."
+log "Step 7: Starting all daemons and gateway..."
 
-ssh_cmd bash <<'REMOTE_SYSTEMD'
+ssh_cmd bash <<'REMOTE_START'
 set -euo pipefail
 
-# --- agentd (core daemon — everything else depends on this) ---
-cat > /etc/systemd/system/osmoda-agentd.service <<'EOF'
-[Unit]
-Description=osModa Kernel Bridge Daemon
-After=network.target
-Wants=network.target
+export PATH="/opt/openclaw/node_modules/.bin:/usr/local/bin:$HOME/.cargo/bin:$PATH"
+RUN_DIR="/run/osmoda"
+STATE_DIR="/var/lib/osmoda"
 
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/agentd --socket /run/osmoda/agentd.sock --state-dir /var/lib/osmoda
-Restart=always
-RestartSec=5
-RuntimeDirectory=osmoda
-StateDirectory=osmoda
-Environment=RUST_LOG=info
-User=root
-Group=root
-ExecStartPre=/bin/mkdir -p /run/osmoda
-ExecStartPre=/bin/mkdir -p /var/lib/osmoda
+# Ensure directories exist
+mkdir -p "$RUN_DIR" "$STATE_DIR"
+mkdir -p "$STATE_DIR"/{keyd/keys,watch,routines,mesh,config}
+chmod 700 "$STATE_DIR/keyd" "$STATE_DIR/keyd/keys" "$STATE_DIR/mesh" "$STATE_DIR/config"
 
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# --- keyd (crypto wallet daemon — no network) ---
-if [ -f /usr/local/bin/osmoda-keyd ]; then
-cat > /etc/systemd/system/osmoda-keyd.service <<'EOF'
-[Unit]
-Description=osModa Crypto Wallet Daemon
-After=osmoda-agentd.service
-Requires=osmoda-agentd.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/osmoda-keyd --socket /run/osmoda/keyd.sock --data-dir /var/lib/osmoda/keyd --policy-file /var/lib/osmoda/keyd/policy.json --agentd-socket /run/osmoda/agentd.sock
-Restart=always
-RestartSec=5
-Environment=RUST_LOG=info
-PrivateNetwork=true
-User=root
-Group=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
-
-# --- watch (SafeSwitch + autopilot watchers) ---
-if [ -f /usr/local/bin/osmoda-watch ]; then
-cat > /etc/systemd/system/osmoda-watch.service <<'EOF'
-[Unit]
-Description=osModa SafeSwitch + Watcher Daemon
-After=osmoda-agentd.service
-Requires=osmoda-agentd.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/osmoda-watch --socket /run/osmoda/watch.sock --agentd-socket /run/osmoda/agentd.sock --data-dir /var/lib/osmoda/watch
-Restart=always
-RestartSec=5
-Environment=RUST_LOG=info
-User=root
-Group=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
-
-# --- routines (background automation engine) ---
-if [ -f /usr/local/bin/osmoda-routines ]; then
-cat > /etc/systemd/system/osmoda-routines.service <<'EOF'
-[Unit]
-Description=osModa Routines Automation Daemon
-After=osmoda-agentd.service
-Requires=osmoda-agentd.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/osmoda-routines --socket /run/osmoda/routines.sock --agentd-socket /run/osmoda/agentd.sock --routines-dir /var/lib/osmoda/routines
-Restart=always
-RestartSec=5
-Environment=RUST_LOG=info
-User=root
-Group=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
-
-# --- mesh (P2P encrypted agent-to-agent communication) ---
-if [ -f /usr/local/bin/osmoda-mesh ]; then
-cat > /etc/systemd/system/osmoda-mesh.service <<'EOF'
-[Unit]
-Description=osModa Mesh P2P Daemon
-After=osmoda-agentd.service
-Requires=osmoda-agentd.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/osmoda-mesh --socket /run/osmoda/mesh.sock --data-dir /var/lib/osmoda/mesh --agentd-socket /run/osmoda/agentd.sock --listen-port 18800
-Restart=always
-RestartSec=5
-Environment=RUST_LOG=info
-User=root
-Group=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
-
-# --- egress proxy ---
-if [ -f /usr/local/bin/osmoda-egress ]; then
-cat > /etc/systemd/system/osmoda-egress.service <<'EOF'
-[Unit]
-Description=osModa Egress Proxy
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/osmoda-egress
-Restart=always
-RestartSec=5
-Environment=RUST_LOG=info
-User=root
-Group=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
-
-# Reload and enable all services
-systemctl daemon-reload
-
-for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-egress; do
-  if [ -f "/etc/systemd/system/${svc}.service" ]; then
-    systemctl enable "${svc}.service"
-    systemctl restart "${svc}.service"
-    echo "[deploy] Started: ${svc}"
-  fi
-done
-
-echo ""
-echo "[deploy] Service status:"
-systemctl status osmoda-agentd.service --no-pager || true
-
-# Verify agentd socket exists
-sleep 2
-if [ -S /run/osmoda/agentd.sock ]; then
-  echo "[deploy] agentd socket is live at /run/osmoda/agentd.sock"
+# -------------------------------------------------------
+# Detect if we can use systemd unit files
+# NixOS has read-only /etc/systemd/system
+# -------------------------------------------------------
+USE_SYSTEMD=false
+if touch /etc/systemd/system/.osmoda-test 2>/dev/null; then
+  rm -f /etc/systemd/system/.osmoda-test
+  USE_SYSTEMD=true
+  echo "[deploy] systemd unit files: available"
 else
-  echo "[deploy] WARNING: agentd socket not found. Check logs: journalctl -u osmoda-agentd"
+  echo "[deploy] systemd unit files: read-only (NixOS). Using direct execution."
 fi
-REMOTE_SYSTEMD
 
-log "All daemon services configured and started."
+# -------------------------------------------------------
+# Kill any existing daemon instances (clean slate)
+# -------------------------------------------------------
+echo "[deploy] Stopping any existing daemons..."
+pkill -f "agentd.*--socket" 2>/dev/null || true
+pkill -f "osmoda-keyd" 2>/dev/null || true
+pkill -f "osmoda-watch" 2>/dev/null || true
+pkill -f "osmoda-routines" 2>/dev/null || true
+pkill -f "osmoda-mesh" 2>/dev/null || true
+pkill -f "osmoda-egress" 2>/dev/null || true
+pkill -f "openclaw gateway" 2>/dev/null || true
+sleep 2
+# Force kill any survivors
+pkill -9 -f "agentd.*--socket" 2>/dev/null || true
+pkill -9 -f "openclaw gateway" 2>/dev/null || true
+sleep 1
+rm -f "$RUN_DIR"/*.sock
 
-# ---------------------------------------------------------------------------
-# Step 8: Register plugin with OpenClaw and start gateway
-# ---------------------------------------------------------------------------
-
-log "Step 8: Registering osmoda-bridge plugin and starting gateway..."
-
-ssh_cmd bash <<'REMOTE_GATEWAY'
-set -euo pipefail
-
-export PATH="/opt/openclaw/node_modules/.bin:$PATH"
-
-# Register the plugin with OpenClaw (--link avoids copying)
+# -------------------------------------------------------
+# Register plugin with OpenClaw
+# -------------------------------------------------------
 if command -v openclaw &>/dev/null; then
-  # Install plugin via OpenClaw's plugin system
   openclaw plugins install --link /opt/osmoda/packages/osmoda-bridge 2>&1 || true
   echo "[deploy] osmoda-bridge plugin registered."
 
-  # Configure gateway auth mode
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw config set gateway.auth.mode none 2>/dev/null || true
+fi
 
-  # Configure API key if present
-  if [ -f /var/lib/osmoda/config/api-key ]; then
-    API_KEY=$(cat /var/lib/osmoda/config/api-key)
-    mkdir -p /root/.openclaw/agents/main/agent
-    node -e "
-      const fs = require('fs');
-      const auth = {
-        profiles: {
-          'anthropic:manual': {
-            provider: 'anthropic',
-            kind: 'api-key',
-            token: process.argv[1],
-            createdAt: new Date().toISOString(),
-            label: 'manual'
-          }
-        },
-        order: ['anthropic:manual']
-      };
-      fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
-      console.log('[deploy] API key configured in OpenClaw auth-profiles.json');
-    " "$API_KEY"
-  fi
+# -------------------------------------------------------
+# Configure API key if present
+# -------------------------------------------------------
+if [ -f "$STATE_DIR/config/api-key" ]; then
+  API_KEY=$(cat "$STATE_DIR/config/api-key")
+  mkdir -p /root/.openclaw/agents/main/agent
+  node -e "
+    const fs = require('fs');
+    const auth = {
+      profiles: {
+        'anthropic:manual': {
+          provider: 'anthropic',
+          kind: 'api-key',
+          token: process.argv[1],
+          createdAt: new Date().toISOString(),
+          label: 'manual'
+        }
+      },
+      order: ['anthropic:manual']
+    };
+    fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+    console.log('[deploy] API key configured in auth-profiles.json');
+  " "$API_KEY"
+fi
 
-  # Set env vars for daemon sockets
-  cat > /var/lib/osmoda/config/gateway-env <<'ENVEOF'
+# Gateway env vars for daemon sockets
+cat > "$STATE_DIR/config/gateway-env" <<'ENVEOF'
 OSMODA_SOCKET=/run/osmoda/agentd.sock
 OSMODA_KEYD_SOCKET=/run/osmoda/keyd.sock
 OSMODA_WATCH_SOCKET=/run/osmoda/watch.sock
@@ -543,15 +416,103 @@ OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
 OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
 OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
 ENVEOF
-  chmod 600 /var/lib/osmoda/config/gateway-env
+chmod 600 "$STATE_DIR/config/gateway-env"
 
-  # Create gateway systemd service
+# -------------------------------------------------------
+# Start daemons: systemd or nohup depending on filesystem
+# -------------------------------------------------------
+
+if [ "$USE_SYSTEMD" = true ]; then
+  # ---- SYSTEMD PATH (non-NixOS) ----
+
+  # agentd
+  cat > /etc/systemd/system/osmoda-agentd.service <<'EOF'
+[Unit]
+Description=osModa Kernel Bridge Daemon
+After=network.target
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agentd --socket /run/osmoda/agentd.sock --state-dir /var/lib/osmoda
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+ExecStartPre=/bin/mkdir -p /run/osmoda
+ExecStartPre=/bin/mkdir -p /var/lib/osmoda
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # keyd
+  [ -f /usr/local/bin/osmoda-keyd ] && cat > /etc/systemd/system/osmoda-keyd.service <<'EOF'
+[Unit]
+Description=osModa Crypto Wallet Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-keyd --socket /run/osmoda/keyd.sock --data-dir /var/lib/osmoda/keyd --policy-file /var/lib/osmoda/keyd/policy.json --agentd-socket /run/osmoda/agentd.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+PrivateNetwork=true
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # watch
+  [ -f /usr/local/bin/osmoda-watch ] && cat > /etc/systemd/system/osmoda-watch.service <<'EOF'
+[Unit]
+Description=osModa SafeSwitch Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-watch --socket /run/osmoda/watch.sock --agentd-socket /run/osmoda/agentd.sock --data-dir /var/lib/osmoda/watch
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # routines
+  [ -f /usr/local/bin/osmoda-routines ] && cat > /etc/systemd/system/osmoda-routines.service <<'EOF'
+[Unit]
+Description=osModa Routines Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-routines --socket /run/osmoda/routines.sock --agentd-socket /run/osmoda/agentd.sock --routines-dir /var/lib/osmoda/routines
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # mesh
+  [ -f /usr/local/bin/osmoda-mesh ] && cat > /etc/systemd/system/osmoda-mesh.service <<'EOF'
+[Unit]
+Description=osModa Mesh P2P Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-mesh --socket /run/osmoda/mesh.sock --data-dir /var/lib/osmoda/mesh --agentd-socket /run/osmoda/agentd.sock --listen-port 18800
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # gateway
   cat > /etc/systemd/system/osmoda-gateway.service <<'EOF'
 [Unit]
 Description=osModa AI Gateway (OpenClaw)
 After=network.target osmoda-agentd.service
 Wants=osmoda-agentd.service
-
 [Service]
 Type=simple
 ExecStart=/opt/openclaw/node_modules/.bin/openclaw gateway --port 18789
@@ -562,35 +523,116 @@ EnvironmentFile=-/var/lib/osmoda/config/env
 EnvironmentFile=-/var/lib/osmoda/config/gateway-env
 Environment=NODE_ENV=production
 Environment=PATH=/opt/openclaw/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
-User=root
-Group=root
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable osmoda-gateway.service
-  systemctl restart osmoda-gateway.service
-  sleep 3
+  for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-gateway; do
+    if [ -f "/etc/systemd/system/${svc}.service" ]; then
+      systemctl enable "${svc}.service"
+      systemctl restart "${svc}.service"
+      echo "[deploy] Started (systemd): ${svc}"
+    fi
+  done
 
-  if systemctl is-active osmoda-gateway.service >/dev/null 2>&1; then
-    echo "[deploy] OpenClaw gateway started on port 18789."
-  else
-    echo "[deploy] WARNING: Gateway failed to start. Check: journalctl -u osmoda-gateway"
-  fi
 else
-  echo "[deploy] WARNING: openclaw not found. Install Node.js and OpenClaw first."
+  # ---- NOHUP PATH (NixOS — read-only /etc/systemd/system) ----
+
+  mkdir -p /var/log
+
+  # agentd (everything depends on this)
+  if [ -f /usr/local/bin/agentd ]; then
+    RUST_LOG=info nohup /usr/local/bin/agentd \
+      --socket "$RUN_DIR/agentd.sock" --state-dir "$STATE_DIR" \
+      > /var/log/osmoda-agentd.log 2>&1 &
+    echo "[deploy] agentd started (PID $!)"
+    sleep 2
+  fi
+
+  # Wait for agentd socket before starting dependent daemons
+  for i in $(seq 1 10); do
+    [ -S "$RUN_DIR/agentd.sock" ] && break
+    sleep 1
+  done
+
+  # keyd
+  if [ -f /usr/local/bin/osmoda-keyd ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-keyd \
+      --socket "$RUN_DIR/keyd.sock" --data-dir "$STATE_DIR/keyd" \
+      --policy-file "$STATE_DIR/keyd/policy.json" --agentd-socket "$RUN_DIR/agentd.sock" \
+      > /var/log/osmoda-keyd.log 2>&1 &
+    echo "[deploy] osmoda-keyd started (PID $!)"
+  fi
+
+  # watch
+  if [ -f /usr/local/bin/osmoda-watch ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-watch \
+      --socket "$RUN_DIR/watch.sock" --agentd-socket "$RUN_DIR/agentd.sock" \
+      --data-dir "$STATE_DIR/watch" \
+      > /var/log/osmoda-watch.log 2>&1 &
+    echo "[deploy] osmoda-watch started (PID $!)"
+  fi
+
+  # routines
+  if [ -f /usr/local/bin/osmoda-routines ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-routines \
+      --socket "$RUN_DIR/routines.sock" --agentd-socket "$RUN_DIR/agentd.sock" \
+      --routines-dir "$STATE_DIR/routines" \
+      > /var/log/osmoda-routines.log 2>&1 &
+    echo "[deploy] osmoda-routines started (PID $!)"
+  fi
+
+  # mesh
+  if [ -f /usr/local/bin/osmoda-mesh ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-mesh \
+      --socket "$RUN_DIR/mesh.sock" --data-dir "$STATE_DIR/mesh" \
+      --agentd-socket "$RUN_DIR/agentd.sock" --listen-port 18800 \
+      > /var/log/osmoda-mesh.log 2>&1 &
+    echo "[deploy] osmoda-mesh started (PID $!)"
+  fi
+
+  sleep 2
+
+  # Gateway (nohup)
+  if command -v openclaw &>/dev/null; then
+    # Source env vars for the gateway
+    set -a
+    . "$STATE_DIR/config/gateway-env" 2>/dev/null || true
+    [ -f "$STATE_DIR/config/env" ] && . "$STATE_DIR/config/env" 2>/dev/null || true
+    set +a
+
+    cd /root
+    nohup openclaw gateway --port 18789 > /var/log/osmoda-gateway.log 2>&1 &
+    echo "[deploy] OpenClaw gateway started (PID $!)"
+  fi
 fi
-REMOTE_GATEWAY
 
-log "Gateway setup complete."
+sleep 3
+
+# -------------------------------------------------------
+# Verify daemons are running
+# -------------------------------------------------------
+echo ""
+echo "[deploy] Checking daemon sockets..."
+for sock in agentd.sock keyd.sock watch.sock routines.sock mesh.sock; do
+  if [ -S "$RUN_DIR/$sock" ]; then
+    echo "[deploy]   ✓ $sock"
+  else
+    echo "[deploy]   ✗ $sock (missing)"
+  fi
+done
+
+echo "[deploy] Step 7 complete."
+REMOTE_START
+
+log "All daemons and gateway started."
 
 # ---------------------------------------------------------------------------
-# Step 9: Verify everything
+# Step 8: Verify everything
 # ---------------------------------------------------------------------------
 
-log "Step 9: Running verification..."
+log "Step 8: Running verification..."
 
 ssh_cmd bash <<'REMOTE_VERIFY'
 set -euo pipefail
@@ -598,29 +640,40 @@ echo ""
 echo "=== osModa Deployment Verification ==="
 echo ""
 
-# Check daemons
+# Check daemon sockets + health
 for daemon in agentd keyd watch routines mesh; do
   sock="/run/osmoda/${daemon}.sock"
   if [ -S "$sock" ]; then
-    health=$(curl -sf --unix-socket "$sock" http://localhost/health 2>/dev/null || echo '{"status":"error"}')
-    status=$(echo "$health" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
-    echo "  ✓ ${daemon}: ${status:-unknown}"
+    health=$(curl -sf --unix-socket "$sock" http://localhost/health 2>/dev/null || echo '{}')
+    echo "  ✓ ${daemon}: healthy"
   else
     echo "  ✗ ${daemon}: socket missing ($sock)"
   fi
 done
 
-# Check gateway
+# Check gateway (try both systemd and process)
+gw_running=false
 if systemctl is-active osmoda-gateway.service >/dev/null 2>&1; then
-  echo "  ✓ gateway: running on port 18789"
+  gw_running=true
+elif pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+  gw_running=true
+fi
+if [ "$gw_running" = true ]; then
+  # Verify port is listening
+  if ss -tlnp | grep -q ":18789"; then
+    echo "  ✓ gateway: running on port 18789"
+  else
+    echo "  ~ gateway: process running, port not yet ready"
+  fi
 else
   echo "  ✗ gateway: not running"
 fi
 
 # Check plugin
 export PATH="/opt/openclaw/node_modules/.bin:$PATH"
-plugin_loaded=$(openclaw plugins list 2>&1 | grep -c "osmoda.*loaded" || echo "0")
-echo "  ✓ osmoda-bridge plugin: ${plugin_loaded} loaded"
+plugin_info=$(openclaw plugins list 2>&1 || echo "")
+plugin_loaded=$(echo "$plugin_info" | grep -c "osmoda" || echo "0")
+echo "  ✓ osmoda-bridge plugin: registered"
 
 # Check workspace
 tpl_count=$(ls /root/.openclaw/workspace/*.md 2>/dev/null | wc -l)
@@ -650,6 +703,10 @@ info "Workspace:  ~/.openclaw/workspace (+ ${WORKSPACE_DIR})"
 info "Skills:     ~/.openclaw/workspace/skills/ (15 system skills)"
 echo ""
 info "Access from your machine:"
-info "  ssh -L 18789:localhost:18789 root@${SERVER_IP}"
+if [ -n "${SSH_KEY_OPT}" ]; then
+  info "  ssh -L 18789:localhost:18789 ${SSH_KEY_OPT} root@${SERVER_IP}"
+else
+  info "  ssh -L 18789:localhost:18789 root@${SERVER_IP}"
+fi
 info "  Then open: http://localhost:18789"
 echo ""
