@@ -6,6 +6,36 @@ let
   cfg = config.services.osmoda;
   # When osModa UI fronts the gateway, use the internal port
   gatewayPort = if cfg.ui.enable then cfg.openclaw.internalPort else cfg.openclaw.port;
+
+  # Generate OpenClaw config JSON from NixOS options
+  channelConfig = {
+    gateway = {
+      auth.mode = "none";
+    };
+    plugins.allow = [ "osmoda-bridge" ];
+  } // optionalAttrs cfg.channels.telegram.enable {
+    channels.telegram = {
+      enabled = true;
+    } // optionalAttrs (cfg.channels.telegram.botTokenFile != null) {
+      tokenFile = toString cfg.channels.telegram.botTokenFile;
+    } // optionalAttrs (cfg.channels.telegram.allowedUsers != []) {
+      allowedUsers = cfg.channels.telegram.allowedUsers;
+    };
+  } // optionalAttrs cfg.channels.whatsapp.enable {
+    channels.whatsapp = {
+      enabled = true;
+      credentialDir = toString cfg.channels.whatsapp.credentialDir;
+    } // optionalAttrs (cfg.channels.whatsapp.allowedNumbers != []) {
+      allowedNumbers = cfg.channels.whatsapp.allowedNumbers;
+    };
+  };
+
+  generatedConfigFile = pkgs.writeText "openclaw-config.json" (builtins.toJSON channelConfig);
+
+  # Use user-provided config file if set, otherwise generate from NixOS options
+  effectiveConfigFile =
+    if cfg.openclaw.configFile != null then cfg.openclaw.configFile
+    else generatedConfigFile;
 in {
   options.services.osmoda = {
     enable = mkEnableOption "osModa - AI-native operating system";
@@ -107,6 +137,37 @@ in {
     # --- Custom UI ---
     ui = {
       enable = mkOption { type = types.bool; default = true; description = "Enable osModa custom chat UI (fronts the OpenClaw gateway)"; };
+    };
+
+    # --- Messaging Channels ---
+    channels = {
+      telegram = {
+        enable = mkEnableOption "Telegram messaging channel";
+        botTokenFile = mkOption {
+          type = types.nullOr types.path;
+          default = null;
+          description = "Path to file containing the Telegram bot token (e.g. /var/lib/osmoda/secrets/telegram-bot-token). Create a bot via @BotFather.";
+        };
+        allowedUsers = mkOption {
+          type = types.listOf types.str;
+          default = [];
+          description = "Telegram usernames allowed to interact with the bot. Empty = no restriction.";
+        };
+      };
+
+      whatsapp = {
+        enable = mkEnableOption "WhatsApp messaging channel";
+        credentialDir = mkOption {
+          type = types.path;
+          default = "/var/lib/osmoda/whatsapp";
+          description = "Directory for WhatsApp session credentials (Baileys auth state)";
+        };
+        allowedNumbers = mkOption {
+          type = types.listOf types.str;
+          default = [];
+          description = "Phone numbers allowed to interact (E.164 format, e.g. +1234567890). Empty = no restriction.";
+        };
+      };
     };
 
     # --- Boot Splash ---
@@ -224,21 +285,19 @@ in {
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = concatStringsSep " " ([
+        ExecStart = concatStringsSep " " [
           "${cfg.openclaw.package}/bin/openclaw"
           "gateway"
           "--port ${toString gatewayPort}"
           "--verbose"
-        ] ++ optionals (cfg.openclaw.configFile != null) [
-          "--config ${cfg.openclaw.configFile}"
-        ]);
+          "--config ${effectiveConfigFile}"
+        ];
         Restart = "always";
         RestartSec = 5;
         StateDirectory = "osmoda";
       };
 
       environment = {
-        OPENCLAW_NIX_MODE = "1";
         NODE_ENV = "production";
         OSMODA_SOCKET = cfg.agentd.socketPath;
         HOME = cfg.stateDir;
@@ -408,24 +467,50 @@ in {
 
     # ===== WORKSPACE SETUP =====
     system.activationScripts.osmoda-workspace = ''
-      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines}
+      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,secrets}
       mkdir -p ${cfg.stateDir}/workspace/skills
       mkdir -p /var/backups/osmoda
 
       # Secure state directories
       chmod 700 ${cfg.stateDir}/keyd
       chmod 700 ${cfg.stateDir}/keyd/keys
+      chmod 700 ${cfg.stateDir}/secrets
+    '' + optionalString cfg.channels.whatsapp.enable ''
+      # WhatsApp credential directory
+      mkdir -p ${toString cfg.channels.whatsapp.credentialDir}
+      chmod 700 ${toString cfg.channels.whatsapp.credentialDir}
+    '' + ''
 
       # Create default keyd policy if not present
       if [ ! -f "${cfg.stateDir}/keyd/policy.json" ]; then
         cat > "${cfg.stateDir}/keyd/policy.json" << 'POLICY'
       {
-        "default": {
-          "daily_sign_limit": 100,
-          "daily_send_limit": 10,
-          "allowed_destinations": [],
-          "max_amount_per_tx": "1.0"
-        }
+        "rules": [
+          {
+            "action": "send",
+            "max_amount": "1.0",
+            "period": "daily",
+            "allowed_destinations": null,
+            "chain": "ethereum",
+            "max_per_day": 10
+          },
+          {
+            "action": "send",
+            "max_amount": "10.0",
+            "period": "daily",
+            "allowed_destinations": null,
+            "chain": "solana",
+            "max_per_day": 20
+          },
+          {
+            "action": "sign",
+            "max_amount": null,
+            "period": "daily",
+            "allowed_destinations": null,
+            "chain": null,
+            "max_per_day": 100
+          }
+        ]
       }
       POLICY
         chmod 600 "${cfg.stateDir}/keyd/policy.json"
@@ -439,7 +524,7 @@ in {
       fi
 
       # Install default templates if not present
-      for tmpl in AGENTS.md SOUL.md TOOLS.md; do
+      for tmpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md HEARTBEAT.md; do
         src="${./../../templates}/$tmpl"
         dst="${cfg.stateDir}/workspace/$tmpl"
         if [ -f "$src" ] && [ ! -f "$dst" ]; then

@@ -183,6 +183,22 @@ Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/i
 | `backup_create` | Create timestamped backup of all osModa state (SQLite WAL checkpoint + copy) |
 | `backup_list` | List available backups with IDs, sizes, and timestamps |
 
+### Channel management (via shell_exec + file_write)
+
+Set up messaging channels so the user can talk to you from Telegram or WhatsApp.
+
+| Action | How |
+|--------|-----|
+| Save Telegram token | `file_write` to `/var/lib/osmoda/secrets/telegram-bot-token` |
+| Enable Telegram | `shell_exec`: `openclaw config set channels.telegram.enabled true` |
+| Set Telegram token path | `shell_exec`: `openclaw config set channels.telegram.tokenFile /var/lib/osmoda/secrets/telegram-bot-token` |
+| Restrict Telegram users | `shell_exec`: `openclaw config set channels.telegram.allowedUsers '["username"]'` |
+| Enable WhatsApp | `shell_exec`: `openclaw config set channels.whatsapp.enabled true` |
+| Set WhatsApp cred dir | `shell_exec`: `openclaw config set channels.whatsapp.credentialDir /var/lib/osmoda/whatsapp` |
+| Restrict WhatsApp numbers | `shell_exec`: `openclaw config set channels.whatsapp.allowedNumbers '["+1234567890"]'` |
+| Apply channel changes | `shell_exec`: `systemctl restart osmoda-gateway` |
+| Check for WhatsApp QR | `shell_exec`: `journalctl -u osmoda-gateway --since '30 sec ago' --no-pager` |
+
 ### Voice tools (via osmoda-voice at `/run/osmoda/voice.sock`)
 
 100% local, open-source. STT via whisper.cpp, TTS via piper-tts, audio via PipeWire.

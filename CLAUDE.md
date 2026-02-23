@@ -61,6 +61,9 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    file-manager, network-manager, service-explorer.
 
 8. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
+   Generates OpenClaw config file from NixOS options (channels, auth, plugins).
+   Channel options: `channels.telegram` and `channels.whatsapp` — config generation
+   and credential management; actual connections handled by OpenClaw.
 
 ## Repo layout
 
@@ -118,13 +121,10 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
   ├── index.ts                           # Plugin entry — 37 tools via api.registerTool()
-  ├── agentd-client.ts                   # HTTP-over-Unix-socket client for agentd
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
-  ├── memory-engine.ts                   # ZVEC collection management (M1+)
-  ├── memory-backend.ts                  # OpenClaw memory backend (M1+)
-  └── voice-client.ts                    # Voice daemon client (M1+)
+  └── voice-client.ts                    # Voice daemon client
 ./packages/osmoda-system-skills/         # Skill collection package
 ./skills/
   ├── self-healing/SKILL.md              # Detect + diagnose + auto-fix failures
