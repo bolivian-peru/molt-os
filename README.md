@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/
 Or deploy from your local machine:
 
 ```bash
-git clone https://github.com/bolivian-peru/os-moda.git && cd osmoda
+git clone https://github.com/bolivian-peru/os-moda.git && cd os-moda
 ./scripts/deploy-hetzner.sh <server-ip> [ssh-key-path]
 ```
 
@@ -202,7 +202,7 @@ Self-healing, morning briefing, security hardening, natural language NixOS confi
 ## Development
 
 ```bash
-git clone https://github.com/bolivian-peru/os-moda.git && cd osmoda
+git clone https://github.com/bolivian-peru/os-moda.git && cd os-moda
 
 cargo check --workspace
 cargo test --workspace    # 97 tests

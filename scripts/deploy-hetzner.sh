@@ -314,7 +314,7 @@ log "Templates installed."
 # Step 7: Set up and start agentd systemd service
 # ---------------------------------------------------------------------------
 
-log "Step 7: Setting up agentd systemd service..."
+log "Step 7: Setting up systemd services for all daemons..."
 
 ssh_cmd bash <<'REMOTE_SYSTEMD'
 set -euo pipefail
@@ -477,7 +477,7 @@ else
 fi
 REMOTE_SYSTEMD
 
-log "agentd service configured and started."
+log "All daemon services configured and started."
 
 # ---------------------------------------------------------------------------
 # Summary

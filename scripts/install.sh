@@ -231,7 +231,7 @@ log "Source ready at $INSTALL_DIR"
 # ---------------------------------------------------------------------------
 # Step 4: Build Rust binaries
 # ---------------------------------------------------------------------------
-log "Step 4: Building agentd (this takes 2-5 minutes on first build)..."
+log "Step 4: Building all daemons (this takes 2-5 minutes on first build)..."
 
 cd "$INSTALL_DIR"
 BUILD_LOG=$(mktemp /tmp/osmoda-build-XXXXXX.log)
