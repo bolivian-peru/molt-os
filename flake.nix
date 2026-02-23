@@ -124,6 +124,10 @@
         cargoArtifacts = artifacts;
         cargoExtraArgs = "-p osmoda-routines";
       });
+      osmoda-mesh = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
+        cargoExtraArgs = "-p osmoda-mesh";
+      });
       osmoda-system-skills = final.callPackage ./packages/osmoda-system-skills { };
       osmoda-plymouth-theme = final.callPackage ./nix/modules/plymouth-theme { };
     };
@@ -205,6 +209,7 @@
       keyd = linuxPkgs.osmoda-keyd;
       watch = linuxPkgs.osmoda-watch;
       routines = linuxPkgs.osmoda-routines;
+      mesh = linuxPkgs.osmoda-mesh;
       default = linuxPkgs.osmoda-agentd;
     };
 

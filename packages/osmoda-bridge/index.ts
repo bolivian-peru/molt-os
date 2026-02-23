@@ -4,18 +4,20 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * Tools registered:
- *   agentd:  system_health, system_query, event_log, memory_store, memory_recall
- *   system:  shell_exec, file_read, file_write, directory_list
- *   systemd: service_status, journal_logs
- *   network: network_info
- *   wallet:  wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt (via keyd)
- *   switch:  safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback (via watch)
- *   watcher: watcher_add, watcher_list (via watch)
- *   routine: routine_add, routine_list, routine_trigger (via routines)
- *   identity: agent_card (via agentd)
- *   receipt: receipt_list, incident_create, incident_step (via agentd)
- *   voice:   voice_status, voice_speak, voice_transcribe, voice_record, voice_listen (via osmoda-voice)
+ * 45 tools registered:
+ *   agentd:  system_health, system_query, event_log, memory_store, memory_recall (5)
+ *   system:  shell_exec, file_read, file_write, directory_list (4)
+ *   systemd: service_status, journal_logs (2)
+ *   network: network_info (1)
+ *   wallet:  wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt (6, via keyd)
+ *   switch:  safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback (4, via watch)
+ *   watcher: watcher_add, watcher_list (2, via watch)
+ *   routine: routine_add, routine_list, routine_trigger (3, via routines)
+ *   identity: agent_card (1, via agentd)
+ *   receipt: receipt_list, incident_create, incident_step (3, via agentd)
+ *   voice:   voice_status, voice_speak, voice_transcribe, voice_record, voice_listen (5, via osmoda-voice)
+ *   backup:  backup_create, backup_list (2, via agentd)
+ *   mesh:    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health (7, via osmoda-mesh)
  */
 
 import * as http from "node:http";
@@ -26,6 +28,7 @@ import { keydRequest } from "./keyd-client";
 import { watchRequest } from "./watch-client";
 import { routinesRequest } from "./routines-client";
 import { VoiceClient } from "./voice-client";
+import { meshRequest } from "./mesh-client";
 
 // ---------------------------------------------------------------------------
 // agentd Unix socket HTTP client
@@ -1009,4 +1012,138 @@ export default function register(api: any) {
       }
     },
   }), { names: ["backup_list"] });
+
+  // =========================================================================
+  // Mesh tools (via osmoda-mesh — P2P encrypted agent-to-agent)
+  // =========================================================================
+
+  // --- mesh_identity ---
+  api.registerTool(() => ({
+    name: "mesh_identity",
+    label: "Mesh Identity",
+    description: "Get this instance's mesh identity: instance_id, public keys, capabilities. Used for P2P agent-to-agent communication.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("GET", "/identity") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_identity"] });
+
+  // --- mesh_invite_create ---
+  api.registerTool(() => ({
+    name: "mesh_invite_create",
+    label: "Mesh Invite Create",
+    description: "Create an invite code for another osModa instance to connect. The code is copy-pasteable and expires after a TTL.",
+    parameters: {
+      type: "object",
+      properties: {
+        ttl_secs: { type: "number", description: "Invite TTL in seconds (default 3600 = 1 hour)" },
+      },
+      required: [],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("POST", "/invite/create", { ttl_secs: params.ttl_secs }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_invite_create"] });
+
+  // --- mesh_invite_accept ---
+  api.registerTool(() => ({
+    name: "mesh_invite_accept",
+    label: "Mesh Invite Accept",
+    description: "Accept an invite code from another osModa instance to establish an encrypted P2P connection.",
+    parameters: {
+      type: "object",
+      properties: {
+        invite_code: { type: "string", description: "The invite code received from another instance" },
+      },
+      required: ["invite_code"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("POST", "/invite/accept", { invite_code: params.invite_code }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_invite_accept"] });
+
+  // --- mesh_peers ---
+  api.registerTool(() => ({
+    name: "mesh_peers",
+    label: "Mesh Peers",
+    description: "List all known mesh peers with connection state, last seen time, and endpoints.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("GET", "/peers") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_peers"] });
+
+  // --- mesh_peer_send ---
+  api.registerTool(() => ({
+    name: "mesh_peer_send",
+    label: "Mesh Peer Send",
+    description: "Send an encrypted message to a connected mesh peer. Supports chat, alerts, health reports, commands.",
+    parameters: {
+      type: "object",
+      properties: {
+        peer_id: { type: "string", description: "Peer instance ID to send to" },
+        message: { type: "object", description: "Message object: {type: 'chat', from: 'admin', text: '...'} or {type: 'alert', severity: 'warning', title: '...', detail: '...'}" },
+      },
+      required: ["peer_id", "message"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("POST", `/peer/${params.peer_id}/send`, { message: params.message }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_peer_send"] });
+
+  // --- mesh_peer_disconnect ---
+  api.registerTool(() => ({
+    name: "mesh_peer_disconnect",
+    label: "Mesh Peer Disconnect",
+    description: "Disconnect and remove a mesh peer.",
+    parameters: {
+      type: "object",
+      properties: {
+        peer_id: { type: "string", description: "Peer instance ID to disconnect" },
+      },
+      required: ["peer_id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("DELETE", `/peer/${params.peer_id}`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_peer_disconnect"] });
+
+  // --- mesh_health ---
+  api.registerTool(() => ({
+    name: "mesh_health",
+    label: "Mesh Health",
+    description: "Check mesh daemon health: peer count, connected count, identity status.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await meshRequest("GET", "/health") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["mesh_health"] });
 }

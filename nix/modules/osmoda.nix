@@ -127,6 +127,14 @@ in {
       routinesDir = mkOption { type = types.str; default = "${cfg.stateDir}/routines"; description = "Directory for persisted routine definitions"; };
     };
 
+    # --- Mesh Daemon (P2P Encrypted Agent-to-Agent) ---
+    mesh = {
+      enable = mkEnableOption "osModa mesh daemon (P2P encrypted agent-to-agent)";
+      socketPath = mkOption { type = types.str; default = "/run/osmoda/mesh.sock"; description = "mesh Unix socket path"; };
+      listenPort = mkOption { type = types.port; default = 18800; description = "TCP port for incoming peer connections"; };
+      listenAddr = mkOption { type = types.str; default = "0.0.0.0"; description = "TCP listen address for peer connections"; };
+    };
+
     # --- Agent Identity (EIP-8004) ---
     agentCard = {
       enable = mkEnableOption "EIP-8004 Agent Card";
@@ -409,6 +417,37 @@ in {
       };
     };
 
+    # ===== MESH DAEMON (P2P) =====
+    systemd.services.osmoda-mesh = mkIf cfg.mesh.enable {
+      description = "osModa Mesh Daemon (P2P encrypted agent-to-agent)";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "osmoda-agentd.service" "network-online.target" ];
+      requires = [ "osmoda-agentd.service" ];
+      wants = [ "network-online.target" ];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = concatStringsSep " " [
+          "${pkgs.osmoda-mesh}/bin/osmoda-mesh"
+          "--socket ${cfg.mesh.socketPath}"
+          "--data-dir ${cfg.stateDir}/mesh"
+          "--agentd-socket ${cfg.agentd.socketPath}"
+          "--listen-addr ${cfg.mesh.listenAddr}"
+          "--listen-port ${toString cfg.mesh.listenPort}"
+        ];
+        Restart = "always";
+        RestartSec = 3;
+        RuntimeDirectory = "osmoda";
+        StateDirectory = "osmoda";
+        ProtectKernelTunables = true;
+        ProtectClock = true;
+        LockPersonality = true;
+        PrivateDevices = true;
+        MemoryDenyWriteExecute = true;
+        ReadWritePaths = [ "${cfg.stateDir}/mesh" "/run/osmoda" ];
+      };
+    };
+
     # ===== VOICE DAEMON =====
     systemd.services.osmoda-voice = mkIf cfg.voice.enable {
       description = "osModa Voice Daemon (STT + TTS)";
@@ -443,7 +482,8 @@ in {
     networking.firewall = {
       enable = true;
       allowedTCPPorts = [ ]
-        ++ optionals cfg.ui.enable [ cfg.openclaw.port ];
+        ++ optionals cfg.ui.enable [ cfg.openclaw.port ]
+        ++ optionals cfg.mesh.enable [ cfg.mesh.listenPort ];
     };
 
     # ===== BACKUP TIMER =====
@@ -467,7 +507,7 @@ in {
 
     # ===== WORKSPACE SETUP =====
     system.activationScripts.osmoda-workspace = ''
-      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,secrets}
+      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,secrets}
       mkdir -p ${cfg.stateDir}/workspace/skills
       mkdir -p /var/backups/osmoda
 
@@ -475,6 +515,7 @@ in {
       chmod 700 ${cfg.stateDir}/keyd
       chmod 700 ${cfg.stateDir}/keyd/keys
       chmod 700 ${cfg.stateDir}/secrets
+      chmod 700 ${cfg.stateDir}/mesh
     '' + optionalString cfg.channels.whatsapp.enable ''
       # WhatsApp credential directory
       mkdir -p ${toString cfg.channels.whatsapp.credentialDir}

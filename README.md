@@ -9,7 +9,7 @@ An AI-native operating system built on NixOS. The agent isn't running *on* your 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Powered-5277C3.svg)](https://nixos.org/)
-[![Tests](https://img.shields.io/badge/Tests-71%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-97%20passing-brightgreen.svg)]()
 [![Status](https://img.shields.io/badge/Status-Early%20Beta-orange.svg)]()
 
 [Quickstart](#quickstart) · [Why NixOS?](#why-nixos) · [Architecture](#architecture) · [Components](#components) · [Contributing](#contributing)
@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/
 This will:
 1. Convert your server to NixOS (Ubuntu/Debian — asks before proceeding)
 2. Build all osModa daemons from source
-3. Install OpenClaw AI gateway + 37 system tools
+3. Install OpenClaw AI gateway + 45 system tools
 4. Start everything — open `http://localhost:18789` to chat with your OS
 
 **Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
@@ -137,12 +137,12 @@ osModa runs as a set of cooperating daemons, each communicating over Unix socket
 │  User (Terminal / Web Chat / API)                        │
 ├─────────────────────────────────────────────────────────┤
 │  OpenClaw Gateway              AI reasoning + tools      │
-│  osmoda-bridge plugin          37 registered tools       │
+│  osmoda-bridge plugin          45 registered tools       │
 ├────────────┬────────────┬────────────┬──────────────────┤
-│  agentd    │ osmoda-keyd│osmoda-watch│osmoda-routines   │
-│  System    │ Crypto     │ SafeSwitch │ Background       │
-│  bridge    │ wallets    │ + watchers │ automation       │
-│  + ledger  │ (isolated) │            │                  │
+│  agentd    │ osmoda-keyd│osmoda-watch│routines │ mesh   │
+│  System    │ Crypto     │ SafeSwitch │ Backgrnd│ P2P    │
+│  bridge    │ wallets    │ + watchers │ automate│ encryp │
+│  + ledger  │ (isolated) │            │         │ Noise  │
 ├────────────┴────────────┴────────────┴──────────────────┤
 │  NixOS                                                   │
 │  Atomic rebuilds · Instant rollback · Reproducible       │
@@ -177,7 +177,8 @@ Tamper-proof. Verifiable with `agentctl verify-ledger`.
 | **osmoda-routines** | Cron/interval automation (health checks, log scans) | `/run/osmoda/routines.sock` |
 | **osmoda-egress** | Domain-filtered HTTP CONNECT proxy for sandboxed tools | `127.0.0.1:19999` |
 | **osmoda-voice** | Local STT (whisper.cpp) + TTS (piper) — no cloud APIs | `/run/osmoda/voice.sock` |
-| **osmoda-bridge** | OpenClaw plugin — 37 tools wiring all daemons to AI | TypeScript |
+| **osmoda-mesh** | P2P encrypted agent-to-agent (Noise_XX + ML-KEM-768) | `/run/osmoda/mesh.sock` + TCP 18800 |
+| **osmoda-bridge** | OpenClaw plugin — 45 tools wiring all daemons to AI | TypeScript |
 
 ### Messaging Channels
 
@@ -204,7 +205,7 @@ Self-healing, morning briefing, security hardening, natural language NixOS confi
 git clone https://github.com/bolivian-peru/os-moda.git && cd osmoda
 
 cargo check --workspace
-cargo test --workspace    # 71 tests
+cargo test --workspace    # 97 tests
 
 # Run agentd locally
 cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
@@ -219,15 +220,16 @@ nix build .#nixosConfigurations.osmoda-iso.config.system.build.isoImage
 
 ## Project Status
 
-Early beta. 7 Rust daemons, 71 tests passing, 37 bridge tools, 15 system skills. Production-hardened with subprocess timeouts, graceful shutdown, input validation, daily backups, and systemd security directives.
+Early beta. 8 Rust crates (7 daemons + CLI), 97 tests passing, 45 bridge tools, 15 system skills. Production-hardened with subprocess timeouts, graceful shutdown, input validation, daily backups, and systemd security directives.
 
 **Working and tested:**
-- All 7 Rust daemons compile and pass tests
+- All 8 Rust crates compile and pass 97 tests
 - ETH + SOL crypto signing with known-vector verification
 - Hash-chained audit ledger with tamper detection
 - SafeSwitch state machine with auto-rollback
 - Cron scheduler, routine persistence, background automation
-- OpenClaw plugin loads and registers all 37 tools
+- P2P encrypted mesh with Noise_XX + ML-KEM-768 (hybrid post-quantum)
+- OpenClaw plugin loads and registers all 45 tools
 
 **Needs real-world testing:**
 - Full NixOS VM boot-to-chat pipeline
@@ -273,7 +275,7 @@ For larger changes, open an issue first so we can discuss the approach before yo
 
 ## Tech Stack
 
-- **Rust**: axum, rusqlite, tokio, serde, k256, ed25519-dalek, aes-gcm, sha3, clap
+- **Rust**: axum, rusqlite, tokio, serde, k256, ed25519-dalek, aes-gcm, sha3, snow, ml-kem, clap
 - **TypeScript**: OpenClaw plugin (osmoda-bridge)
 - **Nix**: flakes, crane (Rust builds), flake-utils
 - **NixOS**: systemd services, nftables, bubblewrap
@@ -288,7 +290,8 @@ crates/osmoda-watch/        SafeSwitch + autopilot watchers
 crates/osmoda-routines/     Background automation engine
 crates/osmoda-egress/       Egress proxy
 crates/osmoda-voice/        Local voice (STT + TTS)
-packages/osmoda-bridge/     OpenClaw plugin (37 tools)
+crates/osmoda-mesh/         P2P encrypted agent mesh
+packages/osmoda-bridge/     OpenClaw plugin (45 tools)
 nix/modules/osmoda.nix      NixOS module
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity, tools, heartbeat

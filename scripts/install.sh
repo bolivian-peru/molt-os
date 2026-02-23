@@ -12,7 +12,7 @@
 #   1. Converts your server to NixOS (via nixos-infect) — optional
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the osmoda-bridge plugin (37 system tools)
+#   4. Sets up the osmoda-bridge plugin (45 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #   7. Opens the setup wizard at localhost:18789
@@ -245,7 +245,7 @@ rm -f "$BUILD_LOG"
 
 # Create bin directory and symlinks
 mkdir -p "$INSTALL_DIR/bin"
-for binary in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice; do
+for binary in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh; do
   if [ -f "target/release/$binary" ]; then
     ln -sf "$INSTALL_DIR/target/release/$binary" "$INSTALL_DIR/bin/$binary"
     log "Built: $binary"
@@ -290,17 +290,18 @@ PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
 PLUGIN_DST="$INSTALL_DIR/osmoda-bridge-plugin"
 
 # Copy plugin files (not symlink — avoids path issues)
+# Glob copies all .ts (index, keyd-client, watch-client, routines-client, voice-client, mesh-client)
+# and all .json (package.json, openclaw.plugin.json, tsconfig.json)
 mkdir -p "$PLUGIN_DST"
-cp "$PLUGIN_SRC/index.ts" "$PLUGIN_DST/"
-cp "$PLUGIN_SRC/package.json" "$PLUGIN_DST/"
-cp "$PLUGIN_SRC/openclaw.plugin.json" "$PLUGIN_DST/"
+cp "$PLUGIN_SRC"/*.ts "$PLUGIN_DST/"
+cp "$PLUGIN_SRC"/*.json "$PLUGIN_DST/"
 
 # Configure OpenClaw
 mkdir -p /root/.openclaw
 openclaw config set gateway.auth.mode none 2>/dev/null || true
 openclaw config set plugins.allow '["osmoda-bridge"]' 2>/dev/null || true
 
-log "Bridge plugin installed with 37 system tools."
+log "Bridge plugin installed with 45 system tools."
 
 # ---------------------------------------------------------------------------
 # Step 7: Install workspace templates + skills
@@ -323,12 +324,13 @@ if [ -d "$INSTALL_DIR/skills" ]; then
 fi
 
 # Create state directories with secure permissions
-mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines}
+mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines,mesh}
 mkdir -p "$RUN_DIR"
 mkdir -p /var/backups/osmoda
 chmod 700 "$STATE_DIR/config"
 chmod 700 "$STATE_DIR/keyd"
 chmod 700 "$STATE_DIR/keyd/keys"
+chmod 700 "$STATE_DIR/mesh"
 
 log "Agent identity and skills installed."
 

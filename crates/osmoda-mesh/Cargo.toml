@@ -1,0 +1,41 @@
+[package]
+name = "osmoda-mesh"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+tokio-util.workspace = true
+
+axum = { version = "0.8", features = ["json"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = "0.5"
+chrono = { version = "0.4", features = ["serde"] }
+http-body-util = "0.1"
+hex = "0.4"
+
+# Noise protocol (X25519/ChaChaPoly/BLAKE2s built-in)
+snow = "0.9"
+# Post-quantum KEM (FIPS 203)
+ml-kem = "0.2"
+kem = "0.3.0-pre.0"
+# Identity signatures (already in workspace via keyd)
+ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
+# Hybrid KDF
+hkdf = "0.12"
+sha2 = "0.10"
+# Key handling
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

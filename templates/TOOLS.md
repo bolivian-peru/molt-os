@@ -92,7 +92,7 @@ Memory system status: embedding model readiness, collection size, state director
 
 ## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 37 tools available to the AI agent through OpenClaw.
+These are the 45 tools available to the AI agent through OpenClaw.
 Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
@@ -211,3 +211,18 @@ No cloud APIs. No data leaves the machine.
 | `voice_transcribe` | Transcribe a WAV audio file to text via whisper.cpp (local STT) |
 | `voice_record` | Record audio from microphone via PipeWire, optionally transcribe |
 | `voice_listen` | Enable/disable continuous listening mode |
+
+### Mesh tools (via osmoda-mesh at `/run/osmoda/mesh.sock`)
+
+P2P encrypted agent-to-agent communication. Noise_XX + X25519 + ML-KEM-768 (hybrid post-quantum).
+No central server. Invite-based pairing.
+
+| Tool | Description |
+|------|-------------|
+| `mesh_identity` | Get this instance's mesh identity (instance_id, public keys, capabilities) |
+| `mesh_invite_create` | Create a copy-pasteable invite code for another osModa instance (default TTL: 1 hour) |
+| `mesh_invite_accept` | Accept an invite code to establish encrypted P2P connection with a peer |
+| `mesh_peers` | List all known mesh peers with connection state and last seen time |
+| `mesh_peer_send` | Send an encrypted message to a connected peer (chat, alert, health report, command) |
+| `mesh_peer_disconnect` | Disconnect and remove a mesh peer |
+| `mesh_health` | Check mesh daemon health: peer count, connected count, identity status |

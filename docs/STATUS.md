@@ -13,6 +13,18 @@ Last updated: 2026-02-23
 
 ---
 
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| Rust crates | 8 (7 daemons + 1 CLI) |
+| Tests passing | 97 |
+| Bridge tools registered | 45 (verified: `grep -c registerTool index.ts` = 45) |
+| System skills | 15 |
+| NixOS systemd services | 8 (agentd, gateway, keyd, watch, routines, voice, mesh, egress) |
+
+---
+
 ## Rust Crates
 
 ### agentd — Kernel Bridge Daemon
@@ -26,13 +38,17 @@ Last updated: 2026-02-23
 | `/memory/ingest` | **Functional** | Stores events to ledger; ZVEC vector search not yet wired |
 | `/memory/recall` | **Scaffold** | Returns empty results — ZVEC binding deferred to M1 |
 | `/memory/store` | **Functional** | Stores to ledger; no vector indexing yet |
+| `/memory/health` | **Functional** | Reports model status and collection size |
 | `/agent/card` | **Solid** | Serves/generates EIP-8004 card; serialization roundtrip tested |
 | `/receipts` | **Solid** | Queries ledger events as structured receipts |
 | Incident workspaces | **Solid** | Dedicated SQLite tables (incidents + incident_steps), 4 tests |
-| Backup system | **Solid** | Daily timer, 7-day retention, WAL checkpointing before backup |
-| Graceful shutdown | **Solid** | All daemons handle SIGTERM/SIGINT with clean resource cleanup |
+| `/backup/create` | **Solid** | WAL checkpointing before copy, timestamped output |
+| `/backup/list` | **Solid** | Lists backups with IDs, sizes, timestamps |
+| Backup retention | **Solid** | 7-day retention with automatic pruning; 2 tests |
+| Graceful shutdown | **Solid** | Handles SIGTERM/SIGINT with clean resource cleanup |
 | Input validation | **Solid** | Path traversal rejection, payload size limits, type checking |
 | Subprocess timeouts | **Solid** | All subprocess calls capped with configurable timeouts |
+| **Tests** | **11** | agent card, incidents (create/get/steps/list/not-found), backup (prune), hash chain (integrity/collision/flush/schema) |
 
 ### osmoda-keyd — Crypto Wallet Daemon
 
@@ -49,16 +65,7 @@ Last updated: 2026-02-23
 | Wallet deletion | **Solid** | Removes key file, zeroizes cache, updates index; 2 tests |
 | `/wallet/send` | **Scaffold** | Signs an intent string, NOT a real transaction; no RLP encoding |
 | Socket authentication | **Known limitation** | File permissions only (0o600); no token-based auth |
-
-### Messaging Channels (NixOS Config)
-
-| Component | Maturity | Notes |
-|-----------|----------|-------|
-| Telegram NixOS options | **Functional** | `channels.telegram.enable`, botTokenFile, allowedUsers |
-| WhatsApp NixOS options | **Functional** | `channels.whatsapp.enable`, credentialDir, allowedNumbers |
-| Config file generation | **Functional** | Generates OpenClaw config JSON with channel settings, passed via `--config` |
-| Credential management | **Functional** | Activation script creates + secures secrets dir and WhatsApp credential dir |
-| Actual channel connections | **Depends on OpenClaw** | osModa generates config; OpenClaw runs the Telegram/WhatsApp adapters |
+| **Tests** | **21** | sign/verify ETH+SOL, keccak256, encryption, KDF consistency, decimal policy (8), delete, persistence, cache eviction, label limit |
 
 ### osmoda-watch — SafeSwitch + Watchers
 
@@ -71,6 +78,8 @@ Last updated: 2026-02-23
 | Watcher escalation | **Functional** | restart → rollback → notify ladder; retries tracked |
 | Watcher persistence | **Solid** | Saved/loaded from JSON on disk; 2 tests |
 | Probation loop | **Functional** | Checks every 5s, auto-commits or rollbacks on TTL expiry |
+| Input validation | **Solid** | Command path validation, arg metachar rejection, unit name sanitization; 12 tests |
+| **Tests** | **18** | state machine (3), persistence (2), health check serialization, input validation (12) |
 
 ### osmoda-routines — Background Automation
 
@@ -82,11 +91,13 @@ Last updated: 2026-02-23
 | ServiceMonitor action | **Functional** | Checks systemd units via `systemctl is-active` |
 | LogScan action | **Functional** | Runs `journalctl` with priority filter |
 | MemoryMaintenance | **Functional** | Fetches recent events from agentd, counts by type, stores summary |
-| Command action | **Functional** | Executes arbitrary commands |
+| Command action | **Functional** | Executes arbitrary commands with validation |
 | Webhook action | **Functional** | Executes via curl (needs network access from proxy) |
+| Input validation | **Solid** | Command path validation, interpreter blocking, URL scheme validation |
 | Persistence | **Solid** | Saves/loads routines as JSON; 2 tests |
+| **Tests** | **17** | cron parser (6), persistence (2), validation (7), command timeout (1), defaults (1) |
 
-### osmoda-voice — Voice Pipeline (100% Local, Open Source)
+### osmoda-voice — Voice Pipeline (100% Local)
 
 All processing on-device. No cloud. No tracking. No data leaves the machine.
 
@@ -101,7 +112,39 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | `/voice/listen` | **Functional** | Enable/disable listening state toggle |
 | VAD (record_clip) | **Functional** | Fixed-duration recording via timeout + pw-record |
 | VAD (record_segment) | **Functional** | Duration-controlled recording with timeout, for continuous use |
-| NixOS service | **Functional** | systemd unit with whisper.cpp + piper-tts; requires PipeWire (systemd `Requires=` dependency) |
+| NixOS service | **Functional** | systemd unit with whisper.cpp + piper-tts; requires PipeWire |
+| **Tests** | **4** | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
+
+### osmoda-mesh — P2P Encrypted Daemon
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| Ed25519 identity | **Solid** | Signing key generation + persistence (0o600), zeroize on Drop; tested |
+| X25519 static key | **Solid** | Generated via `snow::Builder`, saved with public key; tested |
+| ML-KEM-768 keypair | **Solid** | FIPS 203 (via `ml-kem` crate), encapsulate/decapsulate roundtrip tested |
+| instance_id | **Solid** | `hex(SHA-256(noise_static_pubkey))[..32]` — deterministic, content-addressed; tested |
+| Identity signature | **Solid** | Ed25519 sign over canonical JSON; tampered-signature rejection tested |
+| Noise_XX handshake | **Solid** | `snow` crate, 3-message XX (X25519/ChaChaPoly/BLAKE2s), in-memory pipe test |
+| ML-KEM PQ exchange | **Solid** | Post-Noise encapsulation inside encrypted tunnel; both directions |
+| Hybrid HKDF re-key | **Solid** | `HKDF-SHA256(noise_hash || mlkem_1 || mlkem_2, info="osMODA-mesh-v1")`; tested |
+| TCP transport | **Functional** | Length-prefixed framing, `snow` encrypt/decrypt, connection state machine |
+| Auto-reconnect | **Functional** | Exponential backoff: 1s → 2s → 4s → 8s → max 60s; tested |
+| Invite codes | **Solid** | base64url-encoded JSON, TTL validation, roundtrip + expiry rejection tested |
+| Peer storage | **Solid** | JSON persistence, ConnectionState enum, save/load tested |
+| `/invite/create` | **Functional** | Generates invite with configurable TTL |
+| `/invite/accept` | **Functional** | Decodes invite, connects to peer, runs handshake |
+| `/peers` | **Functional** | Returns all known peers with connection state |
+| `/peer/{id}/send` | **Functional** | Sends encrypted MeshMessage to connected peer |
+| `/peer/{id}` DELETE | **Functional** | Graceful disconnect, updates state |
+| `/identity/rotate` | **Functional** | Generates new keypairs, disconnects all peers (re-invite required) |
+| `/identity` GET | **Solid** | Returns current MeshPublicIdentity |
+| `/health` GET | **Solid** | peer_count, connected_count, identity_ready; tested |
+| MeshMessage serde | **Solid** | 10 variants, all roundtrip-tested |
+| Wire framing | **Solid** | Length-prefixed encode/decode, empty payload edge case tested |
+| Audit logging | **Functional** | Logs mesh events to agentd ledger (connect, disconnect, send, receive) |
+| NixOS service | **Functional** | systemd unit, TCP 18800, hardening directives, state dir 0700 |
+| **Tests** | **26** | identity (5), handshake (3), messages (8+2), invite (3), peers (3), transport (2) |
+| **Known limitation** | — | No persistent transport state across restarts — peers must re-invite after daemon restart |
 
 ### osmoda-egress — Egress Proxy
 
@@ -109,6 +152,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 |-----------|----------|-------|
 | HTTP CONNECT proxy | **Functional** | Domain allowlist, localhost-only binding |
 | Capability tokens | **Planned** | Currently uses static allowlist, not per-request tokens |
+| **Tests** | **0** | No tests |
 
 ### agentctl — CLI Tool
 
@@ -116,6 +160,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 |-----------|----------|-------|
 | `events` subcommand | **Functional** | Queries ledger over Unix socket |
 | `verify-ledger` | **Functional** | Verifies hash chain integrity |
+| **Tests** | **0** | No tests |
 
 ---
 
@@ -123,12 +168,31 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| agentd-client.ts | **Functional** | HTTP-over-Unix-socket client |
-| keyd-client.ts | **Functional** | HTTP-over-Unix-socket client |
-| watch-client.ts | **Functional** | HTTP-over-Unix-socket client |
-| routines-client.ts | **Functional** | HTTP-over-Unix-socket client |
-| 37 tool registrations | **Functional** | All registered (incl. backup_create, backup_list); not integration-tested against live daemons |
-| Voice client | **Functional** | HTTP-over-Unix-socket client with status, speak, transcribe, record, listen |
+| agentd-client (inline) | **Functional** | HTTP-over-Unix-socket client for agentd |
+| keyd-client.ts | **Functional** | HTTP-over-Unix-socket client for keyd |
+| watch-client.ts | **Functional** | HTTP-over-Unix-socket client for watch |
+| routines-client.ts | **Functional** | HTTP-over-Unix-socket client for routines |
+| voice-client.ts | **Functional** | HTTP-over-Unix-socket client with status, speak, transcribe, record, listen |
+| mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
+| Tool registrations | **Functional** | **45 tools** verified (`grep -c registerTool index.ts` = 45). Not integration-tested against live daemons |
+
+### Tool breakdown (45 total)
+
+| Category | Count | Tools |
+|----------|-------|-------|
+| agentd | 5 | system_health, system_query, event_log, memory_store, memory_recall |
+| system | 4 | shell_exec, file_read, file_write, directory_list |
+| systemd | 2 | service_status, journal_logs |
+| network | 1 | network_info |
+| wallet (keyd) | 6 | wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt |
+| switch (watch) | 4 | safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback |
+| watcher (watch) | 2 | watcher_add, watcher_list |
+| routine (routines) | 3 | routine_add, routine_list, routine_trigger |
+| identity (agentd) | 1 | agent_card |
+| receipt (agentd) | 3 | receipt_list, incident_create, incident_step |
+| voice | 5 | voice_status, voice_speak, voice_transcribe, voice_record, voice_listen |
+| backup (agentd) | 2 | backup_create, backup_list |
+| mesh | 7 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health |
 
 ---
 
@@ -136,14 +200,34 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| osmoda.nix module | **Functional** | Options + 7 systemd services + Telegram/WhatsApp channels defined |
+| osmoda.nix module | **Functional** | Options + 8 systemd services + channels + mesh defined |
+| osmoda-agentd service | **Functional** | Runs as root, state dir at /var/lib/osmoda |
 | osmoda-keyd service | **Functional** | PrivateNetwork=true, RestrictAddressFamilies=AF_UNIX |
 | osmoda-watch service | **Functional** | Runs as root (needs nixos-rebuild access) |
 | osmoda-routines service | **Functional** | systemd hardening applied |
-| flake.nix overlays | **Functional** | 6 Rust packages built via crane |
+| osmoda-voice service | **Functional** | Requires PipeWire for audio I/O |
+| osmoda-mesh service | **Functional** | TCP 18800, systemd hardening, state dir 0700 |
+| osmoda-egress service | **Functional** | DynamicUser, domain-filtered proxy |
+| OpenClaw gateway service | **Functional** | Depends on agentd, config file generated from NixOS options |
+| Channel config (Telegram) | **Functional** | `channels.telegram.enable`, botTokenFile, allowedUsers |
+| Channel config (WhatsApp) | **Functional** | `channels.whatsapp.enable`, credentialDir, allowedNumbers |
+| Firewall rules | **Functional** | Mesh port (18800) opened conditionally when mesh.enable = true |
+| flake.nix overlays | **Functional** | 8 Rust packages built via crane |
 | dev-vm.nix | **Functional** | QEMU VM with Sway desktop |
 | iso.nix | **Functional** | Installer ISO config |
 | server.nix | **Functional** | Headless server config |
+
+---
+
+## Messaging Channels
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| Telegram NixOS options | **Functional** | `channels.telegram.enable`, botTokenFile, allowedUsers |
+| WhatsApp NixOS options | **Functional** | `channels.whatsapp.enable`, credentialDir, allowedNumbers |
+| Config file generation | **Functional** | Generates OpenClaw config JSON with channel settings, passed via `--config` |
+| Credential management | **Functional** | Activation script creates + secures secrets dir and WhatsApp credential dir |
+| Actual channel connections | **Depends on OpenClaw** | osModa generates config; OpenClaw runs the Telegram/WhatsApp adapters |
 
 ---
 
@@ -161,6 +245,10 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 6. **Socket auth is file-permissions only**: No token-based auth for Unix socket access. Relies on filesystem permissions (0600/0660).
 
+7. **Mesh peers don't survive restarts**: No persistent transport state. Peers must re-invite after daemon restart. Identity and peer metadata persist, but active connections do not.
+
+8. **Voice requires PipeWire**: STT/TTS work but recording/playback needs PipeWire running. Headless servers without audio won't use voice.
+
 ---
 
 ## Test Coverage
@@ -169,16 +257,17 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 cargo test --workspace
 ```
 
-| Crate | Tests | Status |
-|-------|-------|--------|
-| agentd | 11 | Pass (agent card, incidents, backup, hash chain, input validation, graceful shutdown) |
-| osmoda-keyd | 21 | Pass (sign/verify, keccak256, encryption, KDF, decimal policy, delete) |
-| osmoda-watch | 18 | Pass (state machine, persistence, health check serialization, input validation) |
-| osmoda-routines | 17 | Pass (cron parser, persistence, scheduler, action execution) |
-| osmoda-voice | 4 | Pass (STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment) |
-| agentctl | 0 | No tests |
-| osmoda-egress | 0 | No tests |
-| **Total** | **71** | **All pass** |
+| Crate | Tests | What's tested |
+|-------|-------|---------------|
+| agentd | 11 | Agent card serialization, incidents (create/get/steps/list/not-found), backup pruning, hash chain (integrity/collision/flush/schema) |
+| osmoda-keyd | 21 | ETH+SOL sign/verify, keccak256 vector, encryption roundtrip, Argon2 KDF, decimal policy (8 tests), wallet delete, persistence, cache eviction, label limit |
+| osmoda-watch | 18 | Switch state machine (3), watcher persistence (2), health check serde, input validation (12) |
+| osmoda-routines | 17 | Cron parser (6), persistence (2), validation (7), command timeout, defaults |
+| osmoda-voice | 4 | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
+| osmoda-mesh | 26 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (8+2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2) |
+| agentctl | 0 | — |
+| osmoda-egress | 0 | — |
+| **Total** | **97** | **All pass** |
 
 ---
 
@@ -225,7 +314,8 @@ User pays USDC → spawn.os.moda → Hetzner API (create server)
 3. **End-to-end VM test** — boot the dev VM, verify all daemons start and communicate
 4. **Integration tests** — bridge → daemon → ledger pipeline tests
 5. **Token-based socket auth** — capability tokens for fine-grained access control
-6. **NixOS-native deploy** — replace imperative nohup/iptables with osmoda.nix module on Hetzner
-7. **Telegram bot** — `/start <order_id>` for server management via Telegram
-8. **Email notifications** — send order_id + manage link after spawn
-9. **Plan upgrades** — resize Hetzner server via management dashboard
+6. **Persistent mesh sessions** — save/restore transport state across daemon restarts
+7. **NixOS-native deploy** — replace imperative nohup/iptables with osmoda.nix module on Hetzner
+8. **Telegram bot** — `/start <order_id>` for server management via Telegram
+9. **Email notifications** — send order_id + manage link after spawn
+10. **Plan upgrades** — resize Hetzner server via management dashboard

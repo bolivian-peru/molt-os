@@ -2,16 +2,16 @@
 
 ## Overview
 
-osModa is a NixOS distribution where the AI agent IS the operating system interface. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), and background automation (routines).
+osModa is a NixOS distribution where the AI agent IS the operating system interface. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), background automation (routines), and P2P encrypted server-to-server communication (mesh).
 
-All inter-daemon communication happens over Unix sockets. No TCP between components.
+Local inter-daemon communication happens over Unix sockets. osmoda-mesh adds TCP port 18800 for peer-to-peer connections between osModa instances.
 
 ## Trust Rings
 
 ```
-RING 0: OpenClaw + agentd + keyd + watch + routines
+RING 0: OpenClaw + agentd + keyd + watch + routines + mesh
   Full system access. Root-equivalent. See and control everything.
-  Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines
+  Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines, mesh
 
 RING 1: Approved Apps
   Sandboxed with declared capabilities. No root, no arbitrary filesystem.
@@ -34,35 +34,36 @@ RING 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 37 tools registered                 │
+│   osmoda-bridge plugin → 45 tools registered                 │
 │   Memory Backend → ZVEC search → injects into prompt (M1+)  │
-└──────┬──────────┬───────────┬──────────┬────────────────────┘
-       │          │           │          │
-       ▼          ▼           ▼          ▼
-┌──────────┐ ┌──────────┐ ┌─────────┐ ┌───────────┐
-│ agentd   │ │ keyd     │ │ watch   │ │ routines  │
-│          │ │          │ │         │ │           │
-│ /health  │ │ /wallet/ │ │/switch/ │ │/routine/  │
-│ /system/ │ │  create  │ │ begin   │ │ add       │
-│ /events/ │ │  list    │ │ status  │ │ list      │
-│ /memory/ │ │  sign    │ │ commit  │ │ trigger   │
-│ /agent/  │ │  send    │ │rollback │ │ history   │
-│ /receipt │ │          │ │/watcher/│ │           │
-│ /incidnt │ │ Private  │ │ add     │ │ Scheduler │
-│          │ │ Network  │ │ list    │ │ loop runs │
-│ Ledger   │ │ (no net) │ │ remove  │ │ every 60s │
-│ (SQLite) │ │          │ │         │ │           │
-│          │ │ AES-256  │ │ Health  │ │ Cron +    │
-│ Hash     │ │ GCM keys │ │ checks  │ │ interval  │
-│ chain    │ │          │ │ + auto  │ │ triggers  │
-│          │ │ Policy   │ │rollback │ │           │
-│          │ │ engine   │ │         │ │           │
-└──────────┘ └──────────┘ └─────────┘ └───────────┘
-  agentd.sock  keyd.sock  watch.sock  routines.sock
-  (root)       (root,     (root)      (root)
+└──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
+       │          │           │          │          │
+       ▼          ▼           ▼          ▼          ▼
+┌──────────┐ ┌──────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+│ agentd   │ │ keyd     │ │ watch   │ │routines │ │  mesh   │
+│          │ │          │ │         │ │         │ │         │
+│ /health  │ │ /wallet/ │ │/switch/ │ │/routine/│ │/invite/ │
+│ /system/ │ │  create  │ │ begin   │ │ add     │ │ create  │
+│ /events/ │ │  list    │ │ status  │ │ list    │ │ accept  │
+│ /memory/ │ │  sign    │ │ commit  │ │ trigger │ │/peers   │
+│ /agent/  │ │  send    │ │rollback │ │ history │ │/peer/{} │
+│ /receipt │ │          │ │/watcher/│ │         │ │  send   │
+│ /incidnt │ │ Private  │ │ add     │ │Scheduler│ │/identity│
+│          │ │ Network  │ │ list    │ │ loop    │ │         │
+│ Ledger   │ │ (no net) │ │ remove  │ │ every   │ │Noise_XX │
+│ (SQLite) │ │          │ │         │ │  60s    │ │ML-KEM   │
+│          │ │ AES-256  │ │ Health  │ │         │ │ 768     │
+│ Hash     │ │ GCM keys │ │ checks  │ │ Cron +  │ │         │
+│ chain    │ │          │ │ + auto  │ │interval │ │TCP:     │
+│          │ │ Policy   │ │rollback │ │triggers │ │18800    │
+│          │ │ engine   │ │         │ │         │ │         │
+└──────────┘ └──────────┘ └─────────┘ └─────────┘ └─────────┘
+  agentd.sock  keyd.sock  watch.sock routines.sock mesh.sock
+  (root)       (root,     (root)      (root)       (root)
                no network)
 
-All sockets under /run/osmoda/
+All Unix sockets under /run/osmoda/
+mesh also listens on TCP :18800 for peer-to-peer connections
 ```
 
 ## Daemon Details
@@ -108,6 +109,18 @@ All sockets under /run/osmoda/
 - **Triggers**: Cron expressions (`*/5 * * * *`), fixed intervals, event-based.
 - **Actions**: HealthCheck, ServiceMonitor, LogScan, MemoryMaintenance (M1+), Command, Webhook (needs egress).
 - **Hardening**: Graceful shutdown, subprocess timeouts on action execution.
+
+### osmoda-mesh — P2P Encrypted Communication
+
+- **Socket**: `/run/osmoda/mesh.sock` (Unix, local API)
+- **Port**: 18800/TCP (peer connections from other osModa instances)
+- **State**: `/var/lib/osmoda/mesh/` (0700 permissions)
+- **Role**: Enables encrypted, post-quantum-safe P2P communication between osModa instances.
+- **Cipher suite**: Noise_XX (X25519/ChaChaPoly/BLAKE2s) for the handshake. After transport is established, ML-KEM-768 encapsulation happens inside the encrypted tunnel. Final session keys are re-derived by combining both shared secrets via `HKDF-SHA256`. If classical crypto breaks, ML-KEM protects. If ML-KEM breaks, classical protects.
+- **Identity**: Each instance has a stable Ed25519 signing key, X25519 static key (for Noise), and ML-KEM-768 keypair. The `instance_id` is derived as `hex(SHA-256(noise_static_pubkey))[..32]`. Identity is signed so peers can verify authenticity.
+- **Pairing**: Invite-based. No central registry. Initiating peer generates a base64url invite code (endpoint + public keys, TTL-limited). Accepting peer decodes the invite, connects, runs the full handshake.
+- **Messages**: 10 typed variants (Heartbeat, HealthReport, Alert, Chat, LedgerSync, Command, CommandResponse, PeerAnnounce, KeyRotation, PqExchange). All encrypted on the wire.
+- **Hardening**: Keys zeroized on Drop, all key files 0600, graceful shutdown with CancellationToken across all background loops.
 
 ## Data Flow
 
@@ -267,4 +280,6 @@ spawn.os.moda is the commercial provisioning service (separate private repo). It
 - **watch**: Runs as root (needs `nixos-rebuild` and `systemctl` access). Auto-rollback is a safety net, not a security boundary.
 - **routines**: systemd hardening (NoNewPrivileges, ProtectKernelTunables). Runs scheduled tasks only.
 - **egress**: Domain allowlist. Only Ring 2 tools route through it.
-- **All sockets**: Unix domain sockets with restrictive file permissions. No TCP between components.
+- **mesh**: Noise_XX + ML-KEM-768 hybrid PQ. All peer traffic encrypted. Invite-based pairing, no global registry. Keys zeroized on shutdown.
+- **Local sockets**: Unix domain sockets with restrictive file permissions (0600/0660).
+- **Mesh TCP**: Port 18800. All traffic encrypted (Noise_XX transport mode). No plaintext ever on the wire.

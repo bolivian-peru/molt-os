@@ -8,10 +8,10 @@
 #   1. Validates SSH connectivity and key
 #   2. Installs NixOS via nixos-infect (if not already NixOS)
 #   3. Syncs the repo to the server via rsync
-#   4. Builds agentd + agentctl on the server
-#   5. Installs OpenClaw and sets up the osmoda-bridge plugin
+#   4. Builds all daemons (agentd, keyd, watch, routines, mesh, egress, agentctl)
+#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (45 tools)
 #   6. Installs workspace templates (AGENTS.md, SOUL.md, TOOLS.md, etc.)
-#   7. Starts the agentd systemd service
+#   7. Starts all daemon systemd services
 #
 # Prerequisites:
 #   - SSH access to the server (root)
@@ -172,7 +172,7 @@ log "Repo synced to ${REMOTE_DIR}."
 # Step 4: Build Rust binaries on server
 # ---------------------------------------------------------------------------
 
-log "Step 4: Building agentd and agentctl on server..."
+log "Step 4: Building all daemons on server..."
 
 ssh_cmd bash <<'REMOTE_BUILD'
 set -euo pipefail
@@ -194,21 +194,21 @@ if ! cargo build --release --workspace 2>&1; then
   exit 1
 fi
 
-# Verify binaries exist before copying
-for bin in agentd agentctl osmoda-egress; do
-  if [ ! -f "target/release/$bin" ]; then
-    echo "[deploy] ERROR: Binary not found after build: target/release/$bin"
-    exit 1
+# Verify and install all binaries
+echo "[deploy] Installing binaries..."
+for bin in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh; do
+  if [ -f "target/release/$bin" ]; then
+    cp "target/release/$bin" "/usr/local/bin/$bin"
+    echo "[deploy] Installed: $bin"
+  else
+    echo "[deploy] WARNING: Binary not found: target/release/$bin (skipping)"
   fi
 done
 
-echo "[deploy] Installing binaries..."
-cp target/release/agentd /usr/local/bin/agentd
-cp target/release/agentctl /usr/local/bin/agentctl
-cp target/release/osmoda-egress /usr/local/bin/osmoda-egress
-
-echo "[deploy] Binaries installed."
-ls -la /usr/local/bin/agentd /usr/local/bin/agentctl /usr/local/bin/osmoda-egress
+echo "[deploy] Binaries installed:"
+ls -la /usr/local/bin/agentd /usr/local/bin/agentctl /usr/local/bin/osmoda-egress \
+       /usr/local/bin/osmoda-keyd /usr/local/bin/osmoda-watch /usr/local/bin/osmoda-routines \
+       /usr/local/bin/osmoda-voice /usr/local/bin/osmoda-mesh 2>/dev/null || true
 REMOTE_BUILD
 
 log "Rust build complete."
@@ -295,10 +295,14 @@ cp /opt/osmoda/templates/IDENTITY.md "$WORKSPACE/IDENTITY.md" 2>/dev/null || tru
 cp /opt/osmoda/templates/USER.md "$WORKSPACE/USER.md" 2>/dev/null || true
 cp /opt/osmoda/templates/HEARTBEAT.md "$WORKSPACE/HEARTBEAT.md" 2>/dev/null || true
 
-# Create state directories
-mkdir -p /var/lib/osmoda/memory
-mkdir -p /var/lib/osmoda/ledger
+# Create state directories (matching install.sh)
+mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh}
+mkdir -p /var/backups/osmoda
 mkdir -p /run/osmoda
+chmod 700 /var/lib/osmoda/config
+chmod 700 /var/lib/osmoda/keyd
+chmod 700 /var/lib/osmoda/keyd/keys
+chmod 700 /var/lib/osmoda/mesh
 
 echo "[deploy] Workspace templates installed to $WORKSPACE"
 ls -la "$WORKSPACE/"
@@ -315,7 +319,7 @@ log "Step 7: Setting up agentd systemd service..."
 ssh_cmd bash <<'REMOTE_SYSTEMD'
 set -euo pipefail
 
-# Create systemd service file for agentd
+# --- agentd (core daemon — everything else depends on this) ---
 cat > /etc/systemd/system/osmoda-agentd.service <<'EOF'
 [Unit]
 Description=osModa Kernel Bridge Daemon
@@ -330,12 +334,8 @@ RestartSec=5
 RuntimeDirectory=osmoda
 StateDirectory=osmoda
 Environment=RUST_LOG=info
-
-# agentd runs as root -- it IS the system
 User=root
 Group=root
-
-# Ensure socket directory exists
 ExecStartPre=/bin/mkdir -p /run/osmoda
 ExecStartPre=/bin/mkdir -p /var/lib/osmoda
 
@@ -343,15 +343,132 @@ ExecStartPre=/bin/mkdir -p /var/lib/osmoda
 WantedBy=multi-user.target
 EOF
 
-# Reload and start
-systemctl daemon-reload
-systemctl enable osmoda-agentd.service
-systemctl restart osmoda-agentd.service
+# --- keyd (crypto wallet daemon — no network) ---
+if [ -f /usr/local/bin/osmoda-keyd ]; then
+cat > /etc/systemd/system/osmoda-keyd.service <<'EOF'
+[Unit]
+Description=osModa Crypto Wallet Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
 
-echo "[deploy] osmoda-agentd service status:"
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-keyd --socket /run/osmoda/keyd.sock --state-dir /var/lib/osmoda/keyd
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+PrivateNetwork=true
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# --- watch (SafeSwitch + autopilot watchers) ---
+if [ -f /usr/local/bin/osmoda-watch ]; then
+cat > /etc/systemd/system/osmoda-watch.service <<'EOF'
+[Unit]
+Description=osModa SafeSwitch + Watcher Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-watch --socket /run/osmoda/watch.sock --state-dir /var/lib/osmoda/watch
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# --- routines (background automation engine) ---
+if [ -f /usr/local/bin/osmoda-routines ]; then
+cat > /etc/systemd/system/osmoda-routines.service <<'EOF'
+[Unit]
+Description=osModa Routines Automation Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-routines --socket /run/osmoda/routines.sock --state-dir /var/lib/osmoda/routines
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# --- mesh (P2P encrypted agent-to-agent communication) ---
+if [ -f /usr/local/bin/osmoda-mesh ]; then
+cat > /etc/systemd/system/osmoda-mesh.service <<'EOF'
+[Unit]
+Description=osModa Mesh P2P Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-mesh --socket /run/osmoda/mesh.sock --state-dir /var/lib/osmoda/mesh --listen-port 18800
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# --- egress proxy ---
+if [ -f /usr/local/bin/osmoda-egress ]; then
+cat > /etc/systemd/system/osmoda-egress.service <<'EOF'
+[Unit]
+Description=osModa Egress Proxy
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-egress
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# Reload and enable all services
+systemctl daemon-reload
+
+for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-egress; do
+  if [ -f "/etc/systemd/system/${svc}.service" ]; then
+    systemctl enable "${svc}.service"
+    systemctl restart "${svc}.service"
+    echo "[deploy] Started: ${svc}"
+  fi
+done
+
+echo ""
+echo "[deploy] Service status:"
 systemctl status osmoda-agentd.service --no-pager || true
 
-# Verify socket exists
+# Verify agentd socket exists
 sleep 2
 if [ -S /run/osmoda/agentd.sock ]; then
   echo "[deploy] agentd socket is live at /run/osmoda/agentd.sock"
