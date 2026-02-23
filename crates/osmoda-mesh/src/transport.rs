@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::ChaCha20Poly1305;
 use snow::TransportState;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -34,6 +36,10 @@ pub struct MeshConnection {
     pub writer: Arc<Mutex<OwnedWriteHalf>>,
     pub phase: TransportPhase,
     pub pq_rekey_material: [u8; 32],
+    /// Counter-based nonce for PQ encryption (send direction).
+    pq_encrypt_nonce: Arc<Mutex<u64>>,
+    /// Counter-based nonce for PQ decryption (recv direction).
+    pq_decrypt_nonce: Arc<Mutex<u64>>,
 }
 
 impl MeshConnection {
@@ -64,21 +70,41 @@ impl MeshConnection {
             writer: Arc::new(Mutex::new(writer)),
             phase: TransportPhase::Connected,
             pq_rekey_material,
+            pq_encrypt_nonce: Arc::new(Mutex::new(0)),
+            pq_decrypt_nonce: Arc::new(Mutex::new(0)),
         }
     }
 
     /// Send a MeshMessage over the encrypted connection.
-    /// Encrypts under transport lock, then writes under writer lock.
+    /// Double-layer encryption: Noise (X25519) then ChaCha20-Poly1305 (ML-KEM material).
+    /// This ensures post-quantum protection is real — decryption requires both
+    /// the Noise session keys AND the ML-KEM-derived PQ key material.
     pub async fn send_message(&self, msg: &MeshMessage) -> Result<()> {
         let json = serde_json::to_string(msg)?;
-        // Encrypt first (brief lock on transport state)
-        let frame = {
+
+        // Layer 1: Noise encrypt (classical X25519 protection)
+        let noise_ciphertext = {
             let mut transport = self.transport_encrypt.lock().await;
             let mut encrypted = vec![0u8; json.len() + 16]; // AEAD tag overhead
             let len = transport.write_message(json.as_bytes(), &mut encrypted)?;
-            messages::encode_frame(&encrypted[..len])
+            encrypted.truncate(len);
+            encrypted
         };
-        // Write to the dedicated write half (independent from reader)
+
+        // Layer 2: PQ encrypt (ChaCha20-Poly1305 keyed by ML-KEM material)
+        let pq_ciphertext = {
+            let mut counter = self.pq_encrypt_nonce.lock().await;
+            let nonce = make_pq_nonce(*counter);
+            *counter += 1;
+            let cipher = ChaCha20Poly1305::new_from_slice(&self.pq_rekey_material)
+                .map_err(|e| anyhow::anyhow!("PQ cipher init failed: {e}"))?;
+            cipher
+                .encrypt(&nonce, noise_ciphertext.as_slice())
+                .map_err(|e| anyhow::anyhow!("PQ encrypt failed: {e}"))?
+        };
+
+        // Frame and send
+        let frame = messages::encode_frame(&pq_ciphertext);
         let mut writer = self.writer.lock().await;
         writer.write_all(&frame).await?;
         writer.flush().await?;
@@ -86,7 +112,7 @@ impl MeshConnection {
     }
 
     /// Receive a MeshMessage from the encrypted connection.
-    /// Reads under reader lock, then decrypts under transport lock.
+    /// Double-layer decryption: ChaCha20-Poly1305 (PQ) then Noise (classical).
     pub async fn recv_message(&self) -> Result<MeshMessage> {
         // Read the length-prefixed frame (reader lock only — does NOT block sends)
         let payload = {
@@ -105,15 +131,36 @@ impl MeshConnection {
             reader.read_exact(&mut payload).await?;
             payload
         };
-        // Decrypt (brief lock on transport state)
+
+        // Layer 2 (unwrap): PQ decrypt (ChaCha20-Poly1305 keyed by ML-KEM material)
+        let noise_ciphertext = {
+            let mut counter = self.pq_decrypt_nonce.lock().await;
+            let nonce = make_pq_nonce(*counter);
+            *counter += 1;
+            let cipher = ChaCha20Poly1305::new_from_slice(&self.pq_rekey_material)
+                .map_err(|e| anyhow::anyhow!("PQ cipher init failed: {e}"))?;
+            cipher
+                .decrypt(&nonce, payload.as_slice())
+                .map_err(|e| anyhow::anyhow!("PQ decrypt failed: {e}"))?
+        };
+
+        // Layer 1 (unwrap): Noise decrypt (classical X25519 protection)
         let mut transport = self.transport_decrypt.lock().await;
-        let mut decrypted = vec![0u8; payload.len()];
-        let len = transport.read_message(&payload, &mut decrypted)?;
+        let mut decrypted = vec![0u8; noise_ciphertext.len()];
+        let len = transport.read_message(&noise_ciphertext, &mut decrypted)?;
         drop(transport);
 
         let msg: MeshMessage = serde_json::from_slice(&decrypted[..len])?;
         Ok(msg)
     }
+}
+
+/// Build a 96-bit nonce from a counter for the PQ ChaCha20-Poly1305 layer.
+/// The counter occupies the first 8 bytes (little-endian u64), last 4 bytes are zero.
+fn make_pq_nonce(counter: u64) -> chacha20poly1305::Nonce {
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes[..8].copy_from_slice(&counter.to_le_bytes());
+    *chacha20poly1305::Nonce::from_slice(&nonce_bytes)
 }
 
 /// Exponential backoff parameters for reconnection.
@@ -203,5 +250,157 @@ mod tests {
         let _ = backoff.next_delay();
         backoff.reset();
         assert_eq!(backoff.next_delay(), std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_pq_nonce_generation() {
+        let n0 = make_pq_nonce(0);
+        let n1 = make_pq_nonce(1);
+        assert_ne!(n0, n1, "different counters should produce different nonces");
+
+        // Counter 0 → first 8 bytes all zero, last 4 zero
+        let expected_zero: [u8; 12] = [0; 12];
+        assert_eq!(n0.as_slice(), &expected_zero);
+
+        // Counter 1 → first byte is 1 (LE), rest zero
+        let mut expected_one = [0u8; 12];
+        expected_one[0] = 1;
+        assert_eq!(n1.as_slice(), &expected_one);
+    }
+
+    /// Full end-to-end test: Noise handshake → MeshConnection with PQ double-layer
+    /// encryption. Verifies that messages survive Noise + ChaCha20-Poly1305(ML-KEM)
+    /// and that both sides can communicate bidirectionally.
+    #[tokio::test]
+    async fn test_mesh_connection_pq_hybrid_roundtrip() {
+        use crate::handshake::{initiate_handshake, respond_handshake};
+        use crate::identity::MeshIdentity;
+        use tokio::net::TcpListener;
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let identity_a = MeshIdentity::load_or_create(dir_a.path()).unwrap();
+        let identity_b = MeshIdentity::load_or_create(dir_b.path()).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let result = respond_handshake(&mut stream, &identity_b).await.unwrap();
+            MeshConnection::new(
+                "client".to_string(),
+                stream,
+                result.transport,
+                result.pq_rekey_material,
+            )
+        });
+
+        let mut client_stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let client_result = initiate_handshake(&mut client_stream, &identity_a)
+            .await
+            .unwrap();
+        let client_conn = Arc::new(MeshConnection::new(
+            "server".to_string(),
+            client_stream,
+            client_result.transport,
+            client_result.pq_rekey_material,
+        ));
+
+        let server_conn = Arc::new(server.await.unwrap());
+
+        // Send from client → server (through Noise + PQ layers)
+        let msg = MeshMessage::Chat {
+            from: "test".to_string(),
+            text: "hello PQ world".to_string(),
+            room_id: None,
+        };
+        client_conn.send_message(&msg).await.unwrap();
+
+        let received = server_conn.recv_message().await.unwrap();
+        match received {
+            MeshMessage::Chat { text, .. } => assert_eq!(text, "hello PQ world"),
+            _ => panic!("wrong message type received"),
+        }
+
+        // Send from server → client (bidirectional)
+        let reply = MeshMessage::Heartbeat {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+        };
+        server_conn.send_message(&reply).await.unwrap();
+
+        let received_reply = client_conn.recv_message().await.unwrap();
+        match received_reply {
+            MeshMessage::Heartbeat { timestamp } => {
+                assert_eq!(timestamp, "2026-01-01T00:00:00Z");
+            }
+            _ => panic!("wrong message type received"),
+        }
+
+        // Send multiple messages to verify nonce counter synchronization
+        for i in 0..5 {
+            let msg = MeshMessage::Chat {
+                from: "test".to_string(),
+                text: format!("message {i}"),
+                room_id: None,
+            };
+            client_conn.send_message(&msg).await.unwrap();
+            let received = server_conn.recv_message().await.unwrap();
+            match received {
+                MeshMessage::Chat { text, .. } => assert_eq!(text, format!("message {i}")),
+                _ => panic!("wrong message type"),
+            }
+        }
+    }
+
+    /// Verify that mismatched PQ key material causes decryption failure.
+    #[tokio::test]
+    async fn test_pq_key_mismatch_fails() {
+        use crate::handshake::{initiate_handshake, respond_handshake};
+        use crate::identity::MeshIdentity;
+        use tokio::net::TcpListener;
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let identity_a = MeshIdentity::load_or_create(dir_a.path()).unwrap();
+        let identity_b = MeshIdentity::load_or_create(dir_b.path()).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut result = respond_handshake(&mut stream, &identity_b).await.unwrap();
+            // Tamper with PQ key material on server side
+            result.pq_rekey_material = [0xAA; 32];
+            MeshConnection::new(
+                "client".to_string(),
+                stream,
+                result.transport,
+                result.pq_rekey_material,
+            )
+        });
+
+        let mut client_stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let client_result = initiate_handshake(&mut client_stream, &identity_a)
+            .await
+            .unwrap();
+        let client_conn = Arc::new(MeshConnection::new(
+            "server".to_string(),
+            client_stream,
+            client_result.transport,
+            client_result.pq_rekey_material,
+        ));
+
+        let server_conn = Arc::new(server.await.unwrap());
+
+        // Client sends a message — server should fail to decrypt because PQ keys don't match
+        let msg = MeshMessage::Heartbeat {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+        };
+        client_conn.send_message(&msg).await.unwrap();
+
+        let result = server_conn.recv_message().await;
+        assert!(result.is_err(), "decryption should fail with mismatched PQ keys");
     }
 }

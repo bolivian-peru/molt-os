@@ -2,7 +2,7 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
 ## Maturity Levels
 
@@ -17,11 +17,11 @@ Last updated: 2026-02-23
 
 | Metric | Count |
 |--------|-------|
-| Rust crates | 8 (7 daemons + 1 CLI) |
-| Tests passing | 110 |
-| Bridge tools registered | 54 (verified: `grep -c registerTool index.ts` = 54) |
+| Rust crates | 9 (8 daemons + 1 CLI) |
+| Tests passing | 121 |
+| Bridge tools registered | 58 |
 | System skills | 15 |
-| NixOS systemd services | 10 (agentd, gateway, keyd, watch, routines, voice, mesh, egress, cloudflared, tailscale-auth) |
+| NixOS systemd services | 11 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, egress, cloudflared, tailscale-auth) |
 
 ---
 
@@ -149,7 +149,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | Group rooms | **Functional** | In-memory rooms with members + message history; room_id on Chat messages; 5 REST endpoints |
 | Audit logging | **Functional** | Logs to agentd ledger: connect, disconnect, message send/receive, health reports, alerts, DMs, room messages |
 | NixOS service | **Functional** | systemd unit, TCP 18800, hardening directives, state dir 0700 |
-| **Tests** | **28** | identity (5), handshake (3), messages (7 + chat DM + room_id), invite (3), peers (3), transport (2), rooms (3) |
+| **Tests** | **31** | identity (5), handshake (3), messages (7 + chat DM + room_id), invite (3), peers (3), transport (2), rooms (3) |
 | **Known limitation** | — | No persistent transport state across restarts — peers must re-invite after daemon restart |
 
 ### osmoda-egress — Egress Proxy
@@ -159,6 +159,21 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | HTTP CONNECT proxy | **Functional** | Domain allowlist, localhost-only binding |
 | Capability tokens | **Planned** | Currently uses static allowlist, not per-request tokens |
 | **Tests** | **0** | No tests |
+
+### osmoda-mcpd — MCP Server Manager
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| Server lifecycle (start/stop/restart) | **Functional** | Spawns child processes, monitors health, auto-restarts crashed servers |
+| Config loading | **Solid** | Reads NixOS-generated JSON config, handles missing/invalid files gracefully |
+| OpenClaw config generation | **Solid** | Generates MCP servers JSON for OpenClaw; tested with proxy and without |
+| Health monitoring | **Functional** | 10-second check loop, detects exited processes, auto-restart with count tracking |
+| Egress proxy injection | **Solid** | Injects HTTP_PROXY/HTTPS_PROXY for servers with allowedDomains |
+| Secret file injection | **Functional** | Reads secret from disk, injects as env var; warns but doesn't fail on read error |
+| Reload endpoint | **Functional** | Re-reads config, starts new servers, stops removed ones |
+| Receipt logging | **Functional** | Logs start/stop/crash/restart events to agentd ledger (best-effort) |
+| NixOS service | **Functional** | systemd unit, depends on agentd + egress |
+| **Tests** | **8** | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
 
 ### agentctl — CLI Tool
 
@@ -180,9 +195,10 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | routines-client.ts | **Functional** | HTTP-over-Unix-socket client for routines |
 | voice-client.ts | **Functional** | HTTP-over-Unix-socket client with status, speak, transcribe, record, listen |
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
-| Tool registrations | **Functional** | **54 tools** verified (`grep -c registerTool index.ts` = 54). Not integration-tested against live daemons |
+| mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
+| Tool registrations | **Functional** | **58 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (54 total)
+### Tool breakdown (58 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -199,6 +215,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | voice | 5 | voice_status, voice_speak, voice_transcribe, voice_record, voice_listen |
 | backup (agentd) | 2 | backup_create, backup_list |
 | mesh | 11 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health, mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history |
+| mcp (mcpd) | 4 | mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart |
 | safety | 4 | safety_rollback, safety_status, safety_panic, safety_restart |
 
 ---
@@ -207,13 +224,14 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| osmoda.nix module | **Functional** | Options + 10 systemd services + channels + mesh + remote access defined |
+| osmoda.nix module | **Functional** | Options + 11 systemd services + channels + mesh + mcpd + remote access defined |
 | osmoda-agentd service | **Functional** | Runs as root, state dir at /var/lib/osmoda |
 | osmoda-keyd service | **Functional** | PrivateNetwork=true, RestrictAddressFamilies=AF_UNIX |
 | osmoda-watch service | **Functional** | Runs as root (needs nixos-rebuild access) |
 | osmoda-routines service | **Functional** | systemd hardening applied |
 | osmoda-voice service | **Functional** | Requires PipeWire for audio I/O |
 | osmoda-mesh service | **Functional** | TCP 18800, systemd hardening, state dir 0700 |
+| osmoda-mcpd service | **Functional** | MCP server lifecycle, depends on agentd + egress |
 | osmoda-egress service | **Functional** | DynamicUser, domain-filtered proxy |
 | OpenClaw gateway service | **Functional** | Depends on agentd, config file generated from NixOS options |
 | Channel config (Telegram) | **Functional** | `channels.telegram.enable`, botTokenFile, allowedUsers |
@@ -221,7 +239,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | Remote access (Cloudflare) | **Functional** | `remoteAccess.cloudflare.enable`, quick tunnel or credentialed, systemd service |
 | Remote access (Tailscale) | **Functional** | `remoteAccess.tailscale.enable`, auto-auth oneshot, forwards to NixOS built-in |
 | Firewall rules | **Functional** | Mesh port (18800) opened conditionally when mesh.enable = true |
-| flake.nix overlays | **Functional** | 8 Rust packages built via crane |
+| flake.nix overlays | **Functional** | 9 Rust packages built via crane |
 | dev-vm.nix | **Functional** | QEMU VM with Sway desktop |
 | iso.nix | **Functional** | Installer ISO config |
 | server.nix | **Functional** | Headless server config |
@@ -273,10 +291,11 @@ cargo test --workspace
 | osmoda-watch | 18 | Switch state machine (3), watcher persistence (2), health check serde, input validation (12) |
 | osmoda-routines | 17 | Cron parser (6), persistence (2), validation (7), command timeout, defaults |
 | osmoda-voice | 4 | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
-| osmoda-mesh | 28 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2), room create/join/history (3) |
+| osmoda-mesh | 31 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2), room create/join/history (3) |
+| osmoda-mcpd | 8 | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
 | agentctl | 0 | — |
 | osmoda-egress | 0 | — |
-| **Total** | **110** | **All pass** |
+| **Total** | **121** | **All pass** |
 
 ---
 

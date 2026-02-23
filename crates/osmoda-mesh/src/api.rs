@@ -219,13 +219,25 @@ pub async fn peer_disconnect_handler(
 // ── Identity endpoints ──
 
 /// POST /identity/rotate — rotate all keys and generate new identity.
+/// Deletes existing key files first to force generation of fresh keys.
 pub async fn identity_rotate_handler(
     State(state): State<SharedState>,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
     let mut st = state.lock().await;
 
-    // Generate new identity
     let data_dir_path = std::path::Path::new(&st.data_dir);
+
+    // Delete existing key files to force fresh generation
+    for filename in &["ed25519.key", "noise_static.key", "noise_static.pub", "mlkem.dk"] {
+        let path = data_dir_path.join(filename);
+        if path.exists() {
+            if let Err(e) = std::fs::remove_file(&path) {
+                tracing::warn!(file = %path.display(), error = %e, "failed to remove old key file");
+            }
+        }
+    }
+
+    // Now load_or_create will take the "create" branch since key files are gone
     let new_identity =
         crate::identity::MeshIdentity::load_or_create(data_dir_path).map_err(|e| {
             (

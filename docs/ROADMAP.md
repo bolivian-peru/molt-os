@@ -1,8 +1,8 @@
 # osModa — Feature Roadmap
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
-Current state: 110 tests passing, 8 Rust crates (7 daemons + 1 CLI), 54 bridge tools, 15 skills.
+Current state: 121 tests passing, 9 Rust crates (8 daemons + 1 CLI), 58 bridge tools, 15 skills.
 This document covers what's being added next, in priority order.
 
 ---

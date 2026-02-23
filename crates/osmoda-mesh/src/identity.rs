@@ -127,15 +127,32 @@ impl MeshIdentity {
     }
 
     /// Produce canonical JSON for signing (signature field excluded).
+    /// Uses an explicit BTreeMap to guarantee key ordering regardless of
+    /// serde_json feature flags (e.g. preserve_order). This prevents
+    /// silent signature breakage if dependencies change serialization order.
     fn canonical_json(identity: &MeshPublicIdentity) -> Result<String> {
-        let signable = serde_json::json!({
-            "instance_id": identity.instance_id,
-            "ed25519_pubkey": identity.ed25519_pubkey,
-            "noise_static_pubkey": identity.noise_static_pubkey,
-            "mlkem_encap_key": identity.mlkem_encap_key,
-            "capabilities": identity.capabilities,
-        });
-        Ok(serde_json::to_string(&signable)?)
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            "capabilities",
+            serde_json::to_value(&identity.capabilities)?,
+        );
+        map.insert(
+            "ed25519_pubkey",
+            serde_json::Value::String(identity.ed25519_pubkey.clone()),
+        );
+        map.insert(
+            "instance_id",
+            serde_json::Value::String(identity.instance_id.clone()),
+        );
+        map.insert(
+            "mlkem_encap_key",
+            serde_json::Value::String(identity.mlkem_encap_key.clone()),
+        );
+        map.insert(
+            "noise_static_pubkey",
+            serde_json::Value::String(identity.noise_static_pubkey.clone()),
+        );
+        Ok(serde_json::to_string(&map)?)
     }
 
     /// Verify the signature on a public identity.

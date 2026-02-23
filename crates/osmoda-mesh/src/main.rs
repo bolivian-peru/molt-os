@@ -16,6 +16,7 @@ use axum::Router;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, TcpStream, UnixListener};
+use tokio::sync::Semaphore;
 use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -272,7 +273,18 @@ pub async fn post_to_agentd(socket_path: &str, body: String) -> anyhow::Result<(
     Ok(())
 }
 
+/// Maximum concurrent handshakes to prevent resource exhaustion from DoS.
+const MAX_CONCURRENT_HANDSHAKES: usize = 32;
+
+/// Handshake timeout — prevents slow-loris attacks that block threads indefinitely.
+const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Maximum unknown inbound peers allowed before rejecting new unknowns.
+const MAX_UNKNOWN_INBOUND_PEERS: usize = 8;
+
 /// Background loop that accepts incoming TCP connections from peers.
+/// Security: semaphore caps concurrent handshakes, timeout prevents slow-loris,
+/// unknown inbound peers are capped to prevent stranger accumulation.
 async fn tcp_accept_loop(
     state: Arc<Mutex<MeshState>>,
     addr: &str,
@@ -286,6 +298,8 @@ async fn tcp_accept_loop(
         }
     };
 
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_HANDSHAKES));
+
     tracing::info!(addr = %addr, "TCP peer listener started");
 
     loop {
@@ -297,9 +311,20 @@ async fn tcp_accept_loop(
             result = listener.accept() => {
                 match result {
                     Ok((mut stream, peer_addr)) => {
+                        // Acquire semaphore permit — reject if too many concurrent handshakes
+                        let permit = match semaphore.clone().try_acquire_owned() {
+                            Ok(p) => p,
+                            Err(_) => {
+                                tracing::warn!(peer = %peer_addr, "rejected: too many concurrent handshakes");
+                                continue;
+                            }
+                        };
+
                         tracing::info!(peer = %peer_addr, "incoming peer connection");
                         let state = state.clone();
                         tokio::spawn(async move {
+                            let _permit = permit; // held until task completes
+
                             // Extract keys briefly while holding the lock
                             let (keys, agentd_socket) = {
                                 let st = state.lock().await;
@@ -316,8 +341,15 @@ async fn tcp_accept_loop(
                             };
                             let temp_identity = keys.into_identity();
 
-                            match handshake::respond_handshake(&mut stream, &temp_identity).await {
-                                Ok(result) => {
+                            // Handshake with timeout — prevents slow-loris
+                            let handshake_result = tokio::time::timeout(
+                                HANDSHAKE_TIMEOUT,
+                                handshake::respond_handshake(&mut stream, &temp_identity),
+                            )
+                            .await;
+
+                            match handshake_result {
+                                Ok(Ok(result)) => {
                                     let peer_id = result.peer_identity.instance_id.clone();
                                     tracing::info!(peer_id = %peer_id, "peer handshake completed");
 
@@ -333,6 +365,27 @@ async fn tcp_accept_loop(
                                     let conn_clone = connection.clone();
                                     let logger = {
                                         let mut st = state.lock().await;
+
+                                        // Check if peer is known
+                                        let is_known = st.peers.iter().any(|p| p.id == peer_id);
+
+                                        if !is_known {
+                                            // Count existing unknown inbound peers
+                                            let unknown_count = st
+                                                .peers
+                                                .iter()
+                                                .filter(|p| p.endpoint.is_empty())
+                                                .count();
+                                            if unknown_count >= MAX_UNKNOWN_INBOUND_PEERS {
+                                                tracing::warn!(
+                                                    peer_id = %peer_id,
+                                                    peer_addr = %peer_addr,
+                                                    "rejected unknown inbound peer: limit reached ({MAX_UNKNOWN_INBOUND_PEERS})"
+                                                );
+                                                return;
+                                            }
+                                        }
+
                                         st.connections.insert(peer_id.clone(), connection);
 
                                         // Update existing peer or add as new inbound peer
@@ -343,6 +396,11 @@ async fn tcp_accept_loop(
                                             peer.last_seen = Some(chrono::Utc::now().to_rfc3339());
                                         } else {
                                             // Unknown inbound peer — add to peers list with empty endpoint
+                                            tracing::warn!(
+                                                peer_id = %peer_id,
+                                                peer_addr = %peer_addr,
+                                                "accepting unknown inbound peer"
+                                            );
                                             let now = chrono::Utc::now().to_rfc3339();
                                             st.peers.push(PeerInfo {
                                                 id: peer_id.clone(),
@@ -368,11 +426,18 @@ async fn tcp_accept_loop(
                                     // Spawn recv loop after releasing the lock
                                     spawn_recv_loop(peer_id, conn_clone, state, agentd_socket);
                                 }
-                                Err(e) => {
+                                Ok(Err(e)) => {
                                     tracing::warn!(
                                         peer = %peer_addr,
                                         error = %e,
                                         "peer handshake failed"
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::warn!(
+                                        peer = %peer_addr,
+                                        "peer handshake timed out ({}s limit)",
+                                        HANDSHAKE_TIMEOUT.as_secs()
                                     );
                                 }
                             }
@@ -620,6 +685,37 @@ pub async fn initiate_outbound_connection(
             Ok(result) => {
                 let connected_peer_id = result.peer_identity.instance_id.clone();
                 tracing::info!(peer_id = %connected_peer_id, "outbound handshake completed");
+
+                // SECURITY: Verify peer's Noise static key matches what we got from the invite.
+                // This prevents MITM attacks where an attacker intercepts the invite,
+                // changes the endpoint, and tries to impersonate the inviter.
+                let expected_noise_pubkey = {
+                    let st = state.lock().await;
+                    st.peers
+                        .iter()
+                        .find(|p| p.id == peer_id)
+                        .map(|p| p.noise_static_pubkey.clone())
+                };
+                if let Some(ref expected) = expected_noise_pubkey {
+                    if !expected.is_empty()
+                        && result.peer_identity.noise_static_pubkey != *expected
+                    {
+                        tracing::error!(
+                            peer_id = %peer_id,
+                            expected = %expected,
+                            got = %result.peer_identity.noise_static_pubkey,
+                            "SECURITY: peer static key mismatch — possible MITM attack"
+                        );
+                        let mut st = state.lock().await;
+                        if let Some(peer) = st.peers.iter_mut().find(|p| p.id == peer_id) {
+                            peer.connection_state = ConnectionState::Failed {
+                                reason: "static key mismatch — possible MITM".to_string(),
+                                at: chrono::Utc::now().to_rfc3339(),
+                            };
+                        }
+                        continue;
+                    }
+                }
 
                 let connection = Arc::new(MeshConnection::new(
                     connected_peer_id.clone(),

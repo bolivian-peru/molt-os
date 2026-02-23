@@ -32,6 +32,8 @@ ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
 # Hybrid KDF
 hkdf = "0.12"
 sha2 = "0.10"
+# PQ transport layer (double-encrypt: Noise + ChaCha20-Poly1305 keyed by ML-KEM material)
+chacha20poly1305 = "0.10"
 # Key handling
 rand = "0.8"
 zeroize = { version = "1", features = ["derive"] }
