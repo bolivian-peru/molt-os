@@ -156,21 +156,20 @@ The AI doesn't shell out. It calls typed tools that return structured JSON:
 
 ```
 system_health          system_query           event_log
-memory_store           memory_recall          memory_ingest
-shell_exec             file_read              file_write
-directory_list         service_status         journal_logs
-network_info           wallet_create          wallet_list
-wallet_sign            wallet_send            wallet_delete
-wallet_receipt         safe_switch_begin      safe_switch_status
-safe_switch_commit     safe_switch_rollback   watcher_add
-watcher_list           routine_add            routine_list
-routine_trigger        agent_card             receipt_list
-incident_create        incident_step          voice_status
-voice_speak            voice_transcribe       voice_record
-voice_listen           backup_create          backup_list
-mesh_identity          mesh_invite_create     mesh_invite_accept
-mesh_peers             mesh_peer_send         mesh_peer_disconnect
-mesh_health
+memory_store           memory_recall          shell_exec
+file_read              file_write             directory_list
+service_status         journal_logs           network_info
+wallet_create          wallet_list            wallet_sign
+wallet_send            wallet_delete          wallet_receipt
+safe_switch_begin      safe_switch_status     safe_switch_commit
+safe_switch_rollback   watcher_add            watcher_list
+routine_add            routine_list           routine_trigger
+agent_card             receipt_list           incident_create
+incident_step          voice_status           voice_speak
+voice_transcribe       voice_record           voice_listen
+backup_create          backup_list            mesh_identity
+mesh_invite_create     mesh_invite_accept     mesh_peers
+mesh_peer_send         mesh_peer_disconnect   mesh_health
 ```
 
 ### 15 System Skills

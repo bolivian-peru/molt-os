@@ -57,16 +57,19 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    Runs scheduled tasks between agent conversations (health checks, service monitors, log scans).
    Default routines match HEARTBEAT.md cadences.
 
-7. **osmoda-mesh** (Rust) — P2P encrypted agent-to-agent communication daemon. Unix socket at `/run/osmoda/mesh.sock`,
+7. **osmoda-voice** (Rust) — Local speech-to-text (whisper.cpp) + text-to-speech (piper).
+   Unix socket at `/run/osmoda/voice.sock`. All processing on-device. No cloud APIs.
+
+8. **osmoda-mesh** (Rust) — P2P encrypted agent-to-agent communication daemon. Unix socket at `/run/osmoda/mesh.sock`,
    TCP listener at port 18800. Noise_XX (X25519/ChaChaPoly/BLAKE2s) + ML-KEM-768 hybrid post-quantum.
    Invite-based pairing, no central server. Ed25519 identity signatures.
 
-8. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
+9. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
    file-manager, network-manager, service-explorer.
 
-9. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
+10. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
    Generates OpenClaw config file from NixOS options (channels, auth, plugins).
    Channel options: `channels.telegram` and `channels.whatsapp` — config generation
    and credential management; actual connections handled by OpenClaw.
@@ -123,6 +126,13 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── routine.rs                     # Routine definitions + action execution
       ├── scheduler.rs                   # Cron parser + interval scheduler
       └── api.rs                         # Axum handlers (/routine/*)
+./crates/osmoda-voice/                   # Rust: local voice (whisper.cpp + piper)
+  ├── Cargo.toml
+  └── src/
+      ├── main.rs                        # Entry + socket setup
+      ├── stt.rs                         # Speech-to-text (whisper.cpp)
+      ├── tts.rs                         # Text-to-speech (piper)
+      └── vad.rs                         # Voice activity detection
 ./crates/osmoda-mesh/                    # Rust: P2P encrypted agent-to-agent mesh
   ├── Cargo.toml
   └── src/
