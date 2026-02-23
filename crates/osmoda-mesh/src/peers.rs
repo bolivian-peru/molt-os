@@ -33,11 +33,17 @@ pub fn save_peers(peers: &[PeerInfo], dir: &str) -> anyhow::Result<()> {
 }
 
 /// Load peers from a JSON file. Returns empty vec if file doesn't exist.
+/// All connection states are reset to Disconnected on load — there are no
+/// live TCP connections at startup, so stale "connected" state from disk
+/// would prevent the health loop from attempting reconnection.
 pub fn load_peers(dir: &str) -> Vec<PeerInfo> {
     let path = std::path::Path::new(dir).join("peers.json");
     if path.exists() {
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(peers) = serde_json::from_str::<Vec<PeerInfo>>(&data) {
+            if let Ok(mut peers) = serde_json::from_str::<Vec<PeerInfo>>(&data) {
+                for peer in &mut peers {
+                    peer.connection_state = ConnectionState::Disconnected;
+                }
                 return peers;
             }
         }
