@@ -9,7 +9,7 @@
 #   2. Installs NixOS via nixos-infect (if not already NixOS)
 #   3. Syncs the repo to the server via rsync
 #   4. Builds all daemons (agentd, keyd, watch, routines, mesh, egress, agentctl)
-#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (45 tools)
+#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (50 tools)
 #   6. Installs workspace templates (AGENTS.md, SOUL.md, TOOLS.md, etc.)
 #   7. Starts all daemon systemd services
 #
@@ -364,7 +364,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-keyd --socket /run/osmoda/keyd.sock --data-dir /var/lib/osmoda/keyd
+ExecStart=/usr/local/bin/osmoda-keyd --socket /run/osmoda/keyd.sock --data-dir /var/lib/osmoda/keyd --policy-file /var/lib/osmoda/keyd/policy.json --agentd-socket /run/osmoda/agentd.sock
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -387,7 +387,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-watch --socket /run/osmoda/watch.sock --data-dir /var/lib/osmoda/watch
+ExecStart=/usr/local/bin/osmoda-watch --socket /run/osmoda/watch.sock --agentd-socket /run/osmoda/agentd.sock --data-dir /var/lib/osmoda/watch
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -409,7 +409,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-routines --socket /run/osmoda/routines.sock
+ExecStart=/usr/local/bin/osmoda-routines --socket /run/osmoda/routines.sock --agentd-socket /run/osmoda/agentd.sock --routines-dir /var/lib/osmoda/routines
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -431,7 +431,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-mesh --socket /run/osmoda/mesh.sock --data-dir /var/lib/osmoda/mesh --listen-port 18800
+ExecStart=/usr/local/bin/osmoda-mesh --socket /run/osmoda/mesh.sock --data-dir /var/lib/osmoda/mesh --agentd-socket /run/osmoda/agentd.sock --listen-port 18800
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -491,6 +491,148 @@ REMOTE_SYSTEMD
 log "All daemon services configured and started."
 
 # ---------------------------------------------------------------------------
+# Step 8: Register plugin with OpenClaw and start gateway
+# ---------------------------------------------------------------------------
+
+log "Step 8: Registering osmoda-bridge plugin and starting gateway..."
+
+ssh_cmd bash <<'REMOTE_GATEWAY'
+set -euo pipefail
+
+export PATH="/opt/openclaw/node_modules/.bin:$PATH"
+
+# Register the plugin with OpenClaw (--link avoids copying)
+if command -v openclaw &>/dev/null; then
+  # Install plugin via OpenClaw's plugin system
+  openclaw plugins install --link /opt/osmoda/packages/osmoda-bridge 2>&1 || true
+  echo "[deploy] osmoda-bridge plugin registered."
+
+  # Configure gateway auth mode
+  openclaw config set gateway.mode local 2>/dev/null || true
+  openclaw config set gateway.auth.mode none 2>/dev/null || true
+
+  # Configure API key if present
+  if [ -f /var/lib/osmoda/config/api-key ]; then
+    API_KEY=$(cat /var/lib/osmoda/config/api-key)
+    mkdir -p /root/.openclaw/agents/main/agent
+    node -e "
+      const fs = require('fs');
+      const auth = {
+        profiles: {
+          'anthropic:manual': {
+            provider: 'anthropic',
+            kind: 'api-key',
+            token: process.argv[1],
+            createdAt: new Date().toISOString(),
+            label: 'manual'
+          }
+        },
+        order: ['anthropic:manual']
+      };
+      fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+      console.log('[deploy] API key configured in OpenClaw auth-profiles.json');
+    " "$API_KEY"
+  fi
+
+  # Set env vars for daemon sockets
+  cat > /var/lib/osmoda/config/gateway-env <<'ENVEOF'
+OSMODA_SOCKET=/run/osmoda/agentd.sock
+OSMODA_KEYD_SOCKET=/run/osmoda/keyd.sock
+OSMODA_WATCH_SOCKET=/run/osmoda/watch.sock
+OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
+OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
+OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
+ENVEOF
+  chmod 600 /var/lib/osmoda/config/gateway-env
+
+  # Create gateway systemd service
+  cat > /etc/systemd/system/osmoda-gateway.service <<'EOF'
+[Unit]
+Description=osModa AI Gateway (OpenClaw)
+After=network.target osmoda-agentd.service
+Wants=osmoda-agentd.service
+
+[Service]
+Type=simple
+ExecStart=/opt/openclaw/node_modules/.bin/openclaw gateway --port 18789
+Restart=always
+RestartSec=5
+WorkingDirectory=/root
+EnvironmentFile=-/var/lib/osmoda/config/env
+EnvironmentFile=-/var/lib/osmoda/config/gateway-env
+Environment=NODE_ENV=production
+Environment=PATH=/opt/openclaw/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable osmoda-gateway.service
+  systemctl restart osmoda-gateway.service
+  sleep 3
+
+  if systemctl is-active osmoda-gateway.service >/dev/null 2>&1; then
+    echo "[deploy] OpenClaw gateway started on port 18789."
+  else
+    echo "[deploy] WARNING: Gateway failed to start. Check: journalctl -u osmoda-gateway"
+  fi
+else
+  echo "[deploy] WARNING: openclaw not found. Install Node.js and OpenClaw first."
+fi
+REMOTE_GATEWAY
+
+log "Gateway setup complete."
+
+# ---------------------------------------------------------------------------
+# Step 9: Verify everything
+# ---------------------------------------------------------------------------
+
+log "Step 9: Running verification..."
+
+ssh_cmd bash <<'REMOTE_VERIFY'
+set -euo pipefail
+echo ""
+echo "=== osModa Deployment Verification ==="
+echo ""
+
+# Check daemons
+for daemon in agentd keyd watch routines mesh; do
+  sock="/run/osmoda/${daemon}.sock"
+  if [ -S "$sock" ]; then
+    health=$(curl -sf --unix-socket "$sock" http://localhost/health 2>/dev/null || echo '{"status":"error"}')
+    status=$(echo "$health" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+    echo "  ✓ ${daemon}: ${status:-unknown}"
+  else
+    echo "  ✗ ${daemon}: socket missing ($sock)"
+  fi
+done
+
+# Check gateway
+if systemctl is-active osmoda-gateway.service >/dev/null 2>&1; then
+  echo "  ✓ gateway: running on port 18789"
+else
+  echo "  ✗ gateway: not running"
+fi
+
+# Check plugin
+export PATH="/opt/openclaw/node_modules/.bin:$PATH"
+plugin_loaded=$(openclaw plugins list 2>&1 | grep -c "osmoda.*loaded" || echo "0")
+echo "  ✓ osmoda-bridge plugin: ${plugin_loaded} loaded"
+
+# Check workspace
+tpl_count=$(ls /root/.openclaw/workspace/*.md 2>/dev/null | wc -l)
+skill_count=$(ls -d /root/.openclaw/workspace/skills/*/ 2>/dev/null | wc -l)
+echo "  ✓ templates: ${tpl_count} files"
+echo "  ✓ skills: ${skill_count} skills"
+
+echo ""
+echo "=== Verification Complete ==="
+REMOTE_VERIFY
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -503,11 +645,11 @@ info "Repo:       ${REMOTE_DIR}"
 info "State:      ${OSMODA_STATE}"
 info "Socket:     ${OSMODA_RUN}/agentd.sock"
 info "Plugin:     ~/.openclaw/plugins/osmoda-bridge"
+info "Gateway:    http://localhost:18789 (SSH tunnel needed)"
 info "Workspace:  ~/.openclaw/workspace (+ ${WORKSPACE_DIR})"
 info "Skills:     ~/.openclaw/workspace/skills/ (15 system skills)"
 echo ""
-info "Next steps:"
-info "  ssh root@${SERVER_IP}"
-info "  curl --unix-socket /run/osmoda/agentd.sock http://localhost/health"
-info "  openclaw  # start chatting with your OS"
+info "Access from your machine:"
+info "  ssh -L 18789:localhost:18789 root@${SERVER_IP}"
+info "  Then open: http://localhost:18789"
 echo ""

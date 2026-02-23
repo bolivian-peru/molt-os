@@ -12,7 +12,7 @@
 #   1. Converts your server to NixOS (via nixos-infect) — optional
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the osmoda-bridge plugin (45 system tools)
+#   4. Sets up the osmoda-bridge plugin (50 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #   7. Opens the setup wizard at localhost:18789
@@ -290,18 +290,17 @@ PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
 PLUGIN_DST="$INSTALL_DIR/osmoda-bridge-plugin"
 
 # Copy plugin files (not symlink — avoids path issues)
-# Glob copies all .ts (index, keyd-client, watch-client, routines-client, voice-client, mesh-client)
-# and all .json (package.json, openclaw.plugin.json, tsconfig.json)
 mkdir -p "$PLUGIN_DST"
 cp "$PLUGIN_SRC"/*.ts "$PLUGIN_DST/"
 cp "$PLUGIN_SRC"/*.json "$PLUGIN_DST/"
 
-# Configure OpenClaw
+# Register plugin with OpenClaw
 mkdir -p /root/.openclaw
+openclaw config set gateway.mode local 2>/dev/null || true
 openclaw config set gateway.auth.mode none 2>/dev/null || true
-openclaw config set plugins.allow '["osmoda-bridge"]' 2>/dev/null || true
+openclaw plugins install --link "$PLUGIN_DST" 2>/dev/null || true
 
-log "Bridge plugin installed with 45 system tools."
+log "Bridge plugin installed with 50 system tools."
 
 # ---------------------------------------------------------------------------
 # Step 7: Install workspace templates + skills
@@ -359,6 +358,39 @@ if [ -n "$API_KEY" ]; then
   chmod 600 "$STATE_DIR/config/api-key"
   printf 'ANTHROPIC_API_KEY=%s\n' "$API_KEY" > "$STATE_DIR/config/env"
   chmod 600 "$STATE_DIR/config/env"
+
+  # Write OpenClaw auth-profiles.json (the format OpenClaw actually reads)
+  mkdir -p /root/.openclaw/agents/main/agent
+  if command -v node &>/dev/null; then
+    node -e "
+      const fs = require('fs');
+      const auth = {
+        profiles: {
+          'anthropic:manual': {
+            provider: 'anthropic',
+            kind: 'api-key',
+            token: process.argv[1],
+            createdAt: new Date().toISOString(),
+            label: 'manual'
+          }
+        },
+        order: ['anthropic:manual']
+      };
+      fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+    " "$API_KEY"
+  fi
+
+  # Gateway env vars for daemon sockets
+  cat > "$STATE_DIR/config/gateway-env" <<GWEOF
+OSMODA_SOCKET=/run/osmoda/agentd.sock
+OSMODA_KEYD_SOCKET=/run/osmoda/keyd.sock
+OSMODA_WATCH_SOCKET=/run/osmoda/watch.sock
+OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
+OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
+OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
+GWEOF
+  chmod 600 "$STATE_DIR/config/gateway-env"
+
   log "API key configured."
 else
   log "Step 8: No API key provided — setup wizard will run on port 18789."
@@ -373,21 +405,54 @@ log "Step 9: Starting services..."
 if [ "$OS_TYPE" = "nixos" ]; then
   # On NixOS, services should be managed via osmoda.nix module, not imperative unit files.
   # Start services directly if binaries exist, but don't write unit files.
-  log "NixOS detected. Use the osmoda.nix NixOS module for proper service management."
-  log "Starting agentd directly for now..."
+  log "NixOS detected. Use the osmoda.nix NixOS module for persistent service management."
+  log "Starting all daemons directly..."
 
   mkdir -p "$RUN_DIR" "$STATE_DIR"
-  # Kill any existing agentd instance
+  mkdir -p "$STATE_DIR"/{keyd/keys,watch,routines,mesh}
+  chmod 700 "$STATE_DIR/keyd" "$STATE_DIR/keyd/keys" "$STATE_DIR/mesh"
+
+  # Kill any existing daemon instances
   pkill -f "agentd.*--socket" 2>/dev/null || true
-  rm -f "$RUN_DIR/agentd.sock"
+  pkill -f "osmoda-keyd" 2>/dev/null || true
+  pkill -f "osmoda-watch" 2>/dev/null || true
+  pkill -f "osmoda-routines" 2>/dev/null || true
+  pkill -f "osmoda-mesh" 2>/dev/null || true
+  rm -f "$RUN_DIR"/*.sock
   sleep 1
+
+  # Start agentd (everything depends on this)
   if [ -f "$INSTALL_DIR/bin/agentd" ]; then
-    "$INSTALL_DIR/bin/agentd" --socket "$RUN_DIR/agentd.sock" --state-dir "$STATE_DIR" &
-    AGENTD_PID=$!
-    log "agentd started (PID $AGENTD_PID). Add osmoda.nix module for persistent service."
+    nohup "$INSTALL_DIR/bin/agentd" --socket "$RUN_DIR/agentd.sock" --state-dir "$STATE_DIR" > /var/log/osmoda-agentd.log 2>&1 &
+    log "agentd started (PID $!)."
+    sleep 2
   fi
 
-  # Skip to done
+  # Start keyd
+  if [ -f "$INSTALL_DIR/bin/osmoda-keyd" ]; then
+    nohup "$INSTALL_DIR/bin/osmoda-keyd" --socket "$RUN_DIR/keyd.sock" --data-dir "$STATE_DIR/keyd" --policy-file "$STATE_DIR/keyd/policy.json" --agentd-socket "$RUN_DIR/agentd.sock" > /var/log/osmoda-keyd.log 2>&1 &
+    log "osmoda-keyd started (PID $!)."
+  fi
+
+  # Start watch
+  if [ -f "$INSTALL_DIR/bin/osmoda-watch" ]; then
+    nohup "$INSTALL_DIR/bin/osmoda-watch" --socket "$RUN_DIR/watch.sock" --agentd-socket "$RUN_DIR/agentd.sock" --data-dir "$STATE_DIR/watch" > /var/log/osmoda-watch.log 2>&1 &
+    log "osmoda-watch started (PID $!)."
+  fi
+
+  # Start routines
+  if [ -f "$INSTALL_DIR/bin/osmoda-routines" ]; then
+    nohup "$INSTALL_DIR/bin/osmoda-routines" --socket "$RUN_DIR/routines.sock" --agentd-socket "$RUN_DIR/agentd.sock" --routines-dir "$STATE_DIR/routines" > /var/log/osmoda-routines.log 2>&1 &
+    log "osmoda-routines started (PID $!)."
+  fi
+
+  # Start mesh
+  if [ -f "$INSTALL_DIR/bin/osmoda-mesh" ]; then
+    nohup "$INSTALL_DIR/bin/osmoda-mesh" --socket "$RUN_DIR/mesh.sock" --data-dir "$STATE_DIR/mesh" --agentd-socket "$RUN_DIR/agentd.sock" --listen-port 18800 > /var/log/osmoda-mesh.log 2>&1 &
+    log "osmoda-mesh started (PID $!)."
+  fi
+
+  # Skip systemd unit file creation
   SKIP_SYSTEMD=true
 else
   SKIP_SYSTEMD=false
