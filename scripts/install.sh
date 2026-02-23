@@ -213,7 +213,13 @@ log "Step 3: Getting osModa source..."
 if [ -d "$INSTALL_DIR/.git" ]; then
   log "Updating existing installation..."
   cd "$INSTALL_DIR"
-  git pull origin "$BRANCH" || true
+  git fetch origin "$BRANCH"
+  git reset --hard "origin/$BRANCH"
+elif [ -d "$INSTALL_DIR" ]; then
+  log "Removing stale installation at $INSTALL_DIR..."
+  rm -rf "$INSTALL_DIR"
+  git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  cd "$INSTALL_DIR"
 else
   log "Cloning osModa..."
   git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
@@ -294,7 +300,7 @@ mkdir -p /root/.openclaw
 openclaw config set gateway.auth.mode none 2>/dev/null || true
 openclaw config set plugins.allow '["osmoda-bridge"]' 2>/dev/null || true
 
-log "Bridge plugin installed with 12 system tools."
+log "Bridge plugin installed with 37 system tools."
 
 # ---------------------------------------------------------------------------
 # Step 7: Install workspace templates + skills
@@ -364,6 +370,10 @@ if [ "$OS_TYPE" = "nixos" ]; then
   log "Starting agentd directly for now..."
 
   mkdir -p "$RUN_DIR" "$STATE_DIR"
+  # Kill any existing agentd instance
+  pkill -f "agentd.*--socket" 2>/dev/null || true
+  rm -f "$RUN_DIR/agentd.sock"
+  sleep 1
   if [ -f "$INSTALL_DIR/bin/agentd" ]; then
     "$INSTALL_DIR/bin/agentd" --socket "$RUN_DIR/agentd.sock" --state-dir "$STATE_DIR" &
     AGENTD_PID=$!
