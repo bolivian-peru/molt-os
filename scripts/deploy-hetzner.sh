@@ -353,7 +353,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-keyd --socket /run/osmoda/keyd.sock --state-dir /var/lib/osmoda/keyd
+ExecStart=/usr/local/bin/osmoda-keyd --socket /run/osmoda/keyd.sock --data-dir /var/lib/osmoda/keyd
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -376,7 +376,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-watch --socket /run/osmoda/watch.sock --state-dir /var/lib/osmoda/watch
+ExecStart=/usr/local/bin/osmoda-watch --socket /run/osmoda/watch.sock --data-dir /var/lib/osmoda/watch
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -398,7 +398,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-routines --socket /run/osmoda/routines.sock --state-dir /var/lib/osmoda/routines
+ExecStart=/usr/local/bin/osmoda-routines --socket /run/osmoda/routines.sock
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -420,7 +420,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-mesh --socket /run/osmoda/mesh.sock --state-dir /var/lib/osmoda/mesh --listen-port 18800
+ExecStart=/usr/local/bin/osmoda-mesh --socket /run/osmoda/mesh.sock --data-dir /var/lib/osmoda/mesh --listen-port 18800
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
