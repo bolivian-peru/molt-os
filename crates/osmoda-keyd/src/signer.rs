@@ -152,7 +152,12 @@ impl LocalKeyBackend {
     fn save_index(&self) -> Result<()> {
         let index_path = self.data_dir.join("wallets.json");
         let data = serde_json::to_string_pretty(&self.index)?;
-        std::fs::write(&index_path, data)?;
+        std::fs::write(&index_path, &data)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&index_path, std::fs::Permissions::from_mode(0o600))?;
+        }
         Ok(())
     }
 
@@ -224,10 +229,16 @@ impl LocalKeyBackend {
             }
         };
 
-        // Encrypt and store
+        // Encrypt and store with restricted permissions
         let encrypted = self.encrypt(&key_bytes)?;
         key_bytes.zeroize();
-        std::fs::write(self.key_path(&wallet_id), &encrypted)?;
+        let key_file = self.key_path(&wallet_id);
+        std::fs::write(&key_file, &encrypted)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600))?;
+        }
 
         let info = WalletInfo {
             id: wallet_id,

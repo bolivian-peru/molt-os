@@ -173,6 +173,11 @@ impl PolicyEngine {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(policy_path, &data)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(policy_path, std::fs::Permissions::from_mode(0o600))?;
+            }
             tracing::info!("created default policy file at {}", policy_path.display());
             default
         };
