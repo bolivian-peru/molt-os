@@ -279,23 +279,34 @@ log "OpenClaw setup complete."
 # Step 6: Install workspace templates
 # ---------------------------------------------------------------------------
 
-log "Step 6: Installing workspace templates..."
+log "Step 6: Installing workspace templates + skills..."
 
 ssh_cmd bash <<'REMOTE_TEMPLATES'
 set -euo pipefail
 
+# OpenClaw's actual workspace is ~/.openclaw/workspace/ (NOT /root/workspace/)
+# Copy to both locations for compatibility
 WORKSPACE="/root/workspace"
-mkdir -p "$WORKSPACE"
+OC_WORKSPACE="/root/.openclaw/workspace"
+mkdir -p "$WORKSPACE" "$OC_WORKSPACE"
 
-# Copy templates
-cp /opt/osmoda/templates/AGENTS.md "$WORKSPACE/AGENTS.md" 2>/dev/null || true
-cp /opt/osmoda/templates/SOUL.md "$WORKSPACE/SOUL.md" 2>/dev/null || true
-cp /opt/osmoda/templates/TOOLS.md "$WORKSPACE/TOOLS.md" 2>/dev/null || true
-cp /opt/osmoda/templates/IDENTITY.md "$WORKSPACE/IDENTITY.md" 2>/dev/null || true
-cp /opt/osmoda/templates/USER.md "$WORKSPACE/USER.md" 2>/dev/null || true
-cp /opt/osmoda/templates/HEARTBEAT.md "$WORKSPACE/HEARTBEAT.md" 2>/dev/null || true
+# Templates — copy to both workspace dirs
+for tpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md USER.md HEARTBEAT.md; do
+  if [ -f "/opt/osmoda/templates/$tpl" ]; then
+    cp "/opt/osmoda/templates/$tpl" "$WORKSPACE/$tpl"
+    cp "/opt/osmoda/templates/$tpl" "$OC_WORKSPACE/$tpl"
+  fi
+done
 
-# Create state directories (matching install.sh)
+# Skills — copy to both workspace dirs
+if [ -d /opt/osmoda/skills ]; then
+  mkdir -p "$WORKSPACE/skills" "$OC_WORKSPACE/skills"
+  cp -r /opt/osmoda/skills/* "$WORKSPACE/skills/" 2>/dev/null || true
+  cp -r /opt/osmoda/skills/* "$OC_WORKSPACE/skills/" 2>/dev/null || true
+  echo "[deploy] Skills installed: $(ls /opt/osmoda/skills/ | wc -l) skills"
+fi
+
+# Create state directories with secure permissions
 mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh}
 mkdir -p /var/backups/osmoda
 mkdir -p /run/osmoda
@@ -304,11 +315,11 @@ chmod 700 /var/lib/osmoda/keyd
 chmod 700 /var/lib/osmoda/keyd/keys
 chmod 700 /var/lib/osmoda/mesh
 
-echo "[deploy] Workspace templates installed to $WORKSPACE"
-ls -la "$WORKSPACE/"
+echo "[deploy] Workspace templates installed to $WORKSPACE + $OC_WORKSPACE"
+ls -la "$OC_WORKSPACE/"
 REMOTE_TEMPLATES
 
-log "Templates installed."
+log "Templates + skills installed."
 
 # ---------------------------------------------------------------------------
 # Step 7: Set up and start agentd systemd service
@@ -492,7 +503,8 @@ info "Repo:       ${REMOTE_DIR}"
 info "State:      ${OSMODA_STATE}"
 info "Socket:     ${OSMODA_RUN}/agentd.sock"
 info "Plugin:     ~/.openclaw/plugins/osmoda-bridge"
-info "Workspace:  ${WORKSPACE_DIR}"
+info "Workspace:  ~/.openclaw/workspace (+ ${WORKSPACE_DIR})"
+info "Skills:     ~/.openclaw/workspace/skills/ (15 system skills)"
 echo ""
 info "Next steps:"
 info "  ssh root@${SERVER_IP}"

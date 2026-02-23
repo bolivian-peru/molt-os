@@ -308,19 +308,24 @@ log "Bridge plugin installed with 45 system tools."
 # ---------------------------------------------------------------------------
 log "Step 7: Installing agent identity and skills..."
 
-mkdir -p "$WORKSPACE_DIR"
+# OpenClaw's actual workspace is ~/.openclaw/workspace/ (NOT /root/workspace/)
+# Copy to both locations for compatibility
+OC_WORKSPACE="/root/.openclaw/workspace"
+mkdir -p "$WORKSPACE_DIR" "$OC_WORKSPACE"
 
-# Templates
+# Templates — copy to both workspace dirs
 for tpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md USER.md HEARTBEAT.md; do
   if [ -f "$INSTALL_DIR/templates/$tpl" ]; then
     cp "$INSTALL_DIR/templates/$tpl" "$WORKSPACE_DIR/$tpl"
+    cp "$INSTALL_DIR/templates/$tpl" "$OC_WORKSPACE/$tpl"
   fi
 done
 
-# Skills — copy all skill directories
+# Skills — copy to both workspace dirs
 if [ -d "$INSTALL_DIR/skills" ]; then
-  mkdir -p "$WORKSPACE_DIR/skills"
+  mkdir -p "$WORKSPACE_DIR/skills" "$OC_WORKSPACE/skills"
   cp -r "$INSTALL_DIR/skills/"* "$WORKSPACE_DIR/skills/" 2>/dev/null || true
+  cp -r "$INSTALL_DIR/skills/"* "$OC_WORKSPACE/skills/" 2>/dev/null || true
 fi
 
 # Create state directories with secure permissions
