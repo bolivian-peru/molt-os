@@ -8,8 +8,8 @@
 #   1. Validates SSH connectivity and key
 #   2. Installs NixOS via nixos-infect (if not already NixOS)
 #   3. Syncs the repo to the server via rsync
-#   4. Builds all daemons (agentd, keyd, watch, routines, mesh, egress, agentctl)
-#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (50 tools)
+#   4. Builds all daemons (agentd, keyd, watch, routines, mesh, mcpd, egress, agentctl)
+#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (58 tools)
 #   6. Installs workspace templates (AGENTS.md, SOUL.md, TOOLS.md, etc.)
 #   7. Starts all daemons + gateway (auto-detects NixOS read-only fs)
 #   8. Verifies everything is running
@@ -197,7 +197,7 @@ fi
 
 # Verify and install all binaries
 echo "[deploy] Installing binaries..."
-for bin in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh; do
+for bin in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh osmoda-mcpd; do
   if [ -f "target/release/$bin" ]; then
     cp "target/release/$bin" "/usr/local/bin/$bin"
     echo "[deploy] Installed: $bin"
@@ -209,7 +209,7 @@ done
 echo "[deploy] Binaries installed:"
 ls -la /usr/local/bin/agentd /usr/local/bin/agentctl /usr/local/bin/osmoda-egress \
        /usr/local/bin/osmoda-keyd /usr/local/bin/osmoda-watch /usr/local/bin/osmoda-routines \
-       /usr/local/bin/osmoda-voice /usr/local/bin/osmoda-mesh 2>/dev/null || true
+       /usr/local/bin/osmoda-voice /usr/local/bin/osmoda-mesh /usr/local/bin/osmoda-mcpd 2>/dev/null || true
 REMOTE_BUILD
 
 log "Rust build complete."
@@ -307,7 +307,7 @@ if [ -d /opt/osmoda/skills ]; then
 fi
 
 # Create state directories with secure permissions
-mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh}
+mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp}
 mkdir -p /var/backups/osmoda
 mkdir -p /run/osmoda
 chmod 700 /var/lib/osmoda/config
@@ -407,6 +407,7 @@ OSMODA_WATCH_SOCKET=/run/osmoda/watch.sock
 OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
 OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
 OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
+OSMODA_MCPD_SOCKET=/run/osmoda/mcpd.sock
 ENVEOF
 chmod 600 "$STATE_DIR/config/gateway-env"
 

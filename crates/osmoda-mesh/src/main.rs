@@ -290,7 +290,21 @@ async fn tcp_accept_loop(
     addr: &str,
     cancel: CancellationToken,
 ) {
-    let listener = match TcpListener::bind(addr).await {
+    // Use socket2 to set SO_REUSEADDR before binding — prevents EADDRINUSE
+    // after restarts when previous connections are in TIME_WAIT.
+    let listener = match (|| -> anyhow::Result<TcpListener> {
+        let sock_addr: std::net::SocketAddr = addr.parse()?;
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(sock_addr),
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )?;
+        socket.set_reuse_address(true)?;
+        socket.set_nonblocking(true)?;
+        socket.bind(&sock_addr.into())?;
+        socket.listen(128)?;
+        Ok(TcpListener::from_std(std::net::TcpListener::from(socket))?)
+    })() {
         Ok(l) => l,
         Err(e) => {
             tracing::error!(error = %e, addr = %addr, "failed to bind TCP listener");
