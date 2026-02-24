@@ -8,8 +8,8 @@
 #   1. Validates SSH connectivity and key
 #   2. Installs NixOS via nixos-infect (if not already NixOS)
 #   3. Syncs the repo to the server via rsync
-#   4. Builds all daemons (agentd, keyd, watch, routines, mesh, mcpd, egress, agentctl)
-#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (58 tools)
+#   4. Builds all daemons (agentd, keyd, watch, routines, mesh, mcpd, teachd, egress, agentctl)
+#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (66 tools)
 #   6. Installs workspace templates (AGENTS.md, SOUL.md, TOOLS.md, etc.)
 #   7. Starts all daemons + gateway (auto-detects NixOS read-only fs)
 #   8. Verifies everything is running
@@ -197,7 +197,7 @@ fi
 
 # Verify and install all binaries
 echo "[deploy] Installing binaries..."
-for bin in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh osmoda-mcpd; do
+for bin in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh osmoda-mcpd osmoda-teachd; do
   if [ -f "target/release/$bin" ]; then
     cp "target/release/$bin" "/usr/local/bin/$bin"
     echo "[deploy] Installed: $bin"
@@ -209,7 +209,8 @@ done
 echo "[deploy] Binaries installed:"
 ls -la /usr/local/bin/agentd /usr/local/bin/agentctl /usr/local/bin/osmoda-egress \
        /usr/local/bin/osmoda-keyd /usr/local/bin/osmoda-watch /usr/local/bin/osmoda-routines \
-       /usr/local/bin/osmoda-voice /usr/local/bin/osmoda-mesh /usr/local/bin/osmoda-mcpd 2>/dev/null || true
+       /usr/local/bin/osmoda-voice /usr/local/bin/osmoda-mesh /usr/local/bin/osmoda-mcpd \
+       /usr/local/bin/osmoda-teachd 2>/dev/null || true
 REMOTE_BUILD
 
 log "Rust build complete."
@@ -307,7 +308,7 @@ if [ -d /opt/osmoda/skills ]; then
 fi
 
 # Create state directories with secure permissions
-mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp}
+mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd}
 mkdir -p /var/backups/osmoda
 mkdir -p /run/osmoda
 chmod 700 /var/lib/osmoda/config
@@ -361,6 +362,8 @@ pkill -f "osmoda-keyd" 2>/dev/null || true
 pkill -f "osmoda-watch" 2>/dev/null || true
 pkill -f "osmoda-routines" 2>/dev/null || true
 pkill -f "osmoda-mesh" 2>/dev/null || true
+pkill -f "osmoda-mcpd" 2>/dev/null || true
+pkill -f "osmoda-teachd" 2>/dev/null || true
 pkill -f "osmoda-egress" 2>/dev/null || true
 pkill -f "openclaw gateway" 2>/dev/null || true
 sleep 2
@@ -408,6 +411,7 @@ OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
 OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
 OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
 OSMODA_MCPD_SOCKET=/run/osmoda/mcpd.sock
+OSMODA_TEACHD_SOCKET=/run/osmoda/teachd.sock
 ENVEOF
 chmod 600 "$STATE_DIR/config/gateway-env"
 
@@ -500,6 +504,38 @@ Environment=RUST_LOG=info
 WantedBy=multi-user.target
 EOF
 
+  # mcpd
+  [ -f /usr/local/bin/osmoda-mcpd ] && cat > /etc/systemd/system/osmoda-mcpd.service <<'EOF'
+[Unit]
+Description=osModa MCP Server Manager
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-mcpd --socket /run/osmoda/mcpd.sock --config-dir /var/lib/osmoda/mcp --agentd-socket /run/osmoda/agentd.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # teachd
+  [ -f /usr/local/bin/osmoda-teachd ] && cat > /etc/systemd/system/osmoda-teachd.service <<'EOF'
+[Unit]
+Description=osModa Teaching/Learning Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-teachd --socket /run/osmoda/teachd.sock --state-dir /var/lib/osmoda/teachd --agentd-socket /run/osmoda/agentd.sock --watch-socket /run/osmoda/watch.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
   # gateway
   cat > /etc/systemd/system/osmoda-gateway.service <<'EOF'
 [Unit]
@@ -521,7 +557,7 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-gateway; do
+  for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-gateway; do
     if [ -f "/etc/systemd/system/${svc}.service" ]; then
       systemctl enable "${svc}.service"
       systemctl restart "${svc}.service"
@@ -585,6 +621,24 @@ else
     echo "[deploy] osmoda-mesh started (PID $!)"
   fi
 
+  # mcpd
+  if [ -f /usr/local/bin/osmoda-mcpd ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-mcpd \
+      --socket "$RUN_DIR/mcpd.sock" --config-dir "$STATE_DIR/mcp" \
+      --agentd-socket "$RUN_DIR/agentd.sock" \
+      > /var/log/osmoda-mcpd.log 2>&1 &
+    echo "[deploy] osmoda-mcpd started (PID $!)"
+  fi
+
+  # teachd
+  if [ -f /usr/local/bin/osmoda-teachd ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-teachd \
+      --socket "$RUN_DIR/teachd.sock" --state-dir "$STATE_DIR/teachd" \
+      --agentd-socket "$RUN_DIR/agentd.sock" --watch-socket "$RUN_DIR/watch.sock" \
+      > /var/log/osmoda-teachd.log 2>&1 &
+    echo "[deploy] osmoda-teachd started (PID $!)"
+  fi
+
   sleep 2
 
   # Gateway (nohup)
@@ -608,7 +662,7 @@ sleep 3
 # -------------------------------------------------------
 echo ""
 echo "[deploy] Checking daemon sockets..."
-for sock in agentd.sock keyd.sock watch.sock routines.sock mesh.sock; do
+for sock in agentd.sock keyd.sock watch.sock routines.sock mesh.sock mcpd.sock teachd.sock; do
   if [ -S "$RUN_DIR/$sock" ]; then
     echo "[deploy]   ✓ $sock"
   else
@@ -634,7 +688,7 @@ echo "=== osModa Deployment Verification ==="
 echo ""
 
 # Check daemon sockets + health
-for daemon in agentd keyd watch routines mesh; do
+for daemon in agentd keyd watch routines mesh mcpd teachd; do
   sock="/run/osmoda/${daemon}.sock"
   if [ -S "$sock" ]; then
     health=$(curl -sf --unix-socket "$sock" http://localhost/health 2>/dev/null || echo '{}')

@@ -12,7 +12,7 @@
 #   1. Converts your server to NixOS (via nixos-infect) — optional
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the osmoda-bridge plugin (50 system tools)
+#   4. Sets up the osmoda-bridge plugin (66 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #   7. Opens the setup wizard at localhost:18789
@@ -245,7 +245,7 @@ rm -f "$BUILD_LOG"
 
 # Create bin directory and symlinks
 mkdir -p "$INSTALL_DIR/bin"
-for binary in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh; do
+for binary in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh osmoda-mcpd osmoda-teachd; do
   if [ -f "target/release/$binary" ]; then
     ln -sf "$INSTALL_DIR/target/release/$binary" "$INSTALL_DIR/bin/$binary"
     log "Built: $binary"
@@ -305,7 +305,7 @@ openclaw config set gateway.mode local 2>/dev/null || true
 openclaw config set gateway.auth.mode none 2>/dev/null || true
 openclaw config set plugins.allow '["osmoda-bridge", "device-pair", "memory-core", "phone-control", "talk-voice"]' 2>/dev/null || true
 
-log "Bridge plugin installed with 50 system tools."
+log "Bridge plugin installed with 66 system tools."
 
 # ---------------------------------------------------------------------------
 # Step 7: Install workspace templates + skills
@@ -333,7 +333,7 @@ if [ -d "$INSTALL_DIR/skills" ]; then
 fi
 
 # Create state directories with secure permissions
-mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines,mesh}
+mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd}
 mkdir -p "$RUN_DIR"
 mkdir -p /var/backups/osmoda
 chmod 700 "$STATE_DIR/config"
@@ -387,6 +387,8 @@ OSMODA_WATCH_SOCKET=/run/osmoda/watch.sock
 OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
 OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
 OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
+OSMODA_MCPD_SOCKET=/run/osmoda/mcpd.sock
+OSMODA_TEACHD_SOCKET=/run/osmoda/teachd.sock
 GWEOF
   chmod 600 "$STATE_DIR/config/gateway-env"
 
@@ -457,7 +459,106 @@ Environment=OSMODA_WATCH_SOCKET=$RUN_DIR/watch.sock
 Environment=OSMODA_ROUTINES_SOCKET=$RUN_DIR/routines.sock
 Environment=OSMODA_VOICE_SOCKET=$RUN_DIR/voice.sock
 Environment=OSMODA_MESH_SOCKET=$RUN_DIR/mesh.sock
+Environment=OSMODA_MCPD_SOCKET=$RUN_DIR/mcpd.sock
+Environment=OSMODA_TEACHD_SOCKET=$RUN_DIR/teachd.sock
 
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# keyd
+cat > "$SYSTEMD_DIR/osmoda-keyd.service" <<EOF
+[Unit]
+Description=osModa Crypto Wallet Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-keyd --socket $RUN_DIR/keyd.sock --data-dir $STATE_DIR/keyd --policy-file $STATE_DIR/keyd/policy.json --agentd-socket $RUN_DIR/agentd.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+PrivateNetwork=true
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# watch
+cat > "$SYSTEMD_DIR/osmoda-watch.service" <<EOF
+[Unit]
+Description=osModa SafeSwitch Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-watch --socket $RUN_DIR/watch.sock --agentd-socket $RUN_DIR/agentd.sock --data-dir $STATE_DIR/watch
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# routines
+cat > "$SYSTEMD_DIR/osmoda-routines.service" <<EOF
+[Unit]
+Description=osModa Routines Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-routines --socket $RUN_DIR/routines.sock --agentd-socket $RUN_DIR/agentd.sock --routines-dir $STATE_DIR/routines
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# mesh
+cat > "$SYSTEMD_DIR/osmoda-mesh.service" <<EOF
+[Unit]
+Description=osModa Mesh P2P Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-mesh --socket $RUN_DIR/mesh.sock --data-dir $STATE_DIR/mesh --agentd-socket $RUN_DIR/agentd.sock --listen-port 18800
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# mcpd
+cat > "$SYSTEMD_DIR/osmoda-mcpd.service" <<EOF
+[Unit]
+Description=osModa MCP Server Manager
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-mcpd --socket $RUN_DIR/mcpd.sock --config-dir $STATE_DIR/mcp --agentd-socket $RUN_DIR/agentd.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# teachd
+cat > "$SYSTEMD_DIR/osmoda-teachd.service" <<EOF
+[Unit]
+Description=osModa Teaching/Learning Daemon
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-teachd --socket $RUN_DIR/teachd.sock --state-dir $STATE_DIR/teachd --agentd-socket $RUN_DIR/agentd.sock --watch-socket $RUN_DIR/watch.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -516,6 +617,14 @@ if [ -S "$RUN_DIR/agentd.sock" ]; then
 else
   warn "agentd socket not found yet. Check: journalctl -u osmoda-agentd"
 fi
+
+# Start all daemons
+for svc in osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd; do
+  if [ -f "$SYSTEMD_DIR/${svc}.service" ]; then
+    systemctl enable "${svc}.service"
+    systemctl start "${svc}.service"
+  fi
+done
 
 # Start OpenClaw if API key is configured
 if [ -f "$STATE_DIR/config/api-key" ]; then

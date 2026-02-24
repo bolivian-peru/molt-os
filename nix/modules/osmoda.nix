@@ -156,6 +156,12 @@ in {
       };
     };
 
+    # --- Teaching Daemon (System Learning & Self-Optimization) ---
+    teachd = {
+      enable = mkEnableOption "osModa teaching daemon (system learning & self-optimization)";
+      socketPath = mkOption { type = types.str; default = "/run/osmoda/teachd.sock"; description = "teachd Unix socket path"; };
+    };
+
     # --- Agent Identity (EIP-8004) ---
     agentCard = {
       enable = mkEnableOption "EIP-8004 Agent Card";
@@ -371,6 +377,7 @@ in {
         OSMODA_VOICE_SOCKET = cfg.voice.socketPath;
         OSMODA_MESH_SOCKET = cfg.mesh.socketPath;
         OSMODA_MCPD_SOCKET = cfg.mcp.socketPath;
+        OSMODA_TEACHD_SOCKET = cfg.teachd.socketPath;
         HOME = cfg.stateDir;
       };
     };
@@ -554,6 +561,31 @@ in {
       };
     });
 
+    # ===== TEACHING DAEMON =====
+    systemd.services.osmoda-teachd = mkIf cfg.teachd.enable {
+      description = "osModa Teaching Daemon (system learning & self-optimization)";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "osmoda-agentd.service" ];
+      requires = [ "osmoda-agentd.service" ];
+
+      serviceConfig = {
+        Type = "simple";
+        ExecStart = concatStringsSep " " [
+          "${pkgs.osmoda-teachd}/bin/osmoda-teachd"
+          "--socket ${cfg.teachd.socketPath}"
+          "--state-dir ${cfg.stateDir}/teachd"
+          "--agentd-socket ${cfg.agentd.socketPath}"
+          "--watch-socket ${cfg.watch.socketPath}"
+        ];
+        Restart = "on-failure";
+        RestartSec = 5;
+        RuntimeDirectory = "osmoda";
+        StateDirectory = "osmoda";
+        ProtectKernelTunables = true;
+        LockPersonality = true;
+      };
+    };
+
     # ===== VOICE DAEMON =====
     systemd.services.osmoda-voice = mkIf cfg.voice.enable {
       description = "osModa Voice Daemon (STT + TTS)";
@@ -652,7 +684,7 @@ in {
 
     # ===== WORKSPACE SETUP =====
     system.activationScripts.osmoda-workspace = ''
-      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,secrets}
+      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,teachd,secrets}
       mkdir -p ${cfg.stateDir}/workspace/skills
       mkdir -p /var/backups/osmoda
 

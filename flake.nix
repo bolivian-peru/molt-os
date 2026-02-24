@@ -132,6 +132,10 @@
         cargoArtifacts = artifacts;
         cargoExtraArgs = "-p osmoda-mcpd";
       });
+      osmoda-teachd = craneLib.buildPackage (commonArgs // {
+        cargoArtifacts = artifacts;
+        cargoExtraArgs = "-p osmoda-teachd";
+      });
       osmoda-system-skills = final.callPackage ./packages/osmoda-system-skills { };
       osmoda-plymouth-theme = final.callPackage ./nix/modules/plymouth-theme { };
     };
@@ -215,6 +219,7 @@
       routines = linuxPkgs.osmoda-routines;
       mesh = linuxPkgs.osmoda-mesh;
       mcpd = linuxPkgs.osmoda-mcpd;
+      teachd = linuxPkgs.osmoda-teachd;
       default = linuxPkgs.osmoda-agentd;
     };
 

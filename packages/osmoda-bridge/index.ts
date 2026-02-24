@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 58 tools registered:
+ * 66 tools registered:
  *   agentd:  system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:  shell_exec, file_read, file_write, directory_list (4)
  *   systemd: service_status, journal_logs (2)
@@ -20,6 +20,8 @@
  *   mesh:    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health,
  *            mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history (11, via osmoda-mesh)
  *   mcp:     mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart (4, via osmoda-mcpd)
+ *   teach:   teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create,
+ *            teach_context, teach_optimize_suggest, teach_optimize_apply (8, via osmoda-teachd)
  *   safety:  safety_rollback, safety_status, safety_panic, safety_restart (4, direct shell)
  */
 
@@ -33,6 +35,7 @@ import { routinesRequest } from "./routines-client";
 import { VoiceClient } from "./voice-client";
 import { meshRequest } from "./mesh-client";
 import { mcpdRequest } from "./mcpd-client";
+import { teachdRequest } from "./teachd-client";
 
 // ---------------------------------------------------------------------------
 // agentd Unix socket HTTP client
@@ -1407,4 +1410,186 @@ export default function register(api: any) {
       return { output: runShell("systemctl restart osmoda-gateway 2>&1") };
     },
   }), { names: ["safety_restart"] });
+
+  // =========================================================================
+  // Teaching tools (via osmoda-teachd — system learning & self-optimization)
+  // =========================================================================
+
+  // --- teach_status ---
+  api.registerTool(() => ({
+    name: "teach_status",
+    label: "Teach Status",
+    description: "Get teachd health: observation, pattern, knowledge, and optimization counts plus loop status.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("GET", "/health") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_status"] });
+
+  // --- teach_observations ---
+  api.registerTool(() => ({
+    name: "teach_observations",
+    label: "Teach Observations",
+    description: "List recent system observations collected by teachd (CPU, memory, service, journal).",
+    parameters: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "Filter by source: cpu, memory, service, journal" },
+        since: { type: "string", description: "ISO timestamp to filter observations since" },
+        limit: { type: "number", description: "Max results (default 50)" },
+      },
+      required: [],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const qs = new URLSearchParams();
+        if (params.source) qs.set("source", String(params.source));
+        if (params.since) qs.set("since", String(params.since));
+        if (params.limit) qs.set("limit", String(params.limit));
+        const path = `/observations${qs.toString() ? "?" + qs.toString() : ""}`;
+        return { output: await teachdRequest("GET", path) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_observations"] });
+
+  // --- teach_patterns ---
+  api.registerTool(() => ({
+    name: "teach_patterns",
+    label: "Teach Patterns",
+    description: "List detected system patterns (recurring failures, trends, anomalies, correlations).",
+    parameters: {
+      type: "object",
+      properties: {
+        type: { type: "string", description: "Filter by pattern type: recurring, trend, anomaly, correlation" },
+        min_confidence: { type: "number", description: "Minimum confidence threshold (default 0.5)" },
+      },
+      required: [],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const qs = new URLSearchParams();
+        if (params.type) qs.set("type", String(params.type));
+        if (params.min_confidence) qs.set("min_confidence", String(params.min_confidence));
+        const path = `/patterns${qs.toString() ? "?" + qs.toString() : ""}`;
+        return { output: await teachdRequest("GET", path) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_patterns"] });
+
+  // --- teach_knowledge ---
+  api.registerTool(() => ({
+    name: "teach_knowledge",
+    label: "Teach Knowledge",
+    description: "List knowledge documents generated from detected patterns or manually created.",
+    parameters: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Filter by category: performance, reliability, security, configuration" },
+        tag: { type: "string", description: "Filter by tag" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+      required: [],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const qs = new URLSearchParams();
+        if (params.category) qs.set("category", String(params.category));
+        if (params.tag) qs.set("tag", String(params.tag));
+        if (params.limit) qs.set("limit", String(params.limit));
+        const path = `/knowledge${qs.toString() ? "?" + qs.toString() : ""}`;
+        return { output: await teachdRequest("GET", path) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_knowledge"] });
+
+  // --- teach_knowledge_create ---
+  api.registerTool(() => ({
+    name: "teach_knowledge_create",
+    label: "Create Knowledge",
+    description: "Manually create a knowledge document to persist system wisdom (e.g. troubleshooting steps, config insights).",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Knowledge doc title" },
+        category: { type: "string", description: "Category: performance, reliability, security, configuration" },
+        content: { type: "string", description: "Markdown content body" },
+        tags: { type: "array", items: { type: "string" }, description: "Tags for searchability" },
+      },
+      required: ["title", "category", "content"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", "/knowledge/create", params) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_knowledge_create"] });
+
+  // --- teach_context ---
+  api.registerTool(() => ({
+    name: "teach_context",
+    label: "Teach Context",
+    description: "Get relevant knowledge documents for a given context string. Returns matching docs and injected token count.",
+    parameters: {
+      type: "object",
+      properties: {
+        context: { type: "string", description: "Context string to match against knowledge base" },
+      },
+      required: ["context"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", "/teach", { context: params.context }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_context"] });
+
+  // --- teach_optimize_suggest ---
+  api.registerTool(() => ({
+    name: "teach_optimize_suggest",
+    label: "Suggest Optimizations",
+    description: "Generate optimization suggestions from unapplied knowledge documents.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", "/optimize/suggest") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_optimize_suggest"] });
+
+  // --- teach_optimize_apply ---
+  api.registerTool(() => ({
+    name: "teach_optimize_apply",
+    label: "Apply Optimization",
+    description: "Apply an approved optimization via SafeSwitch. Must be in 'approved' status first.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Optimization ID to apply" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", `/optimize/apply/${params.id}`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_optimize_apply"] });
 }

@@ -2,16 +2,16 @@
 
 ## Overview
 
-osModa is a NixOS distribution where the AI agent IS the operating system interface. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), background automation (routines), P2P encrypted server-to-server communication (mesh), local voice (voice), and MCP server lifecycle management (mcpd).
+osModa is a NixOS distribution where the AI agent IS the operating system interface. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), background automation (routines), P2P encrypted server-to-server communication (mesh), local voice (voice), MCP server lifecycle management (mcpd), and system learning & self-optimization (teachd).
 
 Local inter-daemon communication happens over Unix sockets. osmoda-mesh adds TCP port 18800 for peer-to-peer connections between osModa instances.
 
 ## Trust Rings
 
 ```
-RING 0: OpenClaw + agentd + keyd + watch + routines + mesh + voice + mcpd
+RING 0: OpenClaw + agentd + keyd + watch + routines + mesh + voice + mcpd + teachd
   Full system access. Root-equivalent. See and control everything.
-  Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines, mesh, voice, mcpd
+  Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines, mesh, voice, mcpd, teachd
 
 RING 1: Approved Apps
   Sandboxed with declared capabilities. No root, no arbitrary filesystem.
@@ -34,7 +34,7 @@ RING 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 58 tools registered                 │
+│   osmoda-bridge plugin → 66 tools registered                 │
 │   Memory Backend → ZVEC search → injects into prompt (M1+)  │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -144,6 +144,45 @@ mesh also listens on TCP :18800 for peer-to-peer connections
 - **Audit**: All server lifecycle events (start, stop, crash, restart) logged to agentd ledger.
 - **NixOS config**: Declare MCP servers in `services.osmoda.mcp.servers` and they become available to the AI.
 
+### osmoda-teachd — System Learning & Self-Optimization
+
+- **Socket**: `/run/osmoda/teachd.sock`
+- **State**: `/var/lib/osmoda/teachd/`
+- **Role**: Continuously observes the system, detects patterns, generates reusable knowledge documents, and suggests/applies optimizations. When OpenClaw troubleshoots a problem, the knowledge persists as reusable system wisdom.
+
+**Three-loop architecture:**
+
+```
+OBSERVE (30s)          LEARN (5m)            TEACH (on-demand)
+─────────────          ──────────            ─────────────────
+/proc/stat      ──┐    Recurring failures    POST /teach
+/proc/meminfo   ──┤    Resource trends       → keyword match
+systemctl       ──┼──→ Anomaly detection  ──→ → relevant docs
+journalctl      ──┘    Correlations          → token budget
+     │                      │
+     ▼                      ▼
+Observations           Patterns → Knowledge Docs → Optimizations
+(SQLite, 7d TTL)       (confidence > 0.7)          (via SafeSwitch)
+```
+
+**Data flow:**
+1. **OBSERVE** loop collects CPU, memory, service states, and journal errors every 30 seconds
+2. **LEARN** loop analyzes recent observations every 5 minutes, detecting:
+   - **Recurring failures**: same service/identifier failing 3+ times
+   - **Resource trends**: monotonic increase in memory/CPU over 1 hour
+   - **Anomalies**: sudden spikes (>2 std deviations from rolling average)
+   - **Correlations**: events occurring within 60s of each other (e.g., high CPU + service crash)
+3. High-confidence patterns (>0.7) generate **Knowledge Documents** (markdown, categorized, tagged)
+4. **TEACH** API matches a context query against knowledge docs using keyword scoring + confidence weighting
+5. **Optimizer** generates suggestions from unapplied knowledge, applies changes via SafeSwitch
+
+**Integration points:**
+- **agentd**: Receipt logging for all teach events (pattern detection, knowledge creation, optimization)
+- **osmoda-watch**: SafeSwitch sessions for applying optimizations safely with auto-rollback
+- **osmoda-bridge**: 8 tools expose teachd capabilities to OpenClaw
+
+- **Hardening**: Graceful shutdown with CancellationToken, subprocess timeouts on systemctl/sysctl calls, 7-day observation pruning.
+
 ## Data Flow
 
 1. **User sends message** via web chat, Telegram, or WhatsApp → OpenClaw Gateway
@@ -219,6 +258,7 @@ osModa is a NixOS module (`services.osmoda`). One `enable = true` activates:
 - osmoda-routines service (systemd hardening)
 - osmoda-voice service (requires PipeWire for audio I/O)
 - osmoda-mcpd service (MCP server lifecycle, depends on agentd + egress)
+- osmoda-teachd service (system learning, depends on agentd)
 - Egress proxy (DynamicUser, domain-filtered)
 - Messaging channels (Telegram, WhatsApp — env vars injected into gateway)
 - Remote access (Cloudflare Tunnel, Tailscale — optional)
@@ -331,5 +371,6 @@ spawn.os.moda is the commercial provisioning service (separate private repo). It
 - **mesh**: Noise_XX + ML-KEM-768 hybrid PQ. All peer traffic encrypted. Invite-based pairing, no global registry. Keys zeroized on shutdown.
 - **voice**: Local-only processing. No cloud APIs, no network calls. whisper.cpp + piper-tts, both MIT-licensed.
 - **mcpd**: Lifecycle manager only — doesn't proxy MCP traffic. Injects egress proxy for domain-restricted servers. Secret files read from disk, never stored in Nix config.
+- **teachd**: Read-only observation of system metrics. Optimizations require explicit approval flow (Suggested → Approved → Applied). Changes applied via SafeSwitch with auto-rollback safety net. 7-day observation TTL limits data retention.
 - **Local sockets**: Unix domain sockets with restrictive file permissions (0600/0660).
 - **Mesh TCP**: Port 18800. All traffic encrypted (Noise_XX transport mode). No plaintext ever on the wire.

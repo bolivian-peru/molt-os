@@ -10,6 +10,7 @@ members = [
     "crates/osmoda-routines",
     "crates/osmoda-mesh",
     "crates/osmoda-mcpd",
+    "crates/osmoda-teachd",
 ]
 
 [workspace.package]
