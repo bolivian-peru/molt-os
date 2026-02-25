@@ -37,6 +37,11 @@ secrets/
 docs/planning/
 docs/SPRINT-*
 docs/DEPLOY-*
+docs/MONETIZATION.md
+docs/ARCHETYPES.md
+docs/DEMO-SCRIPT.md
+docs/TWITTER-ROBOTICS.md
+docs/GO-TO-MARKET.md
 
 # Apps (separate repos, not part of open source OS)
 apps/
