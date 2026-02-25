@@ -539,7 +539,7 @@ After=osmoda-agentd.service
 Requires=osmoda-agentd.service
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/bin/osmoda-mcpd --socket $RUN_DIR/mcpd.sock --config-dir $STATE_DIR/mcp --agentd-socket $RUN_DIR/agentd.sock
+ExecStart=$INSTALL_DIR/bin/osmoda-mcpd --socket $RUN_DIR/mcpd.sock --state-dir $STATE_DIR/mcp --agentd-socket $RUN_DIR/agentd.sock
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info

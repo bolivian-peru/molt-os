@@ -175,6 +175,16 @@ log "Repo synced to ${REMOTE_DIR}."
 
 log "Step 4: Building all daemons on server..."
 
+# Kill running daemons first so binaries aren't locked ("Text file busy")
+ssh_cmd bash <<'REMOTE_PREKILL'
+killall agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-egress 2>/dev/null || true
+pkill -f "openclaw gateway" 2>/dev/null || true
+sleep 2
+pkill -9 -f "agentd.*--socket" 2>/dev/null || true
+pkill -9 -f "osmoda-" 2>/dev/null || true
+echo "[deploy] Stopped existing daemons (if any)."
+REMOTE_PREKILL
+
 ssh_cmd bash <<'REMOTE_BUILD'
 set -euo pipefail
 
@@ -512,7 +522,7 @@ After=osmoda-agentd.service
 Requires=osmoda-agentd.service
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/osmoda-mcpd --socket /run/osmoda/mcpd.sock --config-dir /var/lib/osmoda/mcp --agentd-socket /run/osmoda/agentd.sock
+ExecStart=/usr/local/bin/osmoda-mcpd --socket /run/osmoda/mcpd.sock --state-dir /var/lib/osmoda/mcp --agentd-socket /run/osmoda/agentd.sock
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -624,7 +634,7 @@ else
   # mcpd
   if [ -f /usr/local/bin/osmoda-mcpd ]; then
     RUST_LOG=info nohup /usr/local/bin/osmoda-mcpd \
-      --socket "$RUN_DIR/mcpd.sock" --config-dir "$STATE_DIR/mcp" \
+      --socket "$RUN_DIR/mcpd.sock" --state-dir "$STATE_DIR/mcp" \
       --agentd-socket "$RUN_DIR/agentd.sock" \
       > /var/log/osmoda-mcpd.log 2>&1 &
     echo "[deploy] osmoda-mcpd started (PID $!)"
