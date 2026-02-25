@@ -1,9 +1,9 @@
 # osModa — Feature Roadmap
 
-Last updated: 2026-02-24
+Last updated: 2026-02-25
 
-Current state: 121 tests passing, 9 Rust crates (8 daemons + 1 CLI), 58 bridge tools, 15 skills.
-This document covers what's being added next, in priority order.
+Current state: 136 tests passing, 10 Rust crates (9 daemons + 1 CLI), 66 bridge tools, 15 skills.
+This document covers what shipped and what's next, in priority order.
 
 ---
 
@@ -21,6 +21,9 @@ This document covers what's being added next, in priority order.
 | Web chat UI | osmoda-ui |
 | One-command server provisioning with USDC payments | spawn.os.moda |
 | **P2P encrypted agent-to-agent mesh** | **osmoda-mesh** |
+| **MCP server lifecycle management** | **osmoda-mcpd** |
+| **System learning & self-optimization** | **osmoda-teachd** |
+| **One-command installer + Hetzner deploy** | **scripts/install.sh, deploy-hetzner.sh** |
 
 ### osmoda-mesh — what it does
 
@@ -46,9 +49,9 @@ osModa server A                    osModa server B
 
 ---
 
-## Sprint 1 — Remote Access + Safety (This Week)
+## Sprint 1 — Remote Access + Safety (SHIPPED)
 
-The biggest gap right now: osModa installed on a home server is only accessible via SSH tunnel. These fix that.
+Remote access and safety slash commands.
 
 ### 1. Cloudflare Tunnel Integration
 
@@ -142,9 +145,9 @@ services.osmoda.channels.discord = {
 
 ---
 
-## Sprint 2 — Ecosystem + Payments (Next Week)
+## Sprint 2 — Ecosystem + Payments (SHIPPED: mcpd)
 
-### 5. osmoda-mcpd — MCP Server Manager
+### 5. osmoda-mcpd — MCP Server Manager (SHIPPED)
 
 **What it does:** Makes any MCP server a first-class osModa capability. The AI gets web scraping, database access, GitHub tools, and any other MCP server without writing a single line of bridge code.
 
@@ -409,25 +412,26 @@ osModa web UI (same as SSH tunnel, but browser-native)
 
 ## Summary Table
 
-| # | Feature | Sprint | Effort | Impact |
+| # | Feature | Sprint | Status | Impact |
 |---|---------|--------|--------|--------|
-| — | **osmoda-mesh P2P** | **DONE** | **3 days** | **Encrypted server-to-server, PQ-safe** |
-| — | **FTS5 memory recall** | **DONE** | — | **Memory recall works (BM25 keyword search)** |
-| — | **Service discovery** | **DONE** | — | **AI sees all running services dynamically** |
-| 1 | Cloudflare Tunnel integration | 1 | 0.5 day | Home server users can access from anywhere |
-| 2 | Tailscale integration | 1 | 0.5 day | Team/VPN mesh access |
-| 3 | Safety slash commands | 1 | 1 day | Production safety net |
-| 4 | Discord channel | 1 | 0.5 day | Developer audience |
-| 5 | osmoda-mcpd MCP manager | 2 | 2 days | Any MCP server becomes an OS capability |
-| 6 | x402 OS-native payments | 2 | 2 days | AI pays for APIs autonomously within policy |
-| 7 | Semantic memory (usearch) | 2 | 2 days | Hybrid BM25 + vector recall |
-| 8 | Zod config validation | 2 | 0.5 day | Developer experience, fail-fast |
-| 9 | Mobile status dashboard | 3 | 1 day | Quick phone health check |
-| 10 | Daily Telegram briefing | 3 | 1 day | Proactive awareness |
-| 11 | Multi-server management | 4 | 1 week | Fleet view, AI queries all servers at once |
-| 12 | Spawn peer discovery | 4 | 3 days | Auto-connect provisioned servers via mesh |
-| 13 | A2UI live dashboard | 4 | 1 week | Product differentiator, native apps |
-| 14 | WebRTC via spawn.os.moda | 5 | 2 weeks | Browser-native access, no install |
+| — | **osmoda-mesh P2P** | **S3** | **SHIPPED** | **Encrypted server-to-server, PQ-safe** |
+| — | **FTS5 memory recall** | **S3** | **SHIPPED** | **Memory recall works (BM25 keyword search)** |
+| — | **Service discovery** | **S3** | **SHIPPED** | **AI sees all running services dynamically** |
+| 1 | Cloudflare Tunnel integration | S1 | **SHIPPED** | Home server users can access from anywhere |
+| 2 | Tailscale integration | S1 | **SHIPPED** | Team/VPN mesh access |
+| 3 | Safety slash commands | S1 | **SHIPPED** | Production safety net |
+| 4 | Discord channel | S1 | **SHIPPED** | Developer audience |
+| 5 | osmoda-mcpd MCP manager | S4 | **SHIPPED** | Any MCP server becomes an OS capability |
+| — | osmoda-teachd learning daemon | S5 | **SHIPPED** | OS learns from behavior, self-optimizes |
+| — | deploy scripts (install.sh, deploy-hetzner.sh) | S5 | **SHIPPED** | One-command server provisioning |
+| 6 | x402 OS-native payments | — | Planned | AI pays for APIs autonomously within policy |
+| 7 | Semantic memory (usearch) | — | Planned | Hybrid BM25 + vector recall |
+| 8 | Zod config validation | — | Planned | Developer experience, fail-fast |
+| 9 | Web dashboard with live chat | — | **Next** | Server management from browser |
+| 10 | Daily Telegram briefing | — | Planned | Proactive awareness |
+| 11 | Multi-server management | — | Planned | Fleet view, AI queries all servers at once |
+| 12 | Spawn peer discovery | — | Planned | Auto-connect provisioned servers via mesh |
+| 13 | A2UI live dashboard | — | Planned | Product differentiator, native apps |
 
 ---
 

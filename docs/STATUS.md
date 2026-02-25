@@ -2,7 +2,7 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-02-24
+Last updated: 2026-02-25
 
 ## Maturity Levels
 
@@ -17,11 +17,11 @@ Last updated: 2026-02-24
 
 | Metric | Count |
 |--------|-------|
-| Rust crates | 9 (8 daemons + 1 CLI) |
-| Tests passing | 121 |
-| Bridge tools registered | 58 |
+| Rust crates | 10 (9 daemons + 1 CLI) |
+| Tests passing | 136 |
+| Bridge tools registered | 66 |
 | System skills | 15 |
-| NixOS systemd services | 11 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, egress, cloudflared, tailscale-auth) |
+| NixOS systemd services | 12 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, cloudflared, tailscale-auth) |
 
 ---
 
@@ -175,6 +175,23 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | NixOS service | **Functional** | systemd unit, depends on agentd + egress |
 | **Tests** | **8** | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
 
+### osmoda-teachd — System Learning & Self-Optimization
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| OBSERVE loop (30s) | **Functional** | Collects CPU (/proc/stat), memory (/proc/meminfo), service (systemctl), journal (journalctl) observations |
+| LEARN loop (5m) | **Functional** | Detects recurring failures, memory trends, anomaly spikes, CPU-service correlations |
+| Pattern detection | **Functional** | Confidence scoring; patterns above 0.7 auto-generate knowledge docs |
+| Knowledge CRUD | **Solid** | SQLite storage, manual + auto-generated docs, tags and categories; 2 tests |
+| TEACH API | **Solid** | Keyword-based retrieval with confidence boost, ~6000 char token budget cap; 2 tests |
+| Optimizer (suggest) | **Functional** | Generates ServiceRestart and Sysctl suggestions from knowledge docs |
+| Optimizer (apply) | **Functional** | Applies via SafeSwitch (POST to osmoda-watch), auto-rollback on failure |
+| SQLite persistence | **Solid** | WAL mode, 5s busy timeout; observations, patterns, knowledge_docs, optimizations tables |
+| Observation pruning | **Solid** | 7-day retention with automatic cleanup; tested |
+| Receipt logging | **Functional** | Logs pattern detection, knowledge CRUD, optimization lifecycle to agentd |
+| NixOS service | **Functional** | systemd unit, depends on agentd, Restart=on-failure |
+| **Tests** | **15** | Health/teach serde (2), learner (4: trend, recurring, anomaly), optimizer (2: suggest, approve), teacher (2: match, no-match), knowledge CRUD (5: observations, patterns, knowledge, optimizations, pruning) |
+
 ### agentctl — CLI Tool
 
 | Component | Maturity | Notes |
@@ -196,9 +213,10 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | voice-client.ts | **Functional** | HTTP-over-Unix-socket client with status, speak, transcribe, record, listen |
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
 | mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
-| Tool registrations | **Functional** | **58 tools** registered. Not integration-tested against live daemons |
+| teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
+| Tool registrations | **Functional** | **66 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (58 total)
+### Tool breakdown (66 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -216,6 +234,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | backup (agentd) | 2 | backup_create, backup_list |
 | mesh | 11 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health, mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history |
 | mcp (mcpd) | 4 | mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart |
+| teach (teachd) | 8 | teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply |
 | safety | 4 | safety_rollback, safety_status, safety_panic, safety_restart |
 
 ---
@@ -224,7 +243,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| osmoda.nix module | **Functional** | Options + 11 systemd services + channels + mesh + mcpd + remote access defined |
+| osmoda.nix module | **Functional** | Options + 12 systemd services + channels + mesh + mcpd + teachd + remote access defined |
 | osmoda-agentd service | **Functional** | Runs as root, state dir at /var/lib/osmoda |
 | osmoda-keyd service | **Functional** | PrivateNetwork=true, RestrictAddressFamilies=AF_UNIX |
 | osmoda-watch service | **Functional** | Runs as root (needs nixos-rebuild access) |
@@ -232,6 +251,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | osmoda-voice service | **Functional** | Requires PipeWire for audio I/O |
 | osmoda-mesh service | **Functional** | TCP 18800, systemd hardening, state dir 0700 |
 | osmoda-mcpd service | **Functional** | MCP server lifecycle, depends on agentd + egress |
+| osmoda-teachd service | **Functional** | System learning, depends on agentd, Restart=on-failure |
 | osmoda-egress service | **Functional** | DynamicUser, domain-filtered proxy |
 | OpenClaw gateway service | **Functional** | Depends on agentd, config file generated from NixOS options |
 | Channel config (Telegram) | **Functional** | `channels.telegram.enable`, botTokenFile, allowedUsers |
@@ -239,7 +259,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | Remote access (Cloudflare) | **Functional** | `remoteAccess.cloudflare.enable`, quick tunnel or credentialed, systemd service |
 | Remote access (Tailscale) | **Functional** | `remoteAccess.tailscale.enable`, auto-auth oneshot, forwards to NixOS built-in |
 | Firewall rules | **Functional** | Mesh port (18800) opened conditionally when mesh.enable = true |
-| flake.nix overlays | **Functional** | 9 Rust packages built via crane |
+| flake.nix overlays | **Functional** | 10 Rust packages built via crane |
 | dev-vm.nix | **Functional** | QEMU VM with Sway desktop |
 | iso.nix | **Functional** | Installer ISO config |
 | server.nix | **Functional** | Headless server config |
@@ -293,9 +313,10 @@ cargo test --workspace
 | osmoda-voice | 4 | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
 | osmoda-mesh | 31 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2), room create/join/history (3) |
 | osmoda-mcpd | 8 | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
+| osmoda-teachd | 15 | Health/teach serde (2), learner (4), optimizer (2), teacher (2), knowledge CRUD (5) |
 | agentctl | 0 | — |
 | osmoda-egress | 0 | — |
-| **Total** | **121** | **All pass** |
+| **Total** | **136** | **All pass** |
 
 ---
 

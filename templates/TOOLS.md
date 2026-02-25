@@ -97,7 +97,7 @@ Memory system status: embedding model readiness, collection size, state director
 
 ## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 58 tools available to the AI agent through OpenClaw.
+These are the 66 tools available to the AI agent through OpenClaw.
 Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
