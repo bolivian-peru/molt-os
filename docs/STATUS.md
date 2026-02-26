@@ -2,7 +2,7 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-02-25
+Last updated: 2026-02-26
 
 ## Maturity Levels
 
@@ -290,7 +290,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 5. **No end-to-end integration tests**: Each crate has unit tests. No tests verify the full daemon-to-daemon-to-bridge pipeline.
 
-6. **Socket auth is file-permissions only**: No token-based auth for Unix socket access. Relies on filesystem permissions (0600/0660).
+6. **Socket auth is file-permissions only**: No token-based auth for Unix socket access. Relies on filesystem permissions (all sockets now 0o600 owner-only since security hardening 2026-02-26).
 
 7. **Mesh peers don't survive restarts**: No persistent transport state. Peers must re-invite after daemon restart. Identity and peer metadata persist, but active connections do not.
 
@@ -353,6 +353,47 @@ User pays USDC → spawn.os.moda → Hetzner API (create server)
                                        ↓
                               /manage?id=UUID → dashboard
 ```
+
+---
+
+## Security Hardening (2026-02-26)
+
+All items verified by automated pentest on live server.
+
+| Fix | Severity | Status |
+|-----|----------|--------|
+| Socket permissions 0o660 → 0o600 (watch, routines, mesh, mcpd, teachd) | HIGH | Done |
+| Mesh TCP default bind 0.0.0.0 → 127.0.0.1 | CRITICAL | Done |
+| shell_exec: block dangerous commands (was warn-only) | CRITICAL | Done |
+| shell_exec: expanded blocklist (7 → 17 patterns) | CRITICAL | Done |
+| directory_list: add validateFilePath() | CRITICAL | Done |
+| agentd error responses: generic JSON (no stack trace leak) | CRITICAL | Done |
+| NixOS module: ProtectSystem=strict, ProtectHome, NoNewPrivileges, PrivateTmp, RestrictSUIDSGID on routines/mesh/mcpd/teachd | MEDIUM | Done |
+| NixOS module: RestrictAddressFamilies on mesh (AF_UNIX + AF_INET + AF_INET6) | MEDIUM | Done |
+| NixOS module: mesh listenAddr default 0.0.0.0 → 127.0.0.1 | MEDIUM | Done |
+
+### Pentest results (2026-02-26, post-hardening)
+
+```
+Socket permissions:    7/7 PASS (all 0600)
+Mesh bind address:     PASS (127.0.0.1:18800)
+Network exposure:      PASS (only SSH + nginx exposed)
+Daemon health:         7/7 PASS
+Injection attacks:     3/3 PASS (SQL injection, path traversal, shell injection)
+Payload bombs:         PASS (agentd survived 1MB payload)
+Error hardening:       PASS (no stack trace leak)
+Data preservation:     PASS (14,462 teachd observations, keyd policy, spawn orders)
+Hash chain integrity:  PASS (139 events, all valid)
+Rate limiting:         PASS (spawn /api/spawn returns 429)
+```
+
+### Remaining known issues
+
+- F-1: No `RequestBodyLimit` middleware on any daemon (axum default is unlimited)
+- F-3: Unbounded `Vec<RoomMessage>` in mesh rooms (memory growth)
+- F-5: No agentd ledger pruning (grows forever)
+- F-6: osmoda-egress has zero tests
+- F-7: keyd daily policy counters are in-memory only (reset on restart)
 
 ---
 

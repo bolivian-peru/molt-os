@@ -2,9 +2,9 @@
 
 # osModa
 
-**The AI doesn't manage your server. It *is* your server.**
+**The AI doesn't manage the server. It *is* the server.**
 
-A Rust + NixOS operating system where the AI agent runs at ring 0 with root access to every process, file, service, and kernel parameter. All mutations atomic and rollbackable. Every action logged to a tamper-proof hash-chained audit ledger. Third-party tools sandboxed. The agent is not.
+NixOS distribution. 9 Rust daemons. 66 typed tools. The agent runs at ring 0 — root access to every process, file, service, and kernel parameter. All mutations atomic and rollbackable. Every action hash-chained to a tamper-proof audit ledger. Third-party tools sandboxed. The agent is not.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
@@ -23,7 +23,7 @@ A Rust + NixOS operating system where the AI agent runs at ring 0 with root acce
 
 ## Why This Exists
 
-Traditional server management: SSH in, run commands, hope nothing breaks, write runbooks nobody reads, get paged at 3am.
+You're a small team shipping AI agents to production. You don't have a DevOps person. You can't afford to babysit servers. You need rollbacks because you deploy fast and sometimes things break. You need audit trails because your agents make real decisions with real money. You need 3am self-healing because nobody is on-call.
 
 osModa: the AI has structured access to the entire system through 66 typed tools exposed via 9 cooperating Rust daemons. It doesn't shell out and parse text — it calls `system_health`, gets structured JSON, makes decisions, and logs every action to a hash-chained ledger. If it breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, `osmoda-watch` detects it, the agent diagnoses root cause, and SafeSwitch deploys a fix with automatic rollback if health checks fail.
 
@@ -415,6 +415,6 @@ Apache 2.0. See [LICENSE](LICENSE).
 
 <div align="center">
 
-**osModa** — your server fixes itself at 3am. You sleep.
+**osModa** — infrastructure for teams that ship agents, not runbooks.
 
 </div>
