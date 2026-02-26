@@ -23,11 +23,11 @@ NixOS distribution. 9 Rust daemons. 66 typed tools. The agent runs at ring 0 —
 
 ## Why This Exists
 
-You're a small team shipping AI agents to production. You don't have a DevOps person. You can't afford to babysit servers. You need rollbacks because you deploy fast and sometimes things break. You need audit trails because your agents make real decisions with real money. You need 3am self-healing because nobody is on-call.
+Current state of AI agents in production: shell out, parse text, hope the regex holds, no audit trail, no rollback, manual recovery.
 
-osModa: the AI has structured access to the entire system through 66 typed tools exposed via 9 cooperating Rust daemons. It doesn't shell out and parse text — it calls `system_health`, gets structured JSON, makes decisions, and logs every action to a hash-chained ledger. If it breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, `osmoda-watch` detects it, the agent diagnoses root cause, and SafeSwitch deploys a fix with automatic rollback if health checks fail.
+osModa gives the agent structured access to the entire OS through 66 typed tools exposed via 9 Rust daemons. No shell parsing. `system_health` returns structured JSON. Every mutation is hash-chained. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, `osmoda-watch` detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — automatic rollback if health checks fail.
 
-The key insight: **NixOS makes AI root access safer.** Every system change is a transaction — it either fully applies or doesn't. Every state has a generation number. Rolling back is one command. The AI can be aggressive about fixing problems because the blast radius of *system configuration* is bounded and reversible. (NixOS rollback covers OS state — it does not undo data sent to external APIs, signed transactions, or deleted user data. See [Threat Model](#threat-model).)
+**NixOS makes AI root access safer.** Every system change is a transaction. Every state has a generation number. Rolling back is one command. The blast radius of system configuration is bounded and reversible. (NixOS rollback covers OS state — not data sent to external APIs, signed transactions, or deleted user data. See [Threat Model](#threat-model).)
 
 ## Quickstart
 
@@ -415,6 +415,6 @@ Apache 2.0. See [LICENSE](LICENSE).
 
 <div align="center">
 
-**osModa** — infrastructure for teams that ship agents, not runbooks.
+**osModa** — the server fixes itself at 3am.
 
 </div>
