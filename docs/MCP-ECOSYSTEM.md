@@ -4,7 +4,7 @@
 
 Last updated: 2026-02-24
 
-Ten daemons are built. 66 tools are registered. The OS works. osmoda-mcpd is live — it manages MCP server lifecycle from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an OS capability without writing another line of bridge code.
+Nine daemons are built. 66 tools are registered. The OS works. osmoda-mcpd is live — it manages MCP server lifecycle from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an OS capability without writing another line of bridge code.
 
 ---
 

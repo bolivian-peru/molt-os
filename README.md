@@ -25,13 +25,13 @@ A Rust + NixOS operating system where the AI agent runs at ring 0 with root acce
 
 Traditional server management: SSH in, run commands, hope nothing breaks, write runbooks nobody reads, get paged at 3am.
 
-osModa: the AI has structured access to the entire system through 66 typed tools exposed via 10 cooperating Rust daemons. It doesn't shell out and parse text — it calls `system_health`, gets structured JSON, makes decisions, and logs every action to a hash-chained ledger. If it breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, `osmoda-watch` detects it, the agent diagnoses root cause, and SafeSwitch deploys a fix with automatic rollback if health checks fail.
+osModa: the AI has structured access to the entire system through 66 typed tools exposed via 9 cooperating Rust daemons. It doesn't shell out and parse text — it calls `system_health`, gets structured JSON, makes decisions, and logs every action to a hash-chained ledger. If it breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, `osmoda-watch` detects it, the agent diagnoses root cause, and SafeSwitch deploys a fix with automatic rollback if health checks fail.
 
-The key insight: **NixOS makes AI root access safe.** Every system change is a transaction — it either fully applies or doesn't. Every state has a generation number. Rolling back is one command. The AI can be aggressive about fixing problems because the blast radius is bounded and reversible.
+The key insight: **NixOS makes AI root access safer.** Every system change is a transaction — it either fully applies or doesn't. Every state has a generation number. Rolling back is one command. The AI can be aggressive about fixing problems because the blast radius of *system configuration* is bounded and reversible. (NixOS rollback covers OS state — it does not undo data sent to external APIs, signed transactions, or deleted user data. See [Threat Model](#threat-model).)
 
 ## Quickstart
 
-### NixOS (flake) — 3 lines
+### NixOS (flake) — recommended
 
 ```nix
 # flake.nix
@@ -47,7 +47,11 @@ sudo nixos-rebuild switch
 curl -s --unix-socket /run/osmoda/agentd.sock http://localhost/health | jq
 ```
 
-### Any Linux Server — 1 command
+This is the primary install path. NixOS flakes give you reproducible builds, atomic upgrades, and instant rollback.
+
+### Any Linux Server — experimental
+
+> **Warning:** This converts your host OS to NixOS. It is a destructive, irreversible operation. Use on fresh/disposable servers only. Not recommended for production machines with existing workloads.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
@@ -93,7 +97,7 @@ curl -s --unix-socket /run/osmoda/mesh.sock http://localhost/identity | jq
 
 ## Architecture
 
-10 daemons, all Rust, communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured tool calls, never raw shell.
+9 daemons, all Rust, communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured tool calls, never raw shell.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -121,7 +125,7 @@ RING 1  Approved apps           Sandboxed. Declared capabilities only.
 RING 2  Untrusted tools         Max isolation. No network. Minimal filesystem.
 ```
 
-The agent is ring 0 by design. It's not a chatbot with sudo — it's a system service with structured access to everything, constrained by NixOS atomicity and its own audit ledger, not by permission denials.
+The agent is ring 0 by design. It's not a chatbot with sudo — it's a system service with structured access to everything, constrained by NixOS atomicity and its own audit ledger, not by permission denials. Lower rings cannot escalate privileges upward by design. Ring 0 remains the trusted computing base and must be governed by approval policies, spending limits, and audit review.
 
 ### Audit Ledger
 
@@ -131,7 +135,18 @@ Every mutation creates a hash-chained event in SQLite:
 hash = SHA-256(id | ts | type | actor | payload | prev_hash)
 ```
 
-Append-only. Tamper-evident. Any single modification invalidates the chain. Verifiable offline with `agentctl verify-ledger`.
+Append-only. Tamper-evident. Any single modification invalidates the chain. Verifiable offline with `agentctl verify-ledger`. Provides tamper-evident audit logging useful for compliance-oriented environments (SOC 2, HIPAA). The ledger is supporting infrastructure for compliance programs — not by itself proof of regulatory readiness.
+
+### Threat Model
+
+**What NixOS rollback covers:** OS configuration, package state, service definitions, firewall rules, system generations. Any bad config change can be atomically reverted.
+
+**What rollback does NOT cover:** Data already sent to external APIs, signed crypto transactions, deleted user data, exposed secrets, or side effects on remote systems. Ring 0 access means the agent can do anything the OS can do — the safety model relies on structured tools, approval policies, spending limits, audit trails, and NixOS atomicity, not on restricting the agent's access.
+
+**Non-goals for the current release:**
+- Ring 0 is not sandboxed — it is the trusted computing base. Misconfigured approval policies or compromised AI reasoning could cause harm that rollback cannot undo.
+- The hash-chained ledger proves *what happened*, not *that what happened was correct*. It is an audit tool, not a prevention mechanism.
+- The mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but has not had an external security audit. Key lifecycle, replay resistance, and downgrade protection need independent review before use in high-assurance environments.
 
 ---
 
@@ -369,13 +384,15 @@ skills/                     15 system skill definitions
 
 ## Status
 
-Early beta. 10 Rust crates, 136 tests passing, 66 bridge tools, 10 daemons, 15 system skills.
+> **Early beta.** This is a working prototype, not production-grade infrastructure. Use on disposable servers or development environments. Expect rough edges.
 
-**Proven on hardware:** Full deployment tested on Hetzner Cloud (CX22). All 10 daemons start, all sockets respond, wallet creation works, mesh identity generates, audit ledger chains correctly, teachd observes and learns.
+10 Rust crates (9 daemons + 1 CLI), 136 tests passing, 66 bridge tools, 15 system skills.
 
-**What works:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, ETH + SOL crypto signing, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, all 66 bridge tools.
+**Tested on hardware:** Full deployment tested on Hetzner Cloud (CX22). All 9 daemons start, all sockets respond, wallet creation works, mesh identity generates, audit ledger chains correctly, teachd observes and learns.
 
-**What's next:** Web dashboard with live chat, vector memory engine (ZVEC), `POST /nix/rebuild` API, multi-model support, fleet coordination via mesh.
+**What works now:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, ETH + SOL crypto signing, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, all 66 bridge tools.
+
+**What's next:** Web dashboard with live chat, vector memory engine (ZVEC), `POST /nix/rebuild` API, multi-model support, fleet coordination via mesh, external security audit of mesh crypto.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the full plan.
 

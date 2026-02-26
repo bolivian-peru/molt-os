@@ -6,7 +6,7 @@
 # Creates 6 Hetzner Cloud VMs, deploys all 10 osModa daemons (9 Rust + gateway),
 # runs ~254 checks across 10 categories, reports results, and destroys VMs when done.
 #
-# 10 Rust crates, 136 tests, 66 bridge tools, 10 daemons, 15 system skills.
+# 10 Rust crates (9 daemons + 1 CLI), 136 tests, 66 bridge tools, 15 system skills.
 # Clones latest code from https://github.com/bolivian-peru/os-moda
 #
 # Usage:
@@ -494,9 +494,9 @@ log "Phase 2 complete: $DEPLOY_OK/$NODE_COUNT deployed."
 
 header "Phase 3: Test Suite"
 
-# ── Test 1: Health Baseline (10 daemons × 6 nodes = 60) ─────────────────
+# ── Test 1: Health Baseline (9 daemons × 6 nodes = 54) ─────────────────
 
-header "Test 1: Health Baseline (10 daemons × 6 nodes = 60)"
+header "Test 1: Health Baseline (9 daemons × 6 nodes = 54)"
 sec_start
 for i in $(seq 1 $NODE_COUNT); do
   # 7 standard daemons with /health on unix socket
