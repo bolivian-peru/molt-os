@@ -312,7 +312,7 @@ POST /switch/begin         { plan, ttl_secs, health_checks[] } → { id, previou
 GET  /switch/status/{id}   → SwitchSession
 POST /switch/commit/{id}   → SwitchSession (committed)
 POST /switch/rollback/{id} → SwitchSession (rolled back)
-POST /watcher/add          { name, check, interval_secs, actions[] } → Watcher
+POST /watcher/add          { name, check: {type: "http_get"|"tcp_port"|"systemd_unit"|"command", ...}, interval_secs, actions[] } → Watcher
 GET  /watcher/list          → Watcher[]
 DEL  /watcher/remove/{id}  → { removed }
 GET  /health               → { active_switches, watchers }
@@ -321,7 +321,7 @@ GET  /health               → { active_switches, watchers }
 ## osmoda-routines API reference (socket: /run/osmoda/routines.sock)
 
 ```
-POST /routine/add          { name, trigger, action } → Routine
+POST /routine/add          { name, trigger: {type: "interval", seconds: N}, action: {type: "health_check"|"service_monitor"|"log_scan"|"memory_maintenance"|"command"|"webhook", ...} } → Routine
 GET  /routine/list          → Routine[]
 DEL  /routine/remove/{id}  → { removed }
 POST /routine/trigger/{id} → { status, output }
