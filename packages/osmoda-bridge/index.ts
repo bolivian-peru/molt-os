@@ -108,8 +108,14 @@ function validateFilePath(filePath: string): string | null {
   return null;
 }
 
-/** Known dangerous commands that warrant extra caution. */
-const DANGEROUS_COMMANDS = ["rm -rf", "mkfs", "dd if=", "format", "> /dev/", "shred", "wipefs"];
+/** Known dangerous commands that must be blocked or routed through agentd APIs. */
+const DANGEROUS_COMMANDS = [
+  "rm -rf", "mkfs", "dd if=", "format", "> /dev/", "shred", "wipefs",
+  "chmod 777", "chmod -R", "chown -R /",
+  "curl | sh", "wget | sh", "curl | bash", "wget | bash",
+  "> /dev/sd", "shutdown", "reboot", "halt", "init 0", "init 6",
+  "nix-collect-garbage", "nixos-rebuild",
+];
 
 // ---------------------------------------------------------------------------
 // Plugin registration
@@ -263,14 +269,15 @@ export default function register(api: any) {
     async execute(_id: string, params: Record<string, unknown>) {
       const cmd = String(params.command);
       const timeout = Math.min(Number(params.timeout) || 30000, 120000); // Cap at 120s
-      // Warn on dangerous commands (still execute — agent has full access, but log it)
-      const isDangerous = DANGEROUS_COMMANDS.some((d) => cmd.includes(d));
-      if (isDangerous) {
+      // Block dangerous commands — must use proper agentd APIs instead
+      const matched = DANGEROUS_COMMANDS.find((d) => cmd.includes(d));
+      if (matched) {
         agentdRequest("POST", "/memory/ingest", {
-          event: { category: "security", subcategory: "dangerous_command", actor: "openclaw.agent",
-            summary: "Dangerous command executed: " + cmd.substring(0, 100),
-            metadata: { command: cmd } },
+          event: { category: "security", subcategory: "dangerous_command_blocked", actor: "openclaw.agent",
+            summary: "Dangerous command blocked: " + cmd.substring(0, 100),
+            metadata: { command: cmd, matched_pattern: matched } },
         }).catch(() => {});
+        return { output: JSON.stringify({ error: `Command blocked: '${matched}' is not allowed via shell_exec. Use the appropriate agentd API (safe_switch_begin for NixOS changes, or request user approval for destructive operations).` }) };
       }
       const result = runShell(cmd, timeout);
       agentdRequest("POST", "/memory/ingest", {
@@ -360,6 +367,10 @@ export default function register(api: any) {
     },
     async execute(_id: string, params: Record<string, unknown>) {
       const dir = String(params.path || "/");
+      const pathErr = validateFilePath(dir);
+      if (pathErr) {
+        return { output: JSON.stringify({ error: pathErr }) };
+      }
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         const result = entries.map((e) => {

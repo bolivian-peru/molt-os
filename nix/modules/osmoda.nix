@@ -132,7 +132,7 @@ in {
       enable = mkEnableOption "osModa mesh daemon (P2P encrypted agent-to-agent)";
       socketPath = mkOption { type = types.str; default = "/run/osmoda/mesh.sock"; description = "mesh Unix socket path"; };
       listenPort = mkOption { type = types.port; default = 18800; description = "TCP port for incoming peer connections"; };
-      listenAddr = mkOption { type = types.str; default = "0.0.0.0"; description = "TCP listen address for peer connections"; };
+      listenAddr = mkOption { type = types.str; default = "127.0.0.1"; description = "TCP listen address for peer connections (set to 0.0.0.0 for external access)"; };
     };
 
     # --- MCP Server Manager ---
@@ -460,6 +460,10 @@ in {
         RuntimeDirectory = "osmoda";
         StateDirectory = "osmoda";
         # Runs as root — needs to execute nixos-rebuild, systemctl
+        ProtectHome = true;
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        RestrictSUIDSGID = true;
       };
     };
 
@@ -482,8 +486,14 @@ in {
         RestartSec = 3;
         RuntimeDirectory = "osmoda";
         StateDirectory = "osmoda";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        RestrictSUIDSGID = true;
         ProtectKernelTunables = true;
         LockPersonality = true;
+        ReadWritePaths = [ "${cfg.routines.routinesDir}" "/run/osmoda" ];
       };
     };
 
@@ -509,11 +519,17 @@ in {
         RestartSec = 3;
         RuntimeDirectory = "osmoda";
         StateDirectory = "osmoda";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        RestrictSUIDSGID = true;
         ProtectKernelTunables = true;
         ProtectClock = true;
         LockPersonality = true;
         PrivateDevices = true;
         MemoryDenyWriteExecute = true;
+        RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
         ReadWritePaths = [ "${cfg.stateDir}/mesh" "/run/osmoda" ];
       };
     };
@@ -556,8 +572,14 @@ in {
         RestartSec = 3;
         RuntimeDirectory = "osmoda";
         StateDirectory = "osmoda";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        RestrictSUIDSGID = true;
         ProtectKernelTunables = true;
         LockPersonality = true;
+        ReadWritePaths = [ "${cfg.stateDir}/mcp" "/run/osmoda" ];
       };
     });
 
@@ -581,8 +603,14 @@ in {
         RestartSec = 5;
         RuntimeDirectory = "osmoda";
         StateDirectory = "osmoda";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        RestrictSUIDSGID = true;
         ProtectKernelTunables = true;
         LockPersonality = true;
+        ReadWritePaths = [ "${cfg.stateDir}/teachd" "/run/osmoda" ];
       };
     };
 

@@ -47,7 +47,12 @@ pub async fn system_query_handler(
         Ok(v) => v,
         Err(e) => {
             tracing::error!(error = %e, query = %body.query, "system query failed");
-            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+            // Return generic error — never leak stack traces or internal paths
+            let query_name = body.query.clone();
+            return Ok(Json(SystemQueryResponse {
+                query: body.query,
+                result: json!({ "error": "query failed", "query": query_name }),
+            }));
         }
     };
 

@@ -44,8 +44,8 @@ struct Args {
     #[arg(long, default_value = "/run/osmoda/agentd.sock")]
     agentd_socket: String,
 
-    /// TCP listen address for incoming peer connections.
-    #[arg(long, default_value = "0.0.0.0")]
+    /// TCP listen address for incoming peer connections (default localhost; use NixOS osmoda.mesh.listenAddr for external).
+    #[arg(long, default_value = "127.0.0.1")]
     listen_addr: String,
 
     /// TCP listen port for incoming peer connections.
@@ -181,7 +181,7 @@ async fn main() {
     {
         use std::os::unix::fs::PermissionsExt;
         if let Err(e) =
-            std::fs::set_permissions(&args.socket, std::fs::Permissions::from_mode(0o660))
+            std::fs::set_permissions(&args.socket, std::fs::Permissions::from_mode(0o600))
         {
             tracing::warn!(error = %e, "failed to set socket permissions");
         }
