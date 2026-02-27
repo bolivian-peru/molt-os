@@ -99,8 +99,23 @@ echo -e "${BOLD}  ╚═══════════════════�
 echo ""
 
 # ---------------------------------------------------------------------------
+# Progress reporting (sends live step updates to spawn.os.moda dashboard)
+# ---------------------------------------------------------------------------
+report_progress() {
+  local step="$1" step_status="$2" detail="$3"
+  if [ -z "$ORDER_ID" ] || [ -z "$CALLBACK_URL" ]; then return 0; fi
+  local BASE_URL="${CALLBACK_URL%/api/heartbeat}"
+  curl -sf -X POST "$BASE_URL/api/provision-progress" \
+    -H "Content-Type: application/json" \
+    -H "X-Heartbeat-Secret: $HEARTBEAT_SECRET" \
+    -d "{\"order_id\":\"$ORDER_ID\",\"step\":\"$step\",\"status\":\"$step_status\",\"detail\":\"$detail\"}" \
+    >/dev/null 2>&1 &
+}
+
+# ---------------------------------------------------------------------------
 # Pre-flight checks
 # ---------------------------------------------------------------------------
+report_progress "preflight" "started" "Running pre-flight checks"
 log "Running pre-flight checks..."
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -179,6 +194,8 @@ fi
 # ---------------------------------------------------------------------------
 # Step 2: Install dependencies
 # ---------------------------------------------------------------------------
+report_progress "preflight" "done" "$OS_TYPE $ARCH"
+report_progress "dependencies" "started" "Installing build tools + Node.js + Rust"
 log "Step 2: Installing dependencies..."
 
 # Ensure git is available
@@ -229,6 +246,8 @@ log "Dependencies ready."
 # ---------------------------------------------------------------------------
 # Step 3: Clone/update the repo
 # ---------------------------------------------------------------------------
+report_progress "dependencies" "done" "Rust + Node.js + build tools ready"
+report_progress "clone" "started" "Cloning osModa from GitHub"
 log "Step 3: Getting osModa source..."
 
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -252,6 +271,8 @@ log "Source ready at $INSTALL_DIR"
 # ---------------------------------------------------------------------------
 # Step 4: Build Rust binaries
 # ---------------------------------------------------------------------------
+report_progress "clone" "done" "Source at $INSTALL_DIR"
+report_progress "build" "started" "Compiling 9 Rust daemons (2-5 min)"
 log "Step 4: Building all daemons (this takes 2-5 minutes on first build)..."
 
 cd "$INSTALL_DIR"
@@ -294,6 +315,8 @@ log "Build complete."
 # ---------------------------------------------------------------------------
 # Step 5: Install OpenClaw
 # ---------------------------------------------------------------------------
+report_progress "build" "done" "All daemons compiled"
+report_progress "openclaw" "started" "Installing OpenClaw AI gateway"
 log "Step 5: Installing OpenClaw AI gateway..."
 
 if ! command -v npm &>/dev/null; then
@@ -318,6 +341,8 @@ log "OpenClaw installed."
 # ---------------------------------------------------------------------------
 # Step 6: Set up osmoda-bridge plugin
 # ---------------------------------------------------------------------------
+report_progress "openclaw" "done" "OpenClaw installed"
+report_progress "bridge" "started" "Installing 72-tool bridge plugin"
 log "Step 6: Setting up osmoda-bridge plugin..."
 
 PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
@@ -334,6 +359,8 @@ log "Bridge plugin installed with 72 system tools."
 # ---------------------------------------------------------------------------
 # Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)
 # ---------------------------------------------------------------------------
+report_progress "bridge" "done" "72 tools registered"
+report_progress "workspaces" "started" "Setting up agent workspaces + skills"
 log "Step 7: Setting up multi-agent workspaces..."
 
 # OpenClaw multi-agent layout:
@@ -415,7 +442,9 @@ fi
 # ---------------------------------------------------------------------------
 # Step 8: Set up API key (if provided) or prep setup wizard
 # ---------------------------------------------------------------------------
+report_progress "workspaces" "done" "osmoda + mobile agents configured"
 if [ -n "$API_KEY" ]; then
+  report_progress "apikey" "started" "Configuring API key + multi-agent auth"
   log "Step 8: Configuring API key..."
 
   # Decode base64 API key if it looks base64-encoded (from spawn cloud-init)
@@ -538,6 +567,8 @@ fi
 # ---------------------------------------------------------------------------
 # Step 9: Create and start systemd services
 # ---------------------------------------------------------------------------
+report_progress "apikey" "done" "Auth profiles written"
+report_progress "services" "started" "Starting 9 daemons + OpenClaw gateway"
 log "Step 9: Starting services..."
 
 if [ "$OS_TYPE" = "nixos" ]; then
@@ -1143,6 +1174,8 @@ fi # end SKIP_SYSTEMD
 # ---------------------------------------------------------------------------
 # Done!
 # ---------------------------------------------------------------------------
+report_progress "services" "done" "All services running"
+report_progress "complete" "done" "osModa installed successfully"
 echo ""
 echo -e "${BOLD}  ╔══════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}  ║       ${GREEN}osModa installed successfully!${NC}${BOLD}      ║${NC}"
