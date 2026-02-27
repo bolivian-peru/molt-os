@@ -6,7 +6,7 @@
 # Creates 6 Hetzner Cloud VMs, deploys all 9 osModa daemons + OpenClaw gateway,
 # runs ~254 checks across 10 categories, reports results, and destroys VMs when done.
 #
-# 10 Rust crates (9 daemons + 1 CLI), 136 tests, 66 bridge tools, 15 system skills.
+# 10 Rust crates (9 daemons + 1 CLI), 136 tests, 72 bridge tools, 16 system skills.
 # Clones latest code from https://github.com/bolivian-peru/os-moda
 #
 # Usage:

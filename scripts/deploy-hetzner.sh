@@ -295,26 +295,56 @@ log "Step 6: Installing workspace templates + skills..."
 ssh_cmd bash <<'REMOTE_TEMPLATES'
 set -euo pipefail
 
-# OpenClaw's actual workspace is ~/.openclaw/workspace/ (NOT /root/workspace/)
-# Copy to both locations for compatibility
+# Multi-agent workspace layout (OpenClaw multi-agent routing)
+OC_BASE="/root/.openclaw"
 WORKSPACE="/root/workspace"
-OC_WORKSPACE="/root/.openclaw/workspace"
-mkdir -p "$WORKSPACE" "$OC_WORKSPACE"
+WS_OSMODA="$OC_BASE/workspace-osmoda"
+WS_MOBILE="$OC_BASE/workspace-mobile"
 
-# Templates — copy to both workspace dirs
+mkdir -p "$WORKSPACE" "$WS_OSMODA" "$WS_MOBILE"
+mkdir -p "$OC_BASE/agents/osmoda/agent" "$OC_BASE/agents/osmoda/sessions"
+mkdir -p "$OC_BASE/agents/mobile/agent" "$OC_BASE/agents/mobile/sessions"
+
+# Main agent (osmoda): full templates + all skills
 for tpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md USER.md HEARTBEAT.md; do
   if [ -f "/opt/osmoda/templates/$tpl" ]; then
     cp "/opt/osmoda/templates/$tpl" "$WORKSPACE/$tpl"
-    cp "/opt/osmoda/templates/$tpl" "$OC_WORKSPACE/$tpl"
+    cp "/opt/osmoda/templates/$tpl" "$WS_OSMODA/$tpl"
   fi
 done
 
-# Skills — copy to both workspace dirs
 if [ -d /opt/osmoda/skills ]; then
-  mkdir -p "$WORKSPACE/skills" "$OC_WORKSPACE/skills"
+  mkdir -p "$WORKSPACE/skills" "$WS_OSMODA/skills"
   cp -r /opt/osmoda/skills/* "$WORKSPACE/skills/" 2>/dev/null || true
-  cp -r /opt/osmoda/skills/* "$OC_WORKSPACE/skills/" 2>/dev/null || true
-  echo "[deploy] Skills installed: $(ls /opt/osmoda/skills/ | wc -l) skills"
+  cp -r /opt/osmoda/skills/* "$WS_OSMODA/skills/" 2>/dev/null || true
+  echo "[deploy] Main agent skills: $(ls /opt/osmoda/skills/ | wc -l) skills"
+fi
+
+# Mobile agent: mobile-specific templates + monitoring skills
+if [ -d /opt/osmoda/templates/agents/mobile ]; then
+  cp /opt/osmoda/templates/agents/mobile/AGENTS.md "$WS_MOBILE/AGENTS.md"
+  cp /opt/osmoda/templates/agents/mobile/SOUL.md "$WS_MOBILE/SOUL.md"
+fi
+for tpl in TOOLS.md IDENTITY.md USER.md; do
+  if [ -f "/opt/osmoda/templates/$tpl" ]; then
+    cp "/opt/osmoda/templates/$tpl" "$WS_MOBILE/$tpl"
+  fi
+done
+
+MOBILE_SKILLS="system-monitor service-explorer network-manager system-packages file-manager"
+if [ -d /opt/osmoda/skills ]; then
+  mkdir -p "$WS_MOBILE/skills"
+  for skill in $MOBILE_SKILLS; do
+    if [ -d "/opt/osmoda/skills/$skill" ]; then
+      cp -r "/opt/osmoda/skills/$skill" "$WS_MOBILE/skills/$skill"
+    fi
+  done
+  echo "[deploy] Mobile agent skills: $(echo $MOBILE_SKILLS | wc -w | tr -d ' ') skills"
+fi
+
+# Share auth across agents (if main agent has auth)
+if [ -f "$OC_BASE/agents/osmoda/agent/auth-profiles.json" ]; then
+  cp "$OC_BASE/agents/osmoda/agent/auth-profiles.json" "$OC_BASE/agents/mobile/agent/auth-profiles.json"
 fi
 
 # Create state directories with secure permissions
@@ -326,8 +356,10 @@ chmod 700 /var/lib/osmoda/keyd
 chmod 700 /var/lib/osmoda/keyd/keys
 chmod 700 /var/lib/osmoda/mesh
 
-echo "[deploy] Workspace templates installed to $WORKSPACE + $OC_WORKSPACE"
-ls -la "$OC_WORKSPACE/"
+echo "[deploy] Multi-agent workspaces installed"
+echo "[deploy] Main agent: $WS_OSMODA"
+echo "[deploy] Mobile agent: $WS_MOBILE"
+ls -la "$WS_OSMODA/"
 REMOTE_TEMPLATES
 
 log "Templates + skills installed."

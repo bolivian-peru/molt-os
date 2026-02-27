@@ -323,37 +323,61 @@ rm -rf "$PLUGIN_DST"
 cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
 chown -R root:root "$PLUGIN_DST"
 
-# Configure OpenClaw
-mkdir -p /root/.openclaw
-openclaw config set gateway.mode local 2>/dev/null || true
-openclaw config set gateway.auth.mode none 2>/dev/null || true
-openclaw config set plugins.allow '["osmoda-bridge", "device-pair", "memory-core", "phone-control", "talk-voice"]' 2>/dev/null || true
-
 log "Bridge plugin installed with 72 system tools."
 
 # ---------------------------------------------------------------------------
-# Step 7: Install workspace templates + skills
+# Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)
 # ---------------------------------------------------------------------------
-log "Step 7: Installing agent identity and skills..."
+log "Step 7: Setting up multi-agent workspaces..."
 
-# OpenClaw's actual workspace is ~/.openclaw/workspace/ (NOT /root/workspace/)
-# Copy to both locations for compatibility
-OC_WORKSPACE="/root/.openclaw/workspace"
-mkdir -p "$WORKSPACE_DIR" "$OC_WORKSPACE"
+# OpenClaw multi-agent layout:
+#   ~/.openclaw/workspace-osmoda/  — main agent (Opus, full access)
+#   ~/.openclaw/workspace-mobile/  — mobile agent (Sonnet, read-only)
+#   ~/.openclaw/agents/<id>/agent/ — per-agent state + auth
+#   ~/.openclaw/agents/<id>/sessions/ — per-agent sessions
+OC_BASE="/root/.openclaw"
+WS_OSMODA="$OC_BASE/workspace-osmoda"
+WS_MOBILE="$OC_BASE/workspace-mobile"
 
-# Templates — copy to both workspace dirs
+mkdir -p "$WORKSPACE_DIR" "$WS_OSMODA" "$WS_MOBILE"
+mkdir -p "$OC_BASE/agents/osmoda/agent" "$OC_BASE/agents/osmoda/sessions"
+mkdir -p "$OC_BASE/agents/mobile/agent" "$OC_BASE/agents/mobile/sessions"
+
+# --- Main agent (osmoda): full templates + all skills ---
 for tpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md USER.md HEARTBEAT.md; do
   if [ -f "$INSTALL_DIR/templates/$tpl" ]; then
     cp "$INSTALL_DIR/templates/$tpl" "$WORKSPACE_DIR/$tpl"
-    cp "$INSTALL_DIR/templates/$tpl" "$OC_WORKSPACE/$tpl"
+    cp "$INSTALL_DIR/templates/$tpl" "$WS_OSMODA/$tpl"
   fi
 done
 
-# Skills — copy to both workspace dirs
 if [ -d "$INSTALL_DIR/skills" ]; then
-  mkdir -p "$WORKSPACE_DIR/skills" "$OC_WORKSPACE/skills"
+  mkdir -p "$WORKSPACE_DIR/skills" "$WS_OSMODA/skills"
   cp -r "$INSTALL_DIR/skills/"* "$WORKSPACE_DIR/skills/" 2>/dev/null || true
-  cp -r "$INSTALL_DIR/skills/"* "$OC_WORKSPACE/skills/" 2>/dev/null || true
+  cp -r "$INSTALL_DIR/skills/"* "$WS_OSMODA/skills/" 2>/dev/null || true
+fi
+
+# --- Mobile agent: mobile-specific templates + monitoring skills only ---
+if [ -d "$INSTALL_DIR/templates/agents/mobile" ]; then
+  cp "$INSTALL_DIR/templates/agents/mobile/AGENTS.md" "$WS_MOBILE/AGENTS.md"
+  cp "$INSTALL_DIR/templates/agents/mobile/SOUL.md" "$WS_MOBILE/SOUL.md"
+fi
+# Share TOOLS.md and IDENTITY.md from main templates
+for tpl in TOOLS.md IDENTITY.md USER.md; do
+  if [ -f "$INSTALL_DIR/templates/$tpl" ]; then
+    cp "$INSTALL_DIR/templates/$tpl" "$WS_MOBILE/$tpl"
+  fi
+done
+
+# Mobile skills: read-only monitoring subset
+MOBILE_SKILLS="system-monitor service-explorer network-manager system-packages file-manager"
+if [ -d "$INSTALL_DIR/skills" ]; then
+  mkdir -p "$WS_MOBILE/skills"
+  for skill in $MOBILE_SKILLS; do
+    if [ -d "$INSTALL_DIR/skills/$skill" ]; then
+      cp -r "$INSTALL_DIR/skills/$skill" "$WS_MOBILE/skills/$skill"
+    fi
+  done
 fi
 
 # Create state directories with secure permissions
@@ -365,7 +389,7 @@ chmod 700 "$STATE_DIR/keyd"
 chmod 700 "$STATE_DIR/keyd/keys"
 chmod 700 "$STATE_DIR/mesh"
 
-log "Agent identity and skills installed."
+log "Multi-agent workspaces installed (osmoda + mobile)."
 
 # Store spawn config (if provisioned via spawn.os.moda)
 if [ -n "$ORDER_ID" ]; then
@@ -407,27 +431,83 @@ if [ -n "$API_KEY" ]; then
   fi
   chmod 600 "$STATE_DIR/config/env"
 
-  # Write OpenClaw auth-profiles.json
-  mkdir -p /root/.openclaw/agents/main/agent
-  if command -v node &>/dev/null; then
-    if [ "$EFFECTIVE_PROVIDER" = "openai" ]; then
-      node -e "
-        const fs = require('fs');
-        const key = process.argv[1];
-        const auth = { type: 'api_key', provider: 'openai', key: key };
-        fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
-      " "$DECODED_KEY"
-    else
-      node -e "
-        const fs = require('fs');
-        const key = process.argv[1];
-        const isOAuth = key.startsWith('sk-ant-oat');
-        const auth = isOAuth
-          ? { type: 'token', provider: 'anthropic', token: key }
-          : { type: 'api_key', provider: 'anthropic', key: key };
-        fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
-      " "$DECODED_KEY"
+  # Write OpenClaw auth-profiles.json for BOTH agents (shared API key)
+  for AGENT_ID in osmoda mobile; do
+    mkdir -p "/root/.openclaw/agents/$AGENT_ID/agent"
+    if command -v node &>/dev/null; then
+      if [ "$EFFECTIVE_PROVIDER" = "openai" ]; then
+        node -e "
+          const fs = require('fs');
+          const key = process.argv[1];
+          const agentId = process.argv[2];
+          const auth = { type: 'api_key', provider: 'openai', key: key };
+          fs.writeFileSync('/root/.openclaw/agents/' + agentId + '/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+        " "$DECODED_KEY" "$AGENT_ID"
+      else
+        node -e "
+          const fs = require('fs');
+          const key = process.argv[1];
+          const agentId = process.argv[2];
+          const isOAuth = key.startsWith('sk-ant-oat');
+          const auth = isOAuth
+            ? { type: 'token', provider: 'anthropic', token: key }
+            : { type: 'api_key', provider: 'anthropic', key: key };
+          fs.writeFileSync('/root/.openclaw/agents/' + agentId + '/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+        " "$DECODED_KEY" "$AGENT_ID"
+      fi
     fi
+  done
+
+  # Generate multi-agent OpenClaw config (JSON5)
+  if command -v node &>/dev/null; then
+    node -e "
+      const fs = require('fs');
+      const config = {
+        gateway: { auth: { mode: 'none' } },
+        plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
+        agents: {
+          list: [
+            {
+              id: 'osmoda',
+              default: true,
+              name: 'osModa',
+              workspace: '/root/.openclaw/workspace-osmoda',
+              agentDir: '/root/.openclaw/agents/osmoda/agent',
+              model: 'anthropic/claude-opus-4-6'
+            },
+            {
+              id: 'mobile',
+              name: 'osModa Mobile',
+              workspace: '/root/.openclaw/workspace-mobile',
+              agentDir: '/root/.openclaw/agents/mobile/agent',
+              model: 'anthropic/claude-sonnet-4-6',
+              tools: {
+                deny: [
+                  'shell_exec', 'file_write',
+                  'safety_panic', 'safety_rollback',
+                  'app_deploy', 'app_remove', 'app_stop', 'app_restart',
+                  'wallet_create', 'wallet_send', 'wallet_sign', 'wallet_delete',
+                  'safe_switch_begin', 'safe_switch_commit', 'safe_switch_rollback',
+                  'watcher_add', 'routine_add',
+                  'mesh_invite_create', 'mesh_invite_accept', 'mesh_peer_disconnect',
+                  'mesh_room_create', 'mesh_room_join',
+                  'mcp_server_start', 'mcp_server_stop', 'mcp_server_restart',
+                  'teach_knowledge_create', 'teach_optimize_suggest', 'teach_optimize_apply',
+                  'incident_create', 'incident_step',
+                  'backup_create'
+                ]
+              }
+            }
+          ]
+        },
+        bindings: [
+          { agentId: 'mobile', match: { channel: 'telegram' } },
+          { agentId: 'mobile', match: { channel: 'whatsapp' } }
+        ]
+      };
+      fs.writeFileSync('/root/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
+    "
+    log "Multi-agent config written to /root/.openclaw/openclaw.json"
   fi
 
   # Gateway env vars for daemon sockets
@@ -443,7 +523,7 @@ OSMODA_TEACHD_SOCKET=/run/osmoda/teachd.sock
 GWEOF
   chmod 600 "$STATE_DIR/config/gateway-env"
 
-  log "API key configured."
+  log "API key configured for both agents."
 else
   log "Step 8: No API key provided — setup wizard will run on port 18789."
   info "After install, open http://localhost:18789 to enter your API key."
@@ -905,6 +985,43 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       fi
       NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
       ;;
+    mesh_invite_create)
+      # Create a mesh invite on this server, report back the invite code
+      TARGET_IP=$(echo "$ACTION_JSON" | jq -r '.target_server_ip' 2>/dev/null)
+      TARGET_PORT=$(echo "$ACTION_JSON" | jq -r '.target_mesh_port' 2>/dev/null)
+      INVITE_RESULT=$(curl -sf --unix-socket "$RUN_DIR/mesh.sock" \
+        -X POST http://l/invite/create \
+        -H "Content-Type: application/json" \
+        -d '{"ttl_secs": 3600}' 2>/dev/null)
+      INVITE_CODE=$(echo "$INVITE_RESULT" | jq -r '.invite_code' 2>/dev/null)
+      if [ -n "$INVITE_CODE" ] && [ "$INVITE_CODE" != "null" ]; then
+        # Report as completed with invite_code result (for relay to target server)
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" --arg code "$INVITE_CODE" \
+          '. + [{id: $id, result: {invite_code: $code}}]')
+      else
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
+    mesh_invite_accept)
+      # Accept a mesh invite on this server
+      INVITE_CODE=$(echo "$ACTION_JSON" | jq -r '.invite_code' 2>/dev/null)
+      if [ -n "$INVITE_CODE" ] && [ "$INVITE_CODE" != "null" ]; then
+        curl -sf --unix-socket "$RUN_DIR/mesh.sock" \
+          -X POST http://l/invite/accept \
+          -H "Content-Type: application/json" \
+          -d "{\"invite_code\": \"$INVITE_CODE\"}" 2>/dev/null || true
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
+    mesh_peer_disconnect)
+      # Disconnect a mesh peer
+      PEER_ID=$(echo "$ACTION_JSON" | jq -r '.peer_instance_id' 2>/dev/null)
+      if [ -n "$PEER_ID" ] && [ "$PEER_ID" != "null" ]; then
+        curl -sf --unix-socket "$RUN_DIR/mesh.sock" \
+          -X DELETE "http://l/peer/$PEER_ID" 2>/dev/null || true
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
     update_api_key)
       APROVIDER=$(echo "$ACTION_JSON" | jq -r '.provider' 2>/dev/null)
       AKEY=$(echo "$ACTION_JSON" | jq -r '.key' 2>/dev/null) || continue
@@ -919,13 +1036,15 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
           printf 'ANTHROPIC_API_KEY=%s\n' "$AKEY" > "$STATE_DIR/config/env"
         fi
         chmod 600 "$STATE_DIR/config/env"
-        # Update auth-profiles.json (use jq to safely encode key value)
-        mkdir -p /root/.openclaw/agents/main/agent
+        # Update auth-profiles.json for all agents
         SAFE_PROVIDER="anthropic"
         if [ "$APROVIDER" = "openai" ]; then SAFE_PROVIDER="openai"; fi
-        jq -n --arg type "api_key" --arg provider "$SAFE_PROVIDER" --arg key "$AKEY" \
-          '{type: $type, provider: $provider, key: $key}' \
-          > /root/.openclaw/agents/main/agent/auth-profiles.json
+        for _AGID in osmoda mobile; do
+          mkdir -p "/root/.openclaw/agents/$_AGID/agent"
+          jq -n --arg type "api_key" --arg provider "$SAFE_PROVIDER" --arg key "$AKEY" \
+            '{type: $type, provider: $provider, key: $key}' \
+            > "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
+        done
         # Restart gateway to pick up new key
         systemctl restart osmoda-gateway.service 2>/dev/null || true
         NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')

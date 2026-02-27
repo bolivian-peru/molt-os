@@ -86,9 +86,17 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    file-manager, network-manager, service-explorer, app-deployer.
 
 12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
-   Generates OpenClaw config file from NixOS options (channels, auth, plugins).
+   Generates multi-agent OpenClaw config from NixOS options (agents, bindings, channels, plugins).
+   Multi-agent routing: `osmoda` (Opus, full access, web default) + `mobile` (Sonnet, read-only, Telegram/WhatsApp).
    Channel options: `channels.telegram` and `channels.whatsapp` — config generation
    and credential management; actual connections handled by OpenClaw.
+
+13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
+   - `osmoda` (default): Claude Opus, all 72 tools, all 16 skills, full system access
+   - `mobile`: Claude Sonnet, read-only tools, monitoring skills, for Telegram/WhatsApp
+   Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
+   Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
+   Per-agent tool deny lists prevent mobile agent from executing destructive operations.
 
 ## Repo layout
 
@@ -209,12 +217,16 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── service-explorer/SKILL.md
   └── app-deployer/SKILL.md              # Deploy + manage user applications
 ./templates/
-  ├── AGENTS.md                          # "You ARE the operating system"
-  ├── SOUL.md                            # Calm, competent, omniscient
+  ├── AGENTS.md                          # "You ARE the operating system" (main agent)
+  ├── SOUL.md                            # Calm, competent, omniscient (main agent)
   ├── TOOLS.md                           # All agentd endpoints documented
   ├── IDENTITY.md                        # Agent identity (name, role, trust model)
   ├── USER.md                            # Learned user preferences template
-  └── HEARTBEAT.md                       # Periodic task scheduling template
+  ├── HEARTBEAT.md                       # Periodic task scheduling template
+  └── agents/
+      └── mobile/                        # Mobile agent (Sonnet, read-only)
+          ├── AGENTS.md                  # Read-only OS monitor for mobile
+          └── SOUL.md                    # Concise, phone-optimized responses
 ./scripts/
   ├── install.sh                         # One-command installer (curl | bash)
   └── deploy-hetzner.sh                  # Push deploy from local to Hetzner

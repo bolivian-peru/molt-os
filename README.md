@@ -97,14 +97,16 @@ curl -s --unix-socket /run/osmoda/mesh.sock http://localhost/identity | jq
 
 ## Architecture
 
-9 daemons, all Rust, communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured tool calls, never raw shell.
+9 daemons, all Rust, communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured tool calls, never raw shell. One gateway, multiple routed agents — Opus for deep work (web), Sonnet for quick status (mobile).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│  AI Gateway (OpenClaw)          reasoning + planning                          │
-│  osmoda-bridge                  72 typed tools                                │
+│  AI Gateway (OpenClaw)          Multi-Agent Router                            │
+│  ├─ osmoda agent (Opus)         72 tools · 16 skills · full access · web      │
+│  └─ mobile agent (Sonnet)       read-only tools · 5 skills · Telegram/WA      │
+│  osmoda-bridge                  72 typed tools (shared plugin)                 │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤
 │ agentd │ keyd   │ watch  │ routines │ mesh   │ voice │ mcpd │teachd │egress │

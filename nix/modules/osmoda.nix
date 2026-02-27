@@ -7,12 +7,51 @@ let
   # When osModa UI fronts the gateway, use the internal port
   gatewayPort = if cfg.ui.enable then cfg.openclaw.internalPort else cfg.openclaw.port;
 
-  # Generate OpenClaw config JSON from NixOS options
+  # Generate multi-agent OpenClaw config from NixOS options
   channelConfig = {
     gateway = {
       auth.mode = "none";
     };
     plugins.allow = [ "osmoda-bridge" ];
+
+    # Multi-agent routing: main (Opus) + mobile (Sonnet)
+    agents.list = [
+      {
+        id = "osmoda";
+        default = true;
+        name = "osModa";
+        workspace = "${cfg.stateDir}/workspace-osmoda";
+        agentDir = "/root/.openclaw/agents/osmoda/agent";
+        model = cfg.openclaw.model;
+      }
+      {
+        id = "mobile";
+        name = "osModa Mobile";
+        workspace = "${cfg.stateDir}/workspace-mobile";
+        agentDir = "/root/.openclaw/agents/mobile/agent";
+        model = "anthropic/claude-sonnet-4-6";
+        tools.deny = [
+          "shell_exec" "file_write"
+          "safety_panic" "safety_rollback"
+          "app_deploy" "app_remove" "app_stop" "app_restart"
+          "wallet_create" "wallet_send" "wallet_sign" "wallet_delete"
+          "safe_switch_begin" "safe_switch_commit" "safe_switch_rollback"
+          "watcher_add" "routine_add"
+          "mesh_invite_create" "mesh_invite_accept" "mesh_peer_disconnect"
+          "mesh_room_create" "mesh_room_join"
+          "mcp_server_start" "mcp_server_stop" "mcp_server_restart"
+          "teach_knowledge_create" "teach_optimize_suggest" "teach_optimize_apply"
+          "incident_create" "incident_step"
+          "backup_create"
+        ];
+      }
+    ];
+
+    # Route Telegram/WhatsApp to mobile agent, web chat defaults to osmoda
+    bindings = [
+      { agentId = "mobile"; match = { channel = "telegram"; }; }
+      { agentId = "mobile"; match = { channel = "whatsapp"; }; }
+    ];
   } // optionalAttrs cfg.channels.telegram.enable {
     channels.telegram = {
       enabled = true;
@@ -802,10 +841,13 @@ in {
       '';
     };
 
-    # ===== WORKSPACE SETUP =====
+    # ===== MULTI-AGENT WORKSPACE SETUP =====
     system.activationScripts.osmoda-workspace = ''
-      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,teachd,apps,secrets}
-      mkdir -p ${cfg.stateDir}/workspace/skills
+      mkdir -p ${cfg.stateDir}/{workspace-osmoda,workspace-mobile,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,teachd,apps,secrets}
+      mkdir -p ${cfg.stateDir}/workspace-osmoda/skills
+      mkdir -p ${cfg.stateDir}/workspace-mobile/skills
+      mkdir -p /root/.openclaw/agents/osmoda/{agent,sessions}
+      mkdir -p /root/.openclaw/agents/mobile/{agent,sessions}
       mkdir -p /var/backups/osmoda
 
       # Secure state directories
@@ -854,17 +896,41 @@ in {
         chmod 600 "${cfg.stateDir}/keyd/policy.json"
       fi
 
-      # Symlink system skills from Nix store if package exists
+      # --- Main agent (osmoda): all skills ---
       if [ -d "${pkgs.osmoda-system-skills or ""}/skills" ]; then
         for skill in ${pkgs.osmoda-system-skills or ""}/skills/*; do
-          ln -sf "$skill" ${cfg.stateDir}/workspace/skills/$(basename "$skill") 2>/dev/null || true
+          ln -sf "$skill" ${cfg.stateDir}/workspace-osmoda/skills/$(basename "$skill") 2>/dev/null || true
         done
       fi
 
-      # Install default templates if not present
+      # --- Mobile agent: monitoring skills only ---
+      for skill_name in system-monitor service-explorer network-manager system-packages file-manager; do
+        if [ -d "${pkgs.osmoda-system-skills or ""}/skills/$skill_name" ]; then
+          ln -sf "${pkgs.osmoda-system-skills or ""}/skills/$skill_name" ${cfg.stateDir}/workspace-mobile/skills/$skill_name 2>/dev/null || true
+        fi
+      done
+
+      # Install main agent templates
       for tmpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md HEARTBEAT.md; do
         src="${./../../templates}/$tmpl"
-        dst="${cfg.stateDir}/workspace/$tmpl"
+        dst="${cfg.stateDir}/workspace-osmoda/$tmpl"
+        if [ -f "$src" ] && [ ! -f "$dst" ]; then
+          cp "$src" "$dst"
+        fi
+      done
+
+      # Install mobile agent templates (mobile-specific AGENTS.md + SOUL.md)
+      for tmpl in AGENTS.md SOUL.md; do
+        src="${./../../templates/agents/mobile}/$tmpl"
+        dst="${cfg.stateDir}/workspace-mobile/$tmpl"
+        if [ -f "$src" ] && [ ! -f "$dst" ]; then
+          cp "$src" "$dst"
+        fi
+      done
+      # Share TOOLS.md and IDENTITY.md with mobile agent
+      for tmpl in TOOLS.md IDENTITY.md; do
+        src="${./../../templates}/$tmpl"
+        dst="${cfg.stateDir}/workspace-mobile/$tmpl"
         if [ -f "$src" ] && [ ! -f "$dst" ]; then
           cp "$src" "$dst"
         fi

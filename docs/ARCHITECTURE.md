@@ -192,18 +192,56 @@ Observations           Patterns → Knowledge Docs → Optimizations
 - **Boot persistence**: `osmoda-app-restore.service` (oneshot) reads the registry on boot and re-creates transient units for all apps marked as `running`.
 - **Audit**: All deploy/stop/restart/remove operations logged to agentd ledger via `/memory/ingest`.
 
+## Multi-Agent Routing
+
+One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain with its own workspace, session store, model, and tool permissions.
+
+```
+                    ┌─────────────────────────────────┐
+                    │     OpenClaw Gateway (:18789)     │
+                    │     Multi-Agent Router            │
+                    └──────┬──────────────┬────────────┘
+                           │              │
+              ┌────────────▼──┐    ┌──────▼────────────┐
+              │  osmoda agent  │    │   mobile agent     │
+              │  (default)     │    │                    │
+              │  Opus 4.6      │    │  Sonnet 4.6        │
+              │  72 tools      │    │  Read-only tools   │
+              │  16 skills     │    │  5 monitoring      │
+              │  Full access   │    │  skills             │
+              │                │    │  No destructive ops │
+              │  ← Web chat    │    │  ← Telegram         │
+              │                │    │  ← WhatsApp         │
+              └────────────────┘    └────────────────────┘
+```
+
+**Agents:**
+
+| Agent | Model | Tools | Skills | Channels |
+|-------|-------|-------|--------|----------|
+| `osmoda` (default) | claude-opus-4-6 | All 72 | All 16 | Web chat (default) |
+| `mobile` | claude-sonnet-4-6 | Read-only subset | 5 monitoring | Telegram, WhatsApp |
+
+**Routing rules:** Bindings route Telegram and WhatsApp to `mobile`. Everything else (web chat) falls through to `osmoda` (marked as `default: true`).
+
+**Per-agent workspaces:**
+- `~/.openclaw/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
+- `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md, monitoring skills only
+
+**Tool deny list (mobile agent):** `shell_exec`, `file_write`, `safety_panic`, `safety_rollback`, `app_deploy`, `app_remove`, `wallet_*` mutations, `safe_switch_*` mutations, `mesh_invite_*`, `teach_optimize_*`, `incident_*`, `backup_create`.
+
 ## Data Flow
 
 1. **User sends message** via web chat, Telegram, or WhatsApp → OpenClaw Gateway
-2. **Gateway routes to single conversation** — all channels share one thread
-3. **Prompt assembled** with system context
-4. **Claude API call** via API key
-5. **Claude responds** with text + tool calls
-6. **Tool execution** → osmoda-bridge → daemon over Unix socket → structured JSON
-7. **Results sent back** to Claude for synthesis
-8. **Ledger event** created for any system mutation
-9. **Response delivered** to originating channel
-10. **Other channels notified** — web UI, Telegram, WhatsApp all see the same thread
+2. **Gateway routes to agent** — bindings match channel → agent (mobile for Telegram/WhatsApp, osmoda for web)
+3. **Agent workspace loaded** — per-agent AGENTS.md, SOUL.md, skills
+4. **Prompt assembled** with agent-specific system context
+5. **Claude API call** via per-agent auth profile and model selection
+6. **Claude responds** with text + tool calls (tool deny list enforced)
+7. **Tool execution** → osmoda-bridge → daemon over Unix socket → structured JSON
+8. **Results sent back** to Claude for synthesis
+9. **Ledger event** created for any system mutation
+10. **Response delivered** to originating channel
 
 ## Chat Sync Model
 

@@ -104,7 +104,7 @@ The deploy scripts auto-detect your token type and write the correct format to O
 }
 ```
 
-The file lives at `~/.openclaw/agents/main/agent/auth-profiles.json`.
+Each agent has its own auth file at `~/.openclaw/agents/<agentId>/agent/auth-profiles.json` (e.g. `agents/osmoda/agent/auth-profiles.json`).
 
 ---
 
@@ -112,7 +112,7 @@ The file lives at `~/.openclaw/agents/main/agent/auth-profiles.json`.
 
 **"No API key found for provider anthropic"**
 - Check that `/var/lib/osmoda/config/api-key` exists and is non-empty
-- Check that `~/.openclaw/agents/main/agent/auth-profiles.json` exists
+- Check that `~/.openclaw/agents/osmoda/agent/auth-profiles.json` exists
 - Verify the format matches the examples above
 
 **"OAuth authentication is currently not supported"**
