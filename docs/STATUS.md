@@ -2,7 +2,7 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-02-26
+Last updated: 2026-02-27
 
 ## Maturity Levels
 
@@ -35,7 +35,7 @@ Last updated: 2026-02-26
 | `/system/query` endpoint | **Solid** | Processes, disk, hostname, uptime |
 | `/events/log` endpoint | **Solid** | Hash-chained SQLite ledger, filter by type/actor/limit |
 | Hash-chain ledger | **Solid** | SHA-256 chain (pipe-delimited format), verifiable with agentctl |
-| `/memory/ingest` | **Functional** | Stores events to ledger; ZVEC vector search not yet wired |
+| `/memory/ingest` | **Functional** | Stores events to ledger; semantic vector search not yet wired (M1) |
 | `/memory/recall` | **Solid** | FTS5 BM25-ranked full-text search with Porter stemming; falls back to keyword scan if FTS5 fails |
 | `/memory/store` | **Functional** | Stores to ledger; no vector indexing yet |
 | `/memory/health` | **Functional** | Reports model status and collection size |
@@ -284,13 +284,13 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 
 2. **No network from keyd**: By design. keyd has `PrivateNetwork=true`. Signed transactions must be broadcast by the caller.
 
-3. **Memory system is M0**: ZVEC vector search is not wired. Memory recall uses FTS5 BM25-ranked full-text search (with keyword fallback). Semantic search deferred to M1.
+3. **Memory system is M0**: Semantic vector search is not yet wired. Memory recall uses FTS5 BM25-ranked full-text search (with keyword fallback). Semantic search (usearch + fastembed) deferred to M1.
 
 4. **SafeSwitch doesn't execute the change**: `switch/begin` records the session but the caller must apply the NixOS change. The daemon manages the health-check/rollback lifecycle after the change.
 
 5. **No end-to-end integration tests**: Each crate has unit tests. No tests verify the full daemon-to-daemon-to-bridge pipeline.
 
-6. **Socket auth is file-permissions only**: No token-based auth for Unix socket access. Relies on filesystem permissions (all sockets now 0o600 owner-only since security hardening 2026-02-26).
+6. **Socket auth is file-permissions only**: No token-based auth for Unix socket access. Relies on filesystem permissions (all sockets 0o600 owner-only) + `umask(0o077)` enforced at daemon startup (since 2026-02-27).
 
 7. **Mesh peers don't survive restarts**: No persistent transport state. Peers must re-invite after daemon restart. Identity and peer metadata persist, but active connections do not.
 
@@ -371,35 +371,49 @@ All items verified by automated pentest on live server.
 | NixOS module: ProtectSystem=strict, ProtectHome, NoNewPrivileges, PrivateTmp, RestrictSUIDSGID on routines/mesh/mcpd/teachd | MEDIUM | Done |
 | NixOS module: RestrictAddressFamilies on mesh (AF_UNIX + AF_INET + AF_INET6) | MEDIUM | Done |
 | NixOS module: mesh listenAddr default 0.0.0.0 → 127.0.0.1 | MEDIUM | Done |
+| `umask(0o077)` enforced at startup in all 9 daemons | HIGH | Done |
+| `DefaultBodyLimit` added to all 8 socket daemons | MEDIUM | Done |
+| keyd policy counters persisted to disk (counters.json) | MEDIUM | Done |
+| Mesh single-use invite enforcement (409 on replay) | MEDIUM | Done |
+| Mesh per-IP TCP rate limiting (5/60s) | MEDIUM | Done |
+| Bridge `shell_exec` rate limiting (30/60s) | MEDIUM | Done |
+| Bridge `file_read` size cap (10 MiB) | MEDIUM | Done |
+| Bridge symlink escape prevention in `validateFilePath()` | MEDIUM | Done |
 
-### Pentest results (2026-02-26, post-hardening)
+### Pentest results (2026-02-27, post-hardening)
 
 ```
 Socket permissions:    7/7 PASS (all 0600)
 Mesh bind address:     PASS (127.0.0.1:18800)
 Network exposure:      PASS (only SSH + nginx exposed)
-Daemon health:         7/7 PASS
+Daemon health:         7/7 PASS (headless; voice + egress skip on servers without audio/sandbox)
 Injection attacks:     3/3 PASS (SQL injection, path traversal, shell injection)
 Payload bombs:         PASS (agentd survived 1MB payload)
 Error hardening:       PASS (no stack trace leak)
 Data preservation:     PASS (14,462 teachd observations, keyd policy, spawn orders)
-Hash chain integrity:  PASS (139 events, all valid)
+Hash chain integrity:  PASS (321 events, all valid, zero broken chain links)
 Rate limiting:         PASS (spawn /api/spawn returns 429)
+umask enforcement:     PASS (all 9 daemons call umask(0o077) at startup)
+Body size limits:      PASS (all 8 socket daemons have DefaultBodyLimit)
+Stress test:           PASS (700/700 concurrent health checks, 50 concurrent queries)
 ```
 
 ### Remaining known issues
 
-- F-1: No `RequestBodyLimit` middleware on any daemon (axum default is unlimited)
 - F-3: Unbounded `Vec<RoomMessage>` in mesh rooms (memory growth)
 - F-5: No agentd ledger pruning (grows forever)
 - F-6: osmoda-egress has zero tests
-- F-7: keyd daily policy counters are in-memory only (reset on restart)
+
+### Resolved since last pentest
+
+- ~~F-1: No `RequestBodyLimit` middleware~~ → All 8 daemons now have `DefaultBodyLimit::max()` (1 MiB for most, 256 KiB for voice)
+- ~~F-7: keyd daily policy counters in-memory only~~ → Counters now persist to `counters.json` on disk; survive daemon restarts
 
 ---
 
 ## What's Next
 
-1. **Wire ZVEC memory** — connect the vector search so `memory/recall` returns real results
+1. **Wire semantic memory** — connect usearch + fastembed so `memory/recall` returns hybrid BM25 + vector results
 2. **Real transaction building** — RLP encoding for ETH, Solana transaction structs
 3. **End-to-end VM test** — boot the dev VM, verify all daemons start and communicate
 4. **Integration tests** — bridge → daemon → ledger pipeline tests

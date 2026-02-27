@@ -5,6 +5,10 @@ description: >
   move, copy, delete, permissions. Present directory contents with context.
 tools:
   - system_query
+  - file_read
+  - file_write
+  - directory_list
+  - shell_exec
   - memory_recall
   - memory_store
 activation: auto

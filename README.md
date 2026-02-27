@@ -156,7 +156,7 @@ Append-only. Tamper-evident. Any single modification invalidates the chain. Veri
 
 | Daemon | What it does | Socket | Key feature |
 |--------|-------------|--------|-------------|
-| **agentd** | System bridge: processes, services, network, filesystem, NixOS config, kernel params. Hash-chained audit ledger. Vector memory (semantic search over system events). Agent Card (EIP-8004). Backups. | `/run/osmoda/agentd.sock` | The kernel-level bridge between AI and OS |
+| **agentd** | System bridge: processes, services, network, filesystem, NixOS config, kernel params. Hash-chained audit ledger. FTS5 full-text memory search (BM25-ranked). Agent Card (EIP-8004). Backups. | `/run/osmoda/agentd.sock` | The kernel-level bridge between AI and OS |
 | **osmoda-keyd** | Crypto wallet daemon. AES-256-GCM encrypted keys. ETH + SOL signing. JSON policy engine (daily limits, address allowlists). Keys never leave the daemon. | `/run/osmoda/keyd.sock` | Runs with `PrivateNetwork=true` — zero network access |
 | **osmoda-watch** | SafeSwitch: deploy with a timer, health checks, and automatic rollback if anything fails. Autopilot watchers: deterministic health checks with escalation (restart -> rollback -> notify). | `/run/osmoda/watch.sock` | Blue-green deploys with automatic undo |
 | **osmoda-routines** | Background cron/event/webhook automation. Runs between conversations. Health checks, log scans, service monitors, scheduled tasks. | `/run/osmoda/routines.sock` | Agent actions that persist when nobody's chatting |
@@ -259,8 +259,8 @@ GET  /health              System metrics (CPU, RAM, disk, load, uptime)
 POST /system/query        Run structured system queries
 GET  /system/discover     Discover all running services, ports, systemd units
 GET  /events/log          Hash-chained audit event log
-POST /memory/ingest       Store event in vector memory
-POST /memory/recall       Semantic search over system history
+POST /memory/ingest       Store event in memory
+POST /memory/recall       FTS5 full-text search over system history (BM25-ranked)
 POST /memory/store        Store named memory with tags
 GET  /agent/card          EIP-8004 Agent Card
 POST /backup/create       Create system backup
@@ -388,11 +388,11 @@ skills/                     15 system skill definitions
 
 10 Rust crates (9 daemons + 1 CLI), 136 tests passing, 66 bridge tools, 15 system skills.
 
-**Tested on hardware:** Full deployment tested on Hetzner Cloud (CX22). All 9 daemons start, all sockets respond, wallet creation works, mesh identity generates, audit ledger chains correctly, teachd observes and learns.
+**Tested on hardware:** Full deployment tested on Hetzner Cloud (CX22/CX23). All 9 daemons start, all sockets respond, wallet creation works, mesh identity generates, audit ledger chains correctly, teachd observes and learns. Stress tested: 100 concurrent health checks per daemon (700/700 OK), 50 concurrent complex queries, 20 rapid wallet create/delete cycles, hash chain verified across 300+ events with zero broken links.
 
 **What works now:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, ETH + SOL crypto signing, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, all 66 bridge tools.
 
-**What's next:** Web dashboard with live chat, vector memory engine (ZVEC), `POST /nix/rebuild` API, multi-model support, fleet coordination via mesh, external security audit of mesh crypto.
+**What's next:** Web dashboard with live chat, semantic memory engine (usearch + fastembed), `POST /nix/rebuild` API, multi-model support, fleet coordination via mesh, external security audit of mesh crypto.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the full plan.
 

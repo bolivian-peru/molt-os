@@ -653,7 +653,7 @@ Personal osModa Mesh
 
 **Why this is the endgame for osModa:**
 - The mesh protocol already exists (osmoda-mesh, post-quantum encrypted)
-- The memory system already exists (ZVEC + SQLite FTS5)
+- The memory system already exists (SQLite FTS5 full-text search, semantic search planned)
 - The wallet already exists (osmoda-keyd, multi-device identity)
 - NixOS runs on everything from Raspberry Pi to workstations
 - No one else is building this — first mover advantage in a greenfield $75B market

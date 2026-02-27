@@ -206,7 +206,7 @@ Both are zero-dependency additions to agentd (no Python sidecar, no separate dae
 - `memory/recall` runs FTS5 first, then usearch, RRF-merges results
 - FTS5 remains the fallback if model not loaded yet
 
-**ZVEC verdict:** Overengineered for this use case. usearch at 22MB vs ZVEC's 500MB+ infrastructure. Same quality at 1/20th the weight.
+**ZVEC verdict:** Overengineered for this use case. usearch at 22MB vs ZVEC's 500MB+ infrastructure. Same quality at 1/20th the weight. ZVEC references in earlier docs refer to the original design; the actual implementation will use fastembed + usearch.
 
 **PageIndex verdict:** Cloud API, data leaves the machine. Not compatible with osModa's principles.
 

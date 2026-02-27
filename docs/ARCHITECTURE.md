@@ -35,7 +35,7 @@ RING 2: Untrusted Execution
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
 │   osmoda-bridge plugin → 66 tools registered                 │
-│   Memory Backend → ZVEC search → injects into prompt (M1+)  │
+│   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
        ▼          ▼           ▼          ▼          ▼
@@ -318,7 +318,7 @@ services.osmoda.remoteAccess.tailscale.authKeyFile = "/var/lib/osmoda/secrets/ta
 
 ## Memory Architecture (M0)
 
-M0 uses ledger-based storage with FTS5 full-text search. ZVEC vector search is designed but not yet wired.
+M0 uses ledger-based storage with FTS5 full-text search. Semantic vector search (via usearch + fastembed) is designed but deferred to M1.
 
 ```
 User message → OpenClaw → Memory Backend search()
@@ -327,11 +327,11 @@ User message → OpenClaw → Memory Backend search()
                               │   Porter stemming, unicode tokenization
                               │   Falls back to keyword scan if FTS5 fails
                               ├─ Embed query (local nomic model, 768-dim)  [M1+]
-                              ├─ ZVEC semantic search                       [M1+]
+                              ├─ usearch semantic vector search              [M1+]
                               └─ RRF hybrid merge                          [M1+]
 
 Ground truth: Markdown files at /var/lib/osmoda/memory/
-ZVEC indexes are derived and always rebuildable.
+Vector indexes (when wired) are derived and always rebuildable.
 ```
 
 ## Provisioning Layer (spawn.os.moda)

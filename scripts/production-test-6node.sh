@@ -15,7 +15,7 @@
 #   ./scripts/production-test-6node.sh --keep    # keep servers after test
 #   ./scripts/production-test-6node.sh --cleanup # destroy leftover servers
 #
-# Cost: ~€0.15 for a 2-hour run (6 × cx22 @ €0.0116/hr)
+# Cost: ~€0.15 for a 2-hour run (6 × ccx13 @ €0.0116/hr)
 # ============================================================================
 
 set -euo pipefail

@@ -1,6 +1,6 @@
 # osModa — Feature Roadmap
 
-Last updated: 2026-02-25
+Last updated: 2026-02-27
 
 Current state: 136 tests passing, 10 Rust crates (9 daemons + 1 CLI), 66 bridge tools, 15 skills.
 This document covers what shipped and what's next, in priority order.
@@ -41,7 +41,7 @@ osModa server A                    osModa server B
        │  6. Encrypted messages ──────────│
 ```
 
-**Mesh bridge tools** (7): `mesh_identity`, `mesh_invite_create`, `mesh_invite_accept`, `mesh_peers`, `mesh_peer_send`, `mesh_peer_disconnect`, `mesh_health`
+**Mesh bridge tools** (11): `mesh_identity`, `mesh_invite_create`, `mesh_invite_accept`, `mesh_peers`, `mesh_peer_send`, `mesh_peer_disconnect`, `mesh_health`, `mesh_room_create`, `mesh_room_join`, `mesh_room_send`, `mesh_room_history`
 
 **Cipher suite**: Noise_XX (X25519/ChaChaPoly/BLAKE2s) + ML-KEM-768 (FIPS 203) + HKDF-SHA256 hybrid. If classical crypto breaks, PQ protects. If PQ breaks, classical protects.
 
