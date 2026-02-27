@@ -634,6 +634,39 @@ if [ -f "$COMPLETED_FILE" ] && [ -s "$COMPLETED_FILE" ]; then
   COMPLETED_JSON=$(cat "$COMPLETED_FILE")
 fi
 
+# Collect agent instances
+AGENTS_JSON="[]"
+if [ -d /root/.openclaw/agents ]; then
+  for agent_dir in /root/.openclaw/agents/*/; do
+    [ -d "$agent_dir" ] || continue
+    ANAME=$(basename "$agent_dir")
+    ASTATUS="stopped"
+    if systemctl is-active osmoda-gateway.service >/dev/null 2>&1; then
+      ASTATUS="running"
+    fi
+    AGENTS_JSON=$(echo "$AGENTS_JSON" | jq --arg name "$ANAME" --arg status "$ASTATUS" \
+      '. + [{name: $name, status: $status}]')
+  done
+fi
+
+# Collect daemon health
+DAEMON_JSON="{}"
+for svc in agentd keyd watch routines mesh mcpd teachd voice egress gateway; do
+  UNIT="osmoda-${svc}.service"
+  DACTIVE=$(systemctl is-active "$UNIT" 2>/dev/null || echo "inactive")
+  DPID=$(systemctl show -p MainPID --value "$UNIT" 2>/dev/null || echo "0")
+  DAEMON_JSON=$(echo "$DAEMON_JSON" | jq \
+    --arg name "$svc" \
+    --argjson active "$([ "$DACTIVE" = "active" ] && echo true || echo false)" \
+    --argjson pid "${DPID:-0}" \
+    '.[$name] = {active: $active, pid: (if $pid == 0 then null else $pid end)}')
+done
+
+# Collect mesh identity + peers
+MESH_IDENTITY=$(curl -sf --unix-socket "$RUN_DIR/mesh.sock" http://l/identity 2>/dev/null || echo "{}")
+MESH_PEERS=$(curl -sf --unix-socket "$RUN_DIR/mesh.sock" http://l/peers 2>/dev/null || echo "[]")
+MESH_PEERS_SLIM=$(echo "$MESH_PEERS" | jq '[.[] | {id: .id, label: .label, state: (.connection_state // "unknown")}]' 2>/dev/null || echo "[]")
+
 # Build payload (use jq for safe JSON construction)
 PAYLOAD=$(jq -n \
   --arg oid "$OID" \
@@ -643,7 +676,11 @@ PAYLOAD=$(jq -n \
   --argjson disk "${DISK:-0}" \
   --argjson uptime "${UPTIME:-0}" \
   --argjson completed "$COMPLETED_JSON" \
-  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed}'
+  --argjson agents "$AGENTS_JSON" \
+  --argjson daemon_health "$DAEMON_JSON" \
+  --argjson mesh_identity "$MESH_IDENTITY" \
+  --argjson mesh_peers "$MESH_PEERS_SLIM" \
+  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers}'
 )
 
 # Send heartbeat (with HMAC signature if secret is set)
