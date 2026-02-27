@@ -3,7 +3,7 @@
 # production-test-6node.sh — 6-Node Hetzner Production Test for osModa
 # ============================================================================
 #
-# Creates 6 Hetzner Cloud VMs, deploys all 10 osModa daemons (9 Rust + gateway),
+# Creates 6 Hetzner Cloud VMs, deploys all 9 osModa daemons + OpenClaw gateway,
 # runs ~254 checks across 10 categories, reports results, and destroys VMs when done.
 #
 # 10 Rust crates (9 daemons + 1 CLI), 136 tests, 66 bridge tools, 15 system skills.

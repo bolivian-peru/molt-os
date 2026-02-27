@@ -56,26 +56,32 @@ API_KEY=""
 BRANCH="main"
 ORDER_ID=""
 CALLBACK_URL=""
+HEARTBEAT_SECRET=""
+PROVIDER_TYPE=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --skip-nixos)     SKIP_NIXOS=true; shift ;;
-    --api-key)        API_KEY="$2"; shift 2 ;;
-    --branch)         BRANCH="$2"; shift 2 ;;
-    --order-id)       ORDER_ID="$2"; shift 2 ;;
-    --callback-url)   CALLBACK_URL="$2"; shift 2 ;;
+    --skip-nixos)        SKIP_NIXOS=true; shift ;;
+    --api-key)           API_KEY="$2"; shift 2 ;;
+    --branch)            BRANCH="$2"; shift 2 ;;
+    --order-id)          ORDER_ID="$2"; shift 2 ;;
+    --callback-url)      CALLBACK_URL="$2"; shift 2 ;;
+    --heartbeat-secret)  HEARTBEAT_SECRET="$2"; shift 2 ;;
+    --provider)          PROVIDER_TYPE="$2"; shift 2 ;;
     --help|-h)
       echo "osModa Installer v${VERSION}"
       echo ""
       echo "Usage: curl -fsSL <url> | bash -s -- [options]"
       echo ""
       echo "Options:"
-      echo "  --skip-nixos        Don't install NixOS (use on existing NixOS systems)"
-      echo "  --api-key KEY       Set Anthropic API key (skips setup wizard)"
-      echo "  --branch NAME       Git branch to install (default: main)"
-      echo "  --order-id UUID     Spawn order ID (set by spawn.os.moda)"
-      echo "  --callback-url URL  Heartbeat callback URL (set by spawn.os.moda)"
-      echo "  --help              Show this help"
+      echo "  --skip-nixos          Don't install NixOS (use on existing NixOS systems)"
+      echo "  --api-key KEY         Set API key (base64-encoded, skips setup wizard)"
+      echo "  --branch NAME         Git branch to install (default: main)"
+      echo "  --order-id UUID       Spawn order ID (set by spawn.os.moda)"
+      echo "  --callback-url URL    Heartbeat callback URL (set by spawn.os.moda)"
+      echo "  --heartbeat-secret S  HMAC secret for heartbeat authentication"
+      echo "  --provider TYPE       AI provider: anthropic or openai (default: anthropic)"
+      echo "  --help                Show this help"
       exit 0
       ;;
     *) warn "Unknown option: $1"; shift ;;
@@ -352,6 +358,10 @@ if [ -n "$ORDER_ID" ]; then
     printf '%s\n' "$CALLBACK_URL" > "$STATE_DIR/config/callback-url"
     chmod 600 "$STATE_DIR/config/callback-url"
   fi
+  if [ -n "$HEARTBEAT_SECRET" ]; then
+    printf '%s\n' "$HEARTBEAT_SECRET" > "$STATE_DIR/config/heartbeat-secret"
+    chmod 600 "$STATE_DIR/config/heartbeat-secret"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -359,24 +369,47 @@ fi
 # ---------------------------------------------------------------------------
 if [ -n "$API_KEY" ]; then
   log "Step 8: Configuring API key..."
-  printf '%s\n' "$API_KEY" > "$STATE_DIR/config/api-key"
+
+  # Decode base64 API key if it looks base64-encoded (from spawn cloud-init)
+  DECODED_KEY="$API_KEY"
+  if echo "$API_KEY" | grep -qE '^[A-Za-z0-9+/=]{20,}$' && ! echo "$API_KEY" | grep -q '^sk-'; then
+    DECODED_KEY=$(echo "$API_KEY" | base64 -d 2>/dev/null || echo "$API_KEY")
+  fi
+
+  # Determine provider
+  EFFECTIVE_PROVIDER="${PROVIDER_TYPE:-anthropic}"
+
+  printf '%s\n' "$DECODED_KEY" > "$STATE_DIR/config/api-key"
   chmod 600 "$STATE_DIR/config/api-key"
-  printf 'ANTHROPIC_API_KEY=%s\n' "$API_KEY" > "$STATE_DIR/config/env"
+
+  if [ "$EFFECTIVE_PROVIDER" = "openai" ]; then
+    printf 'OPENAI_API_KEY=%s\n' "$DECODED_KEY" > "$STATE_DIR/config/env"
+  else
+    printf 'ANTHROPIC_API_KEY=%s\n' "$DECODED_KEY" > "$STATE_DIR/config/env"
+  fi
   chmod 600 "$STATE_DIR/config/env"
 
   # Write OpenClaw auth-profiles.json
-  # Auto-detects: sk-ant-oat01- = OAuth token, sk-ant-api03- = API key
   mkdir -p /root/.openclaw/agents/main/agent
   if command -v node &>/dev/null; then
-    node -e "
-      const fs = require('fs');
-      const key = process.argv[1];
-      const isOAuth = key.startsWith('sk-ant-oat');
-      const auth = isOAuth
-        ? { type: 'token', provider: 'anthropic', token: key }
-        : { type: 'api_key', provider: 'anthropic', key: key };
-      fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
-    " "$API_KEY"
+    if [ "$EFFECTIVE_PROVIDER" = "openai" ]; then
+      node -e "
+        const fs = require('fs');
+        const key = process.argv[1];
+        const auth = { type: 'api_key', provider: 'openai', key: key };
+        fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+      " "$DECODED_KEY"
+    else
+      node -e "
+        const fs = require('fs');
+        const key = process.argv[1];
+        const isOAuth = key.startsWith('sk-ant-oat');
+        const auth = isOAuth
+          ? { type: 'token', provider: 'anthropic', token: key }
+          : { type: 'api_key', provider: 'anthropic', key: key };
+        fs.writeFileSync('/root/.openclaw/agents/main/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+      " "$DECODED_KEY"
+    fi
   fi
 
   # Gateway env vars for daemon sockets
@@ -565,6 +598,134 @@ EOF
 
 # Heartbeat timer (phones home to spawn.os.moda)
 if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
+
+# Ensure jq is available for heartbeat action processing
+if ! command -v jq &>/dev/null; then
+  if command -v nix-env &>/dev/null; then
+    nix-env -iA nixos.jq 2>/dev/null || true
+  elif command -v apt-get &>/dev/null; then
+    apt-get install -y -qq jq 2>/dev/null || true
+  fi
+fi
+
+# Write heartbeat script (more capable than inline bash)
+cat > "$INSTALL_DIR/bin/osmoda-heartbeat.sh" <<'HBEOF'
+#!/usr/bin/env bash
+set -uo pipefail
+STATE_DIR="/var/lib/osmoda"
+RUN_DIR="/run/osmoda"
+
+OID=$(cat "$STATE_DIR/config/order-id" 2>/dev/null) || exit 0
+CBURL=$(cat "$STATE_DIR/config/callback-url" 2>/dev/null) || exit 0
+HBSECRET=$(cat "$STATE_DIR/config/heartbeat-secret" 2>/dev/null || echo "")
+
+# Collect health from agentd
+HEALTH=$(curl -sf --unix-socket "$RUN_DIR/agentd.sock" http://l/health 2>/dev/null || echo "{}")
+CPU=$(echo "$HEALTH" | grep -o '"cpu":[0-9.]*' | head -1 | cut -d: -f2)
+RAM=$(echo "$HEALTH" | grep -o '"ram":[0-9.]*' | head -1 | cut -d: -f2)
+DISK=$(echo "$HEALTH" | grep -o '"disk":[0-9.]*' | head -1 | cut -d: -f2)
+UPTIME=$(echo "$HEALTH" | grep -o '"uptime":[0-9.]*' | head -1 | cut -d: -f2)
+OC_READY=$(systemctl is-active osmoda-gateway.service 2>/dev/null | grep -q "^active$" && echo true || echo false)
+
+# Build completed_actions from previous heartbeat
+COMPLETED_FILE="$STATE_DIR/config/completed-actions"
+COMPLETED_JSON="[]"
+if [ -f "$COMPLETED_FILE" ] && [ -s "$COMPLETED_FILE" ]; then
+  COMPLETED_JSON=$(cat "$COMPLETED_FILE")
+fi
+
+# Build payload (use jq for safe JSON construction)
+PAYLOAD=$(jq -n \
+  --arg oid "$OID" \
+  --argjson oc_ready "$OC_READY" \
+  --argjson cpu "${CPU:-0}" \
+  --argjson ram "${RAM:-0}" \
+  --argjson disk "${DISK:-0}" \
+  --argjson uptime "${UPTIME:-0}" \
+  --argjson completed "$COMPLETED_JSON" \
+  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed}'
+)
+
+# Send heartbeat (with HMAC signature if secret is set)
+if [ -n "$HBSECRET" ]; then
+  SIGNATURE=$(printf '%s' "$OID" | openssl dgst -sha256 -hmac "$HBSECRET" 2>/dev/null | awk '{print $NF}')
+  RESPONSE=$(curl -sf -X POST "$CBURL" \
+    -H "Content-Type: application/json" \
+    -H "X-Heartbeat-Signature: $SIGNATURE" \
+    -d "$PAYLOAD" 2>/dev/null) || exit 0
+else
+  RESPONSE=$(curl -sf -X POST "$CBURL" \
+    -H "Content-Type: application/json" \
+    -d "$PAYLOAD" 2>/dev/null) || exit 0
+fi
+
+# Clear completed actions after successful send
+echo "[]" > "$COMPLETED_FILE"
+
+# Process pending actions from response
+if ! command -v jq &>/dev/null; then exit 0; fi
+
+NEW_COMPLETED="[]"
+for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null); do
+  ACTION_JSON=$(echo "$ACTION_B64" | base64 -d 2>/dev/null) || continue
+  ATYPE=$(echo "$ACTION_JSON" | jq -r '.type' 2>/dev/null) || continue
+  AID=$(echo "$ACTION_JSON" | jq -r '.id' 2>/dev/null) || continue
+
+  case "$ATYPE" in
+    add_ssh_key)
+      AKEY=$(echo "$ACTION_JSON" | jq -r '.key' 2>/dev/null) || continue
+      if [ -n "$AKEY" ] && [ "$AKEY" != "null" ]; then
+        mkdir -p /root/.ssh && chmod 700 /root/.ssh
+        if ! grep -qF "$AKEY" /root/.ssh/authorized_keys 2>/dev/null; then
+          echo "$AKEY" >> /root/.ssh/authorized_keys
+          chmod 600 /root/.ssh/authorized_keys
+        fi
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
+    remove_ssh_key)
+      AFP=$(echo "$ACTION_JSON" | jq -r '.fingerprint' 2>/dev/null) || continue
+      if [ -n "$AFP" ] && [ "$AFP" != "null" ] && [ -f /root/.ssh/authorized_keys ]; then
+        AK_TMP=$(mktemp /root/.ssh/.ak_tmp.XXXXXX) || continue
+        grep -vF "$AFP" /root/.ssh/authorized_keys > "$AK_TMP" 2>/dev/null && mv "$AK_TMP" /root/.ssh/authorized_keys || rm -f "$AK_TMP"
+        chmod 600 /root/.ssh/authorized_keys
+      fi
+      NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      ;;
+    update_api_key)
+      APROVIDER=$(echo "$ACTION_JSON" | jq -r '.provider' 2>/dev/null)
+      AKEY=$(echo "$ACTION_JSON" | jq -r '.key' 2>/dev/null) || continue
+      if [ -n "$AKEY" ] && [ "$AKEY" != "null" ]; then
+        # Update stored API key
+        printf '%s\n' "$AKEY" > "$STATE_DIR/config/api-key"
+        chmod 600 "$STATE_DIR/config/api-key"
+        # Update env file
+        if [ "$APROVIDER" = "openai" ]; then
+          printf 'OPENAI_API_KEY=%s\n' "$AKEY" > "$STATE_DIR/config/env"
+        else
+          printf 'ANTHROPIC_API_KEY=%s\n' "$AKEY" > "$STATE_DIR/config/env"
+        fi
+        chmod 600 "$STATE_DIR/config/env"
+        # Update auth-profiles.json (use jq to safely encode key value)
+        mkdir -p /root/.openclaw/agents/main/agent
+        SAFE_PROVIDER="anthropic"
+        if [ "$APROVIDER" = "openai" ]; then SAFE_PROVIDER="openai"; fi
+        jq -n --arg type "api_key" --arg provider "$SAFE_PROVIDER" --arg key "$AKEY" \
+          '{type: $type, provider: $provider, key: $key}' \
+          > /root/.openclaw/agents/main/agent/auth-profiles.json
+        # Restart gateway to pick up new key
+        systemctl restart osmoda-gateway.service 2>/dev/null || true
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
+  esac
+done
+
+# Store completed action IDs for next heartbeat
+echo "$NEW_COMPLETED" > "$COMPLETED_FILE"
+HBEOF
+chmod +x "$INSTALL_DIR/bin/osmoda-heartbeat.sh"
+
 cat > "$SYSTEMD_DIR/osmoda-heartbeat.service" <<EOF
 [Unit]
 Description=osModa Heartbeat (phones home to spawn.os.moda)
@@ -573,19 +734,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c '\
-  OID=\$(cat $STATE_DIR/config/order-id 2>/dev/null) && \
-  CBURL=\$(cat $STATE_DIR/config/callback-url 2>/dev/null) && \
-  HEALTH=\$(curl -sf --unix-socket $RUN_DIR/agentd.sock http://l/health 2>/dev/null || echo "{}") && \
-  CPU=\$(echo "\$HEALTH" | grep -o "\"cpu\":[0-9.]*" | head -1 | cut -d: -f2) && \
-  RAM=\$(echo "\$HEALTH" | grep -o "\"ram\":[0-9.]*" | head -1 | cut -d: -f2) && \
-  DISK=\$(echo "\$HEALTH" | grep -o "\"disk\":[0-9.]*" | head -1 | cut -d: -f2) && \
-  UPTIME=\$(echo "\$HEALTH" | grep -o "\"uptime\":[0-9.]*" | head -1 | cut -d: -f2) && \
-  OC_READY=\$(systemctl is-active osmoda-gateway.service 2>/dev/null | grep -q "^active\$" && echo true || echo false) && \
-  curl -sf -X POST "\$CBURL" \
-    -H "Content-Type: application/json" \
-    -d "{\"order_id\":\"\$OID\",\"status\":\"alive\",\"setup_complete\":true,\"openclaw_ready\":\$OC_READY,\"health\":{\"cpu\":\${CPU:-0},\"ram\":\${RAM:-0},\"disk\":\${DISK:-0},\"uptime\":\${UPTIME:-0}}}" \
-  || true'
+ExecStart=$INSTALL_DIR/bin/osmoda-heartbeat.sh
 EOF
 
 cat > "$SYSTEMD_DIR/osmoda-heartbeat.timer" <<EOF
@@ -683,8 +832,17 @@ echo ""
 # Phone home on install completion (if spawned)
 if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
   log "Phoning home to spawn.os.moda..."
-  curl -sf -X POST "$CALLBACK_URL" \
-    -H "Content-Type: application/json" \
-    -d "{\"order_id\":\"$ORDER_ID\",\"status\":\"alive\",\"setup_complete\":true}" \
-    || true
+  if [ -n "$HEARTBEAT_SECRET" ]; then
+    HB_SIG=$(printf '%s' "$ORDER_ID" | openssl dgst -sha256 -hmac "$HEARTBEAT_SECRET" 2>/dev/null | awk '{print $NF}')
+    curl -sf -X POST "$CALLBACK_URL" \
+      -H "Content-Type: application/json" \
+      -H "X-Heartbeat-Signature: $HB_SIG" \
+      -d "{\"order_id\":\"$ORDER_ID\",\"status\":\"alive\",\"setup_complete\":true}" \
+      || true
+  else
+    curl -sf -X POST "$CALLBACK_URL" \
+      -H "Content-Type: application/json" \
+      -d "{\"order_id\":\"$ORDER_ID\",\"status\":\"alive\",\"setup_complete\":true}" \
+      || true
+  fi
 fi
