@@ -24,7 +24,8 @@ pub async fn backup_create_handler(
         .unwrap_or_else(|_| DEFAULT_BACKUP_DIR.to_string());
 
     std::fs::create_dir_all(&backup_dir).map_err(|e| {
-        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create backup dir: {e}"))
+        tracing::error!(error = %e, "failed to create backup directory");
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "backup directory unavailable".to_string())
     })?;
 
     let now = chrono::Utc::now();
@@ -55,11 +56,15 @@ pub async fn backup_create_handler(
             .output()
     ).await
     .map_err(|_| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "backup timed out after 120s".to_string()))?
-    .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("tar failed: {e}")))?;
+    .map_err(|e| {
+        tracing::error!(error = %e, "tar command failed to execute");
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "backup failed".to_string())
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("tar failed: {stderr}")));
+        tracing::error!(stderr = %stderr, "tar backup failed");
+        return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, "backup failed".to_string()));
     }
 
     let size_bytes = std::fs::metadata(&backup_path)
@@ -190,11 +195,15 @@ pub async fn backup_restore_handler(
             .output()
     ).await
     .map_err(|_| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "restore timed out after 120s".to_string()))?
-    .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("tar extract failed: {e}")))?;
+    .map_err(|e| {
+        tracing::error!(error = %e, "tar extract command failed to execute");
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "restore failed".to_string())
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("restore failed: {stderr}")));
+        tracing::error!(stderr = %stderr, "tar restore failed");
+        return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, "restore failed".to_string()));
     }
 
     tracing::info!(backup_id = %body.backup_id, "backup restored");

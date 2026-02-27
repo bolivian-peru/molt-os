@@ -396,10 +396,18 @@ in {
         DynamicUser = true;
         CapabilityBoundingSet = "CAP_NET_BIND_SERVICE";
         AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
         PrivateDevices = true;
         ProtectKernelTunables = true;
         ProtectClock = true;
+        ProtectHostname = true;
         LockPersonality = true;
+        MemoryDenyWriteExecute = true;
+        RestrictSUIDSGID = true;
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
       };
     };
 
@@ -464,6 +472,10 @@ in {
         NoNewPrivileges = true;
         PrivateTmp = true;
         RestrictSUIDSGID = true;
+        ProtectKernelTunables = true;
+        ProtectClock = true;
+        ProtectHostname = true;
+        LockPersonality = true;
       };
     };
 
@@ -638,6 +650,19 @@ in {
         RestartSec = 5;
         RuntimeDirectory = "osmoda";
         StateDirectory = "osmoda";
+
+        # Hardening — voice needs audio device access but not broad system access
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        RestrictSUIDSGID = true;
+        ProtectKernelTunables = true;
+        ProtectClock = true;
+        ProtectHostname = true;
+        LockPersonality = true;
+        RestrictAddressFamilies = [ "AF_UNIX" ];
+        ReadWritePaths = [ "${cfg.stateDir}/voice" "/run/osmoda" ];
       };
 
       environment = {
