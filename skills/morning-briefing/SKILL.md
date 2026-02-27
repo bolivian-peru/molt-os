@@ -11,6 +11,8 @@ tools:
   - shell_exec
   - memory_recall
   - event_log
+  - teach_patterns
+  - teach_context
 activation: manual
 ---
 
@@ -92,7 +94,14 @@ Run these in sequence:
    memory_recall({ query: "overnight incidents errors fixes", timeframe: "24h" })
    ```
 
-7. **NixOS generation**
+7. **teachd patterns** — check for overnight trends and anomalies detected between conversations
+   ```
+   teach_patterns({ min_confidence: 0.5 })
+   teach_context({ context: "overnight incidents failures resource trends" })
+   ```
+   Include any detected patterns in the briefing under [OVERNIGHT EVENTS].
+
+8. **NixOS generation**
    ```
    shell_exec({ command: "nixos-rebuild list-generations | tail -5" })
    ```

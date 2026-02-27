@@ -97,7 +97,7 @@ Memory system status: embedding model readiness, collection size, state director
 
 ## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 66 tools available to the AI agent through OpenClaw.
+These are the 72 tools available to the AI agent through OpenClaw.
 Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
@@ -247,6 +247,36 @@ MCP server lifecycle management. Any MCP server declared in NixOS config becomes
 | `mcp_server_start` | Start a stopped MCP server by name |
 | `mcp_server_stop` | Stop a running MCP server by name |
 | `mcp_server_restart` | Restart an MCP server (stop + start) |
+
+### System learning tools (via osmoda-teachd at `/run/osmoda/teachd.sock`)
+
+teachd runs two background loops: OBSERVE (every 30s — collects CPU, memory, service, journal data) and LEARN (every 5m — detects patterns from accumulated observations). Knowledge is stored in SQLite and persists across conversations.
+
+Use `teach_context` at the start of troubleshooting to get relevant historical knowledge. Use `teach_patterns` to check for slow-burn issues the agent wouldn't catch in a single conversation (memory leaks over hours, recurring 3am failures, correlated events).
+
+| Tool | Description |
+|------|-------------|
+| `teach_status` | teachd health: observation count, pattern count, knowledge count, loop status |
+| `teach_observations` | Query raw observations (source filter: cpu/memory/service/journal, time range, limit) |
+| `teach_patterns` | List detected patterns: recurring failures, resource trends, anomalies, correlations (filterable by type and min confidence) |
+| `teach_knowledge` | List auto-generated knowledge docs with recommendations (filterable by category and tag) |
+| `teach_knowledge_create` | Manually create a knowledge doc (title, category, content, tags) for teachd to surface later |
+| `teach_context` | Get relevant knowledge for a given context string. Returns matching docs ranked by relevance within a token budget. Use this before diagnosing issues. |
+| `teach_optimize_suggest` | Generate optimization suggestions from unapplied knowledge (e.g., restart a failing service) |
+| `teach_optimize_apply` | Execute an approved optimization via SafeSwitch (atomic, rollback on failure) |
+
+### App management tools (direct systemd-run)
+
+Deploy and manage user applications as systemd transient services. Resource-limited via cgroups. Boot-persistent via JSON registry.
+
+| Tool | Description |
+|------|-------------|
+| `app_deploy` | Deploy an app as a managed systemd service (DynamicUser isolation, resource limits, env vars, restart policy) |
+| `app_list` | List all managed apps with live status (PID, memory, CPU, state) and configuration |
+| `app_logs` | Retrieve journal logs for a managed app (supports time range, priority, line limits) |
+| `app_stop` | Stop a running app (remains in registry for restart) |
+| `app_restart` | Restart an app (systemctl restart if active, re-deploy from registry if inactive) |
+| `app_remove` | Stop and permanently remove an app from the registry |
 
 ### Safety tools (direct shell — bypass AI)
 

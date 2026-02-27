@@ -164,12 +164,14 @@ fn make_pq_nonce(counter: u64) -> chacha20poly1305::Nonce {
 }
 
 /// Exponential backoff parameters for reconnection.
+#[allow(dead_code)] // Used by persistent connection manager (M1)
 pub struct ReconnectBackoff {
     pub attempt: u32,
     pub base_secs: u64,
     pub max_secs: u64,
 }
 
+#[allow(dead_code)]
 impl ReconnectBackoff {
     pub fn new() -> Self {
         Self {
@@ -190,12 +192,14 @@ impl ReconnectBackoff {
     }
 
     /// Reset the backoff after a successful connection.
+    #[allow(dead_code)] // Called when reconnection succeeds
     pub fn reset(&mut self) {
         self.attempt = 0;
     }
 }
 
 /// Background heartbeat sender loop. Sends heartbeat messages at the given interval.
+#[allow(dead_code)] // Wired up when persistent connections are enabled
 pub async fn heartbeat_loop(
     connection: Arc<MeshConnection>,
     interval_secs: u64,

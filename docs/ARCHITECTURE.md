@@ -34,7 +34,7 @@ RING 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 66 tools registered                 │
+│   osmoda-bridge plugin → 72 tools registered                 │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -182,6 +182,15 @@ Observations           Patterns → Knowledge Docs → Optimizations
 - **osmoda-bridge**: 8 tools expose teachd capabilities to OpenClaw
 
 - **Hardening**: Graceful shutdown with CancellationToken, subprocess timeouts on systemctl/sysctl calls, 7-day observation pruning.
+
+### App Management — Bridge Tools
+
+- **No daemon**: App management runs entirely through osmoda-bridge (6 tools), not a separate Rust daemon.
+- **Mechanism**: `systemd-run` creates transient systemd services. Each app gets its own cgroup, journal log stream, and optional resource limits (MemoryMax, CPUQuota).
+- **Isolation**: `DynamicUser=yes` by default — ephemeral UID per app, no root. Optional `user` parameter for apps that need filesystem access.
+- **Registry**: JSON file at `/var/lib/osmoda/apps/registry.json`. Atomic writes (write `.tmp` then `rename`).
+- **Boot persistence**: `osmoda-app-restore.service` (oneshot) reads the registry on boot and re-creates transient units for all apps marked as `running`.
+- **Audit**: All deploy/stop/restart/remove operations logged to agentd ledger via `/memory/ingest`.
 
 ## Data Flow
 

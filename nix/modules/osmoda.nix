@@ -735,9 +735,76 @@ in {
       };
     };
 
+    # ===== APP RESTORE SERVICE =====
+    # Restores transient systemd units for managed apps on boot
+    systemd.services.osmoda-app-restore = {
+      description = "osModa App Process Restore";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "osmoda-agentd.service" ];
+      requires = [ "osmoda-agentd.service" ];
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+
+      path = with pkgs; [ jq systemd coreutils ];
+
+      script = ''
+        REGISTRY="${cfg.stateDir}/apps/registry.json"
+        if [ ! -f "$REGISTRY" ]; then exit 0; fi
+
+        for APP_NAME in $(${pkgs.jq}/bin/jq -r '.apps | to_entries[] | select(.value.status == "running") | .key' "$REGISTRY" 2>/dev/null); do
+          COMMAND=$(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].command' "$REGISTRY")
+          RESTART=$(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].restart_policy // "on-failure"' "$REGISTRY")
+          WORKDIR=$(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].working_dir // empty' "$REGISTRY")
+          MEMMAX=$(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].memory_max // empty' "$REGISTRY")
+          CPUQUOTA=$(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].cpu_quota // empty' "$REGISTRY")
+          USER=$(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].user // empty' "$REGISTRY")
+
+          SAFE_NAME=$(echo "$APP_NAME" | tr -cd 'a-zA-Z0-9_-')
+          UNIT="osmoda-app-$SAFE_NAME"
+
+          SYSARGS=(
+            --unit "$UNIT"
+            --service-type=simple
+            "--property=Restart=$RESTART"
+            --property=StartLimitIntervalSec=0
+            --property=RestartSec=3
+          )
+
+          if [ -n "$USER" ]; then
+            SYSARGS+=("--uid=$USER")
+          else
+            SYSARGS+=("--property=DynamicUser=yes")
+          fi
+          [ -n "$WORKDIR" ] && SYSARGS+=("--working-directory=$WORKDIR")
+          [ -n "$MEMMAX" ] && SYSARGS+=("--property=MemoryMax=$MEMMAX")
+          [ -n "$CPUQUOTA" ] && SYSARGS+=("--property=CPUQuota=$CPUQUOTA")
+
+          # Restore env vars
+          for ENVKEY in $(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].env // {} | keys[]' "$REGISTRY" 2>/dev/null); do
+            ENVVAL=$(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" --arg k "$ENVKEY" '.apps[$n].env[$k]' "$REGISTRY")
+            SAFE_KEY=$(echo "$ENVKEY" | tr -cd 'a-zA-Z0-9_')
+            [ -n "$SAFE_KEY" ] && SYSARGS+=("--setenv=$SAFE_KEY=$ENVVAL")
+          done
+
+          SYSARGS+=("--" "$COMMAND")
+
+          # Restore command args
+          for ARG in $(${pkgs.jq}/bin/jq -r --arg n "$APP_NAME" '.apps[$n].args // [] | .[]' "$REGISTRY" 2>/dev/null); do
+            SYSARGS+=("$ARG")
+          done
+
+          echo "Restoring app: $APP_NAME (unit: $UNIT)"
+          systemd-run "''${SYSARGS[@]}" || echo "Failed to restore $APP_NAME"
+        done
+      '';
+    };
+
     # ===== WORKSPACE SETUP =====
     system.activationScripts.osmoda-workspace = ''
-      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,teachd,secrets}
+      mkdir -p ${cfg.stateDir}/{workspace,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,teachd,apps,secrets}
       mkdir -p ${cfg.stateDir}/workspace/skills
       mkdir -p /var/backups/osmoda
 

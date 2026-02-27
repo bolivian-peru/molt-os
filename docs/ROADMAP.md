@@ -2,7 +2,7 @@
 
 Last updated: 2026-02-27
 
-Current state: 136 tests passing, 10 Rust crates (9 daemons + 1 CLI), 66 bridge tools, 15 skills.
+Current state: 136 tests passing, 10 Rust crates (9 daemons + 1 CLI), 72 bridge tools, 16 skills.
 This document covers what shipped and what's next, in priority order.
 
 ---
@@ -24,6 +24,7 @@ This document covers what shipped and what's next, in priority order.
 | **MCP server lifecycle management** | **osmoda-mcpd** |
 | **System learning & self-optimization** | **osmoda-teachd** |
 | **One-command installer + Hetzner deploy** | **scripts/install.sh, deploy-hetzner.sh** |
+| **App process management** (deploy, manage, resource-limit user apps) | **osmoda-bridge (6 tools) + systemd-run** |
 
 ### osmoda-mesh — what it does
 
@@ -424,6 +425,7 @@ osModa web UI (same as SSH tunnel, but browser-native)
 | 5 | osmoda-mcpd MCP manager | S4 | **SHIPPED** | Any MCP server becomes an OS capability |
 | — | osmoda-teachd learning daemon | S5 | **SHIPPED** | OS learns from behavior, self-optimizes |
 | — | deploy scripts (install.sh, deploy-hetzner.sh) | S5 | **SHIPPED** | One-command server provisioning |
+| — | App process management (deploy, manage, limit) | S6 | **SHIPPED** | User apps as managed systemd services |
 | 6 | x402 OS-native payments | — | Planned | AI pays for APIs autonomously within policy |
 | 7 | Semantic memory (usearch) | — | Planned | Hybrid BM25 + vector recall |
 | 8 | Zod config validation | — | Planned | Developer experience, fail-fast |

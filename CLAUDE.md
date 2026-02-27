@@ -28,7 +28,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (66 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (72 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
@@ -43,6 +43,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart,
    teach_status, teach_observations, teach_patterns, teach_knowledge,
    teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply,
+   app_deploy, app_list, app_logs, app_stop, app_restart, app_remove,
    safety_rollback, safety_status, safety_panic, safety_restart.
 
 3. **osmoda-egress** (Rust) — localhost-only HTTP CONNECT proxy. Domain allowlist
@@ -82,7 +83,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 11. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
-   file-manager, network-manager, service-explorer.
+   file-manager, network-manager, service-explorer, app-deployer.
 
 12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
    Generates OpenClaw config file from NixOS options (channels, auth, plugins).
@@ -181,7 +182,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 66 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 72 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
@@ -205,7 +206,8 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── system-config/SKILL.md
   ├── file-manager/SKILL.md
   ├── network-manager/SKILL.md
-  └── service-explorer/SKILL.md
+  ├── service-explorer/SKILL.md
+  └── app-deployer/SKILL.md              # Deploy + manage user applications
 ./templates/
   ├── AGENTS.md                          # "You ARE the operating system"
   ├── SOUL.md                            # Calm, competent, omniscient

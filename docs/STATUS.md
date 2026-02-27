@@ -19,9 +19,9 @@ Last updated: 2026-02-27
 |--------|-------|
 | Rust crates | 10 (9 daemons + 1 CLI) |
 | Tests passing | 136 |
-| Bridge tools registered | 66 |
-| System skills | 15 |
-| NixOS systemd services | 12 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, cloudflared, tailscale-auth) |
+| Bridge tools registered | 72 |
+| System skills | 16 |
+| NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 
 ---
 
@@ -214,9 +214,9 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
 | mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
 | teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
-| Tool registrations | **Functional** | **66 tools** registered. Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **72 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (66 total)
+### Tool breakdown (72 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -235,7 +235,25 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh | 11 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health, mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history |
 | mcp (mcpd) | 4 | mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart |
 | teach (teachd) | 8 | teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply |
+| app (direct) | 6 | app_deploy, app_list, app_logs, app_stop, app_restart, app_remove |
 | safety | 4 | safety_rollback, safety_status, safety_panic, safety_restart |
+
+---
+
+## App Management (Bridge Tools)
+
+App process management via `systemd-run` transient units. No new Rust daemon — 6 bridge tools call systemd directly. JSON registry provides boot persistence.
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| `app_deploy` | **Functional** | systemd-run with DynamicUser isolation, resource limits, env vars |
+| `app_list` | **Functional** | Reads registry + live systemctl show for each app |
+| `app_logs` | **Functional** | journalctl wrapper with unit filter |
+| `app_stop` | **Functional** | systemctl stop + registry status update |
+| `app_restart` | **Functional** | systemctl restart or re-deploy from registry if inactive |
+| `app_remove` | **Functional** | Stop + delete from registry |
+| Boot persistence | **Functional** | JSON registry + oneshot restore service re-creates transient units on boot |
+| Input validation | **Solid** | Name sanitization, absolute path check, restart policy validation, env key sanitization |
 
 ---
 

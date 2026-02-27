@@ -13,6 +13,10 @@ tools:
   - memory_store
   - memory_recall
   - file_read
+  - teach_context
+  - teach_patterns
+  - teach_optimize_suggest
+  - teach_optimize_apply
 activation: auto
 ---
 
@@ -24,18 +28,25 @@ You can detect, diagnose, and fix system problems automatically.
 
 When you detect a service failure or anomaly during a heartbeat check:
 
-1. **Confirm the failure** — don't act on a single check
+1. **Check teachd for historical patterns first** — teachd observes the system 24/7 between conversations
+   ```
+   teach_context({ context: "nginx failure service down" })
+   teach_patterns({ min_confidence: 0.5 })
+   ```
+   This surfaces slow-burn issues (memory leaks, recurring failures, correlated events) that you wouldn't catch in a single conversation.
+
+2. **Confirm the failure** — don't act on a single check
    ```
    service_status({ service: "nginx" })
    ```
    If the service is down, check again after 10 seconds. If still down, proceed.
 
-2. **Check journal logs** for why it failed
+3. **Check journal logs** for why it failed
    ```
    journal_logs({ unit: "nginx", lines: 30, priority: "err" })
    ```
 
-3. **Recall past incidents** — have we seen this before?
+4. **Recall past incidents** — have we seen this before?
    ```
    memory_recall({ query: "nginx failure", timeframe: "30d" })
    ```

@@ -12,7 +12,7 @@
 #   1. Converts your server to NixOS (via nixos-infect) — optional
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the osmoda-bridge plugin (66 system tools)
+#   4. Sets up the osmoda-bridge plugin (72 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #   7. Opens the setup wizard at localhost:18789
@@ -187,11 +187,16 @@ fi
 # Ensure build tools for Rust
 if [ "$OS_TYPE" = "nixos" ]; then
   # NixOS: install via nix-env
-  for pkg in gcc gnumake pkg-config sqlite openssl cmake; do
+  for pkg in gcc gnumake pkg-config sqlite openssl cmake jq; do
     if ! nix-env -q "$pkg" &>/dev/null; then
       nix-env -iA "nixos.$pkg" 2>/dev/null || true
     fi
   done
+elif [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
+  log "Installing build dependencies for Ubuntu/Debian..."
+  apt-get update -qq
+  apt-get install -y -qq build-essential gcc g++ cmake pkg-config \
+    libsqlite3-dev libssl-dev curl jq 2>&1 | tail -3
 fi
 
 # Ensure Rust toolchain
@@ -206,6 +211,10 @@ export PATH="$HOME/.cargo/bin:$PATH"
 if ! command -v node &>/dev/null; then
   if command -v nix-env &>/dev/null; then
     nix-env -iA nixos.nodejs_22
+  elif command -v apt-get &>/dev/null; then
+    log "Installing Node.js 22 via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y -qq nodejs
   fi
 fi
 
@@ -251,12 +260,21 @@ rm -f "$BUILD_LOG"
 
 # Create bin directory and symlinks
 mkdir -p "$INSTALL_DIR/bin"
+MISSING_BINARIES=""
 for binary in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh osmoda-mcpd osmoda-teachd; do
   if [ -f "target/release/$binary" ]; then
     ln -sf "$INSTALL_DIR/target/release/$binary" "$INSTALL_DIR/bin/$binary"
     log "Built: $binary"
+  else
+    warn "Binary not found: $binary"
+    MISSING_BINARIES="$MISSING_BINARIES $binary"
   fi
 done
+
+# Validate critical binaries exist
+if [ ! -f "target/release/agentd" ]; then
+  die "Critical binary missing: agentd. Build failed."
+fi
 
 # Add to PATH
 if ! grep -q "osmoda/bin" /etc/profile.d/osmoda.sh 2>/dev/null; then
@@ -311,7 +329,7 @@ openclaw config set gateway.mode local 2>/dev/null || true
 openclaw config set gateway.auth.mode none 2>/dev/null || true
 openclaw config set plugins.allow '["osmoda-bridge", "device-pair", "memory-core", "phone-control", "talk-voice"]' 2>/dev/null || true
 
-log "Bridge plugin installed with 66 system tools."
+log "Bridge plugin installed with 72 system tools."
 
 # ---------------------------------------------------------------------------
 # Step 7: Install workspace templates + skills
@@ -339,7 +357,7 @@ if [ -d "$INSTALL_DIR/skills" ]; then
 fi
 
 # Create state directories with secure permissions
-mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd}
+mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd,apps}
 mkdir -p "$RUN_DIR"
 mkdir -p /var/backups/osmoda
 chmod 700 "$STATE_DIR/config"
@@ -620,13 +638,137 @@ After=osmoda-agentd.service
 Requires=osmoda-agentd.service
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/bin/osmoda-egress --listen 127.0.0.1:3128 --agentd-socket $RUN_DIR/agentd.sock
+ExecStart=$INSTALL_DIR/bin/osmoda-egress --port 3128 --state-dir $STATE_DIR
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# app-restore (restores managed apps on boot)
+cat > "$SYSTEMD_DIR/osmoda-app-restore.service" <<'AREOF'
+[Unit]
+Description=osModa App Process Restore
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '\
+  REGISTRY="/var/lib/osmoda/apps/registry.json"; \
+  if [ ! -f "$REGISTRY" ]; then exit 0; fi; \
+  for APP_NAME in $(jq -r ".apps | to_entries[] | select(.value.status == \"running\") | .key" "$REGISTRY" 2>/dev/null); do \
+    COMMAND=$(jq -r --arg n "$APP_NAME" ".apps[\$n].command" "$REGISTRY"); \
+    RESTART=$(jq -r --arg n "$APP_NAME" ".apps[\$n].restart_policy // \"on-failure\"" "$REGISTRY"); \
+    WORKDIR=$(jq -r --arg n "$APP_NAME" ".apps[\$n].working_dir // empty" "$REGISTRY"); \
+    MEMMAX=$(jq -r --arg n "$APP_NAME" ".apps[\$n].memory_max // empty" "$REGISTRY"); \
+    CPUQUOTA=$(jq -r --arg n "$APP_NAME" ".apps[\$n].cpu_quota // empty" "$REGISTRY"); \
+    USER=$(jq -r --arg n "$APP_NAME" ".apps[\$n].user // empty" "$REGISTRY"); \
+    SAFE_NAME=$(echo "$APP_NAME" | tr -cd "a-zA-Z0-9_-"); \
+    UNIT="osmoda-app-$SAFE_NAME"; \
+    SYSARGS=(--unit "$UNIT" --service-type=simple "--property=Restart=$RESTART" --property=StartLimitIntervalSec=0 --property=RestartSec=3); \
+    if [ -n "$USER" ]; then SYSARGS+=("--uid=$USER"); else SYSARGS+=("--property=DynamicUser=yes"); fi; \
+    [ -n "$WORKDIR" ] && SYSARGS+=("--working-directory=$WORKDIR"); \
+    [ -n "$MEMMAX" ] && SYSARGS+=("--property=MemoryMax=$MEMMAX"); \
+    [ -n "$CPUQUOTA" ] && SYSARGS+=("--property=CPUQuota=$CPUQUOTA"); \
+    SYSARGS+=("--" "$COMMAND"); \
+    echo "Restoring app: $APP_NAME (unit: $UNIT)"; \
+    systemd-run "${SYSARGS[@]}" || echo "Failed to restore $APP_NAME"; \
+  done'
+
+[Install]
+WantedBy=multi-user.target
+AREOF
+
+# WebSocket relay (bridges dashboard chat to OpenClaw gateway)
+if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
+
+cat > "$INSTALL_DIR/bin/osmoda-ws-relay.js" <<'WSEOF'
+#!/usr/bin/env node
+const WebSocket = require("ws");
+const fs = require("fs");
+const crypto = require("crypto");
+
+const STATE_DIR = "/var/lib/osmoda";
+const RECONNECT_DELAY = 5000;
+
+function readConfig(name) {
+  try { return fs.readFileSync(`${STATE_DIR}/config/${name}`, "utf8").trim(); }
+  catch { return ""; }
+}
+
+function connect() {
+  const orderId = readConfig("order-id");
+  const callbackUrl = readConfig("callback-url");
+  const secret = readConfig("heartbeat-secret");
+  if (!orderId || !callbackUrl || !secret) {
+    console.error("[ws-relay] missing config, retrying in 30s...");
+    setTimeout(connect, 30000);
+    return;
+  }
+
+  const wsBase = callbackUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const proto = callbackUrl.startsWith("https") ? "wss" : "ws";
+  const ts = String(Date.now());
+  const sig = crypto.createHmac("sha256", secret).update(`ws:${orderId}:${ts}`).digest("hex");
+
+  const upstream = new WebSocket(`${proto}://${wsBase}/api/ws/agent/${orderId}`, {
+    headers: { "x-ws-signature": sig, "x-ws-timestamp": ts },
+  });
+
+  let local = null;
+
+  upstream.on("open", () => {
+    console.log("[ws-relay] connected to spawn server");
+    local = new WebSocket("ws://127.0.0.1:18789");
+    local.on("open", () => console.log("[ws-relay] connected to OpenClaw"));
+    local.on("message", (data) => {
+      if (upstream.readyState === WebSocket.OPEN) upstream.send(data);
+    });
+    local.on("close", () => {
+      console.log("[ws-relay] OpenClaw disconnected, reconnecting...");
+      upstream.close();
+    });
+    local.on("error", () => {});
+  });
+
+  upstream.on("message", (data) => {
+    if (local && local.readyState === WebSocket.OPEN) local.send(data);
+  });
+
+  upstream.on("close", () => {
+    console.log("[ws-relay] spawn disconnected, reconnecting...");
+    if (local) local.close();
+    setTimeout(connect, RECONNECT_DELAY);
+  });
+
+  upstream.on("error", (err) => {
+    console.error("[ws-relay] error:", err.message);
+  });
+}
+
+connect();
+WSEOF
+chmod +x "$INSTALL_DIR/bin/osmoda-ws-relay.js"
+
+cat > "$SYSTEMD_DIR/osmoda-ws-relay.service" <<EOF
+[Unit]
+Description=osModa WebSocket Chat Relay
+After=osmoda-gateway.service
+Wants=osmoda-gateway.service
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node $INSTALL_DIR/bin/osmoda-ws-relay.js
+Restart=always
+RestartSec=5
+Environment=NODE_PATH=$OPENCLAW_DIR/node_modules
+[Install]
+WantedBy=multi-user.target
+EOF
+
+fi # end ORDER_ID check for ws-relay
 
 # Heartbeat timer (phones home to spawn.os.moda)
 if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
@@ -826,8 +968,9 @@ systemctl daemon-reload
 systemctl enable osmoda-agentd.service
 systemctl start osmoda-agentd.service
 
-# Wait for agentd socket
-for i in $(seq 1 10); do
+# Wait for agentd socket (30s timeout — builds can be slow to start)
+log "Waiting for agentd socket..."
+for i in $(seq 1 30); do
   if [ -S "$RUN_DIR/agentd.sock" ]; then break; fi
   sleep 1
 done
@@ -835,11 +978,11 @@ done
 if [ -S "$RUN_DIR/agentd.sock" ]; then
   log "agentd is running."
 else
-  warn "agentd socket not found yet. Check: journalctl -u osmoda-agentd"
+  warn "agentd socket not found after 30s. Check: journalctl -u osmoda-agentd"
 fi
 
 # Start all daemons
-for svc in osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice osmoda-egress; do
+for svc in osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice osmoda-egress osmoda-app-restore; do
   if [ -f "$SYSTEMD_DIR/${svc}.service" ]; then
     systemctl enable "${svc}.service"
     systemctl start "${svc}.service"
@@ -860,6 +1003,13 @@ if [ -f "$SYSTEMD_DIR/osmoda-heartbeat.timer" ]; then
   systemctl enable osmoda-heartbeat.timer
   systemctl start osmoda-heartbeat.timer
   log "Heartbeat timer started (every 5 min)."
+fi
+
+# Enable WS relay if configured
+if [ -f "$SYSTEMD_DIR/osmoda-ws-relay.service" ]; then
+  systemctl enable osmoda-ws-relay.service
+  systemctl start osmoda-ws-relay.service
+  log "WebSocket chat relay started."
 fi
 fi # end SKIP_SYSTEMD
 

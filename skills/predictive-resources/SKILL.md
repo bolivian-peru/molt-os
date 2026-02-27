@@ -10,12 +10,25 @@ tools:
   - memory_recall
   - file_read
   - file_write
+  - teach_patterns
+  - teach_observations
 activation: auto
 ---
 
 # Predictive Resource Exhaustion
 
 Don't wait for things to break. Predict when they will and fix proactively.
+
+## teachd Trend Data
+
+Before collecting your own data points, check teachd — it has been observing CPU, memory, and services every 30 seconds since boot:
+
+```
+teach_patterns({ type: "trend", min_confidence: 0.3 })
+teach_observations({ source: "memory", limit: 100 })
+```
+
+teachd automatically detects monotonic memory increases over 6+ data points. If it has already flagged a trend, use that instead of re-deriving manually.
 
 ## Disk Growth Analysis
 

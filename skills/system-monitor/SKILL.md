@@ -9,6 +9,8 @@ tools:
   - system_health
   - memory_recall
   - memory_store
+  - teach_context
+  - teach_patterns
 activation: auto
 ---
 

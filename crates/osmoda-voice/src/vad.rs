@@ -15,6 +15,7 @@ use tokio::process::Command;
 /// Uses `pw-record` to capture audio from the default input device.
 /// Duration is enforced via `timeout` to ensure the recording terminates.
 /// Returns the path to the recorded WAV file (16kHz mono 16-bit PCM).
+#[allow(dead_code)] // Used by continuous listening mode (M1)
 pub async fn record_segment(data_dir: &Path, duration_secs: u32) -> Result<String> {
     let output_file = data_dir
         .join("cache")

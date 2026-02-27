@@ -264,6 +264,7 @@ impl Ledger {
     }
 
     /// Retrieve the hash of the most recent event, or the genesis zero-hash if empty.
+    #[allow(dead_code)] // Public API — used by agentctl verify-ledger
     pub fn last_hash(&self) -> Result<String> {
         Self::last_hash_conn(&self.conn)
     }
@@ -566,6 +567,7 @@ impl Ledger {
     }
 
     /// Update incident status (e.g., "resolved").
+    #[allow(dead_code)] // Public API — will be called from incident resolution endpoint
     pub fn resolve_incident(&self, id: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE incidents SET status = 'resolved', resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1",

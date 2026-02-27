@@ -4,13 +4,13 @@
 
 **The AI doesn't manage the server. It *is* the server.**
 
-NixOS distribution. 9 Rust daemons. 66 typed tools. The agent runs at ring 0 — root access to every process, file, service, and kernel parameter. All mutations atomic and rollbackable. Every action hash-chained to a tamper-proof audit ledger. Third-party tools sandboxed. The agent is not.
+NixOS distribution. 9 Rust daemons. 72 typed tools. The agent runs at ring 0 — root access to every process, file, service, and kernel parameter. All mutations atomic and rollbackable. Every action hash-chained to a tamper-proof audit ledger. Third-party tools sandboxed. The agent is not.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
 [![Tests](https://img.shields.io/badge/Tests-136%20passing-brightgreen.svg)]()
-[![Tools](https://img.shields.io/badge/Agent%20Tools-66-blueviolet.svg)]()
+[![Tools](https://img.shields.io/badge/Agent%20Tools-72-blueviolet.svg)]()
 
 [Quickstart](#quickstart) · [Architecture](#architecture) · [What It Does](#what-it-does) · [API](#api-reference) · [Development](#development)
 
@@ -25,7 +25,7 @@ NixOS distribution. 9 Rust daemons. 66 typed tools. The agent runs at ring 0 —
 
 Current state of AI agents in production: shell out, parse text, hope the regex holds, no audit trail, no rollback, manual recovery.
 
-osModa gives the agent structured access to the entire OS through 66 typed tools exposed via 9 Rust daemons. No shell parsing. `system_health` returns structured JSON. Every mutation is hash-chained. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, `osmoda-watch` detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — automatic rollback if health checks fail.
+osModa gives the agent structured access to the entire OS through 72 typed tools exposed via 9 Rust daemons. No shell parsing. `system_health` returns structured JSON. Every mutation is hash-chained. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, `osmoda-watch` detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — automatic rollback if health checks fail.
 
 **NixOS makes AI root access safer.** Every system change is a transaction. Every state has a generation number. Rolling back is one command. The blast radius of system configuration is bounded and reversible. (NixOS rollback covers OS state — not data sent to external APIs, signed transactions, or deleted user data. See [Threat Model](#threat-model).)
 
@@ -57,7 +57,7 @@ This is the primary install path. NixOS flakes give you reproducible builds, ato
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
-Converts Ubuntu/Debian to NixOS, builds 10 Rust binaries from source, installs the AI gateway + 66 tools, starts everything. Takes ~10 minutes.
+Converts Ubuntu/Debian to NixOS, builds 10 Rust binaries from source, installs the AI gateway + 72 tools, starts everything. Takes ~10 minutes.
 
 **Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
 
@@ -104,7 +104,7 @@ curl -s --unix-socket /run/osmoda/mesh.sock http://localhost/identity | jq
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  AI Gateway (OpenClaw)          reasoning + planning                          │
-│  osmoda-bridge                  66 typed tools                                │
+│  osmoda-bridge                  72 typed tools                                │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤
 │ agentd │ keyd   │ watch  │ routines │ mesh   │ voice │ mcpd │teachd │egress │
@@ -166,7 +166,7 @@ Append-only. Tamper-evident. Any single modification invalidates the chain. Veri
 | **osmoda-teachd** | System learning and self-optimization. OBSERVE loop (30s) collects CPU, memory, service, journal metrics. LEARN loop (5m) detects patterns (recurring failures, resource trends, anomalies, correlations). TEACH API injects relevant knowledge into agent context. Optimizer suggests and applies fixes via SafeSwitch. | `/run/osmoda/teachd.sock` | The OS learns from its own behavior and improves over time |
 | **osmoda-egress** | HTTP CONNECT proxy with domain allowlist per capability token. Only path to the internet for sandboxed tools. | `127.0.0.1:19999` | Sandboxed tools can't phone home |
 
-### 66 Bridge Tools
+### 72 Bridge Tools
 
 The AI doesn't shell out. It calls typed tools that return structured JSON:
 
@@ -192,11 +192,13 @@ mcp_server_start       mcp_server_stop        mcp_server_restart
 teach_status           teach_observations     teach_patterns
 teach_knowledge        teach_knowledge_create teach_context
 teach_optimize_suggest teach_optimize_apply
+app_deploy             app_list               app_logs
+app_stop               app_restart            app_remove
 safety_rollback        safety_status          safety_panic
 safety_restart
 ```
 
-### 15 System Skills
+### 16 System Skills
 
 Predefined behavioral patterns the agent can follow:
 
@@ -209,6 +211,7 @@ Predefined behavioral patterns the agent can follow:
 **Generation timeline** — correlate "what changed" with "when things broke" across NixOS generations.
 **Flight recorder** — black box telemetry for post-incident analysis.
 **Nix optimizer** — smart garbage collection and store deduplication.
+**App deployer** — deploy and manage user applications as systemd services with resource limits and boot persistence.
 Plus: system monitor, package manager, config editor, file manager, network manager, service explorer.
 
 ### Remote Access
@@ -369,11 +372,11 @@ crates/osmoda-voice/        Local voice (whisper.cpp + piper)
 crates/osmoda-mesh/         P2P mesh (Noise_XX + ML-KEM-768)
 crates/osmoda-mcpd/         MCP server lifecycle manager
 crates/osmoda-teachd/       System learning + self-optimization
-packages/osmoda-bridge/     AI gateway plugin (66 tools, TypeScript)
+packages/osmoda-bridge/     AI gateway plugin (72 tools, TypeScript)
 nix/modules/osmoda.nix      NixOS module (single source of truth)
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity + tools + heartbeat
-skills/                     15 system skill definitions
+skills/                     16 system skill definitions
 ```
 
 ### Tech Stack
@@ -386,11 +389,11 @@ skills/                     15 system skill definitions
 
 > **Early beta.** This is a working prototype, not production-grade infrastructure. Use on disposable servers or development environments. Expect rough edges.
 
-10 Rust crates (9 daemons + 1 CLI), 136 tests passing, 66 bridge tools, 15 system skills.
+10 Rust crates (9 daemons + 1 CLI), 136 tests passing, 72 bridge tools, 16 system skills.
 
 **Tested on hardware:** Full deployment tested on Hetzner Cloud (CX22/CX23). All 9 daemons start, all sockets respond, wallet creation works, mesh identity generates, audit ledger chains correctly, teachd observes and learns. Stress tested: 100 concurrent health checks per daemon (700/700 OK), 50 concurrent complex queries, 20 rapid wallet create/delete cycles, hash chain verified across 300+ events with zero broken links.
 
-**What works now:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, ETH + SOL crypto signing, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, all 66 bridge tools.
+**What works now:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, ETH + SOL crypto signing, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management with systemd-run, all 72 bridge tools.
 
 **What's next:** Web dashboard with live chat, semantic memory engine (usearch + fastembed), `POST /nix/rebuild` API, multi-model support, fleet coordination via mesh, external security audit of mesh crypto.
 

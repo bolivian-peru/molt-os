@@ -9,7 +9,7 @@
 #   2. Installs NixOS via nixos-infect (if not already NixOS)
 #   3. Syncs the repo to the server via rsync
 #   4. Builds all daemons (agentd, keyd, watch, routines, mesh, mcpd, teachd, egress, agentctl)
-#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (66 tools)
+#   5. Installs OpenClaw and sets up the osmoda-bridge plugin (72 tools)
 #   6. Installs workspace templates (AGENTS.md, SOUL.md, TOOLS.md, etc.)
 #   7. Starts all daemons + gateway (auto-detects NixOS read-only fs)
 #   8. Verifies everything is running
@@ -122,7 +122,7 @@ else
   fi
 
   log "Running nixos-infect on ${SERVER_IP}..."
-  ssh_cmd "curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect | NIX_CHANNEL=nixos-24.11 bash -x"
+  ssh_cmd "curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect | NIX_CHANNEL=nixos-unstable bash -x"
 
   warn "nixos-infect complete. The server will reboot."
   warn "Waiting 60 seconds for reboot..."
@@ -318,7 +318,7 @@ if [ -d /opt/osmoda/skills ]; then
 fi
 
 # Create state directories with secure permissions
-mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd}
+mkdir -p /var/lib/osmoda/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd,apps}
 mkdir -p /var/backups/osmoda
 mkdir -p /run/osmoda
 chmod 700 /var/lib/osmoda/config
@@ -566,8 +566,40 @@ Environment=PATH=/opt/openclaw/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 WantedBy=multi-user.target
 EOF
 
+  # voice
+  [ -f /usr/local/bin/osmoda-voice ] && cat > /etc/systemd/system/osmoda-voice.service <<'EOF'
+[Unit]
+Description=osModa Voice (STT/TTS)
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-voice --socket /run/osmoda/voice.sock --agentd-socket /run/osmoda/agentd.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # egress
+  [ -f /usr/local/bin/osmoda-egress ] && cat > /etc/systemd/system/osmoda-egress.service <<'EOF'
+[Unit]
+Description=osModa Egress Proxy
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/osmoda-egress --port 3128 --state-dir /var/lib/osmoda
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
   systemctl daemon-reload
-  for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-gateway; do
+  for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice osmoda-egress osmoda-gateway; do
     if [ -f "/etc/systemd/system/${svc}.service" ]; then
       systemctl enable "${svc}.service"
       systemctl restart "${svc}.service"
@@ -649,6 +681,22 @@ else
     echo "[deploy] osmoda-teachd started (PID $!)"
   fi
 
+  # voice
+  if [ -f /usr/local/bin/osmoda-voice ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-voice \
+      --socket "$RUN_DIR/voice.sock" --agentd-socket "$RUN_DIR/agentd.sock" \
+      > /var/log/osmoda-voice.log 2>&1 &
+    echo "[deploy] osmoda-voice started (PID $!)"
+  fi
+
+  # egress
+  if [ -f /usr/local/bin/osmoda-egress ]; then
+    RUST_LOG=info nohup /usr/local/bin/osmoda-egress \
+      --port 3128 --state-dir "$STATE_DIR" \
+      > /var/log/osmoda-egress.log 2>&1 &
+    echo "[deploy] osmoda-egress started (PID $!)"
+  fi
+
   sleep 2
 
   # Gateway (nohup)
@@ -672,7 +720,7 @@ sleep 3
 # -------------------------------------------------------
 echo ""
 echo "[deploy] Checking daemon sockets..."
-for sock in agentd.sock keyd.sock watch.sock routines.sock mesh.sock mcpd.sock teachd.sock; do
+for sock in agentd.sock keyd.sock watch.sock routines.sock mesh.sock mcpd.sock teachd.sock voice.sock; do
   if [ -S "$RUN_DIR/$sock" ]; then
     echo "[deploy]   ✓ $sock"
   else
@@ -757,7 +805,7 @@ info "Socket:     ${OSMODA_RUN}/agentd.sock"
 info "Plugin:     ~/.openclaw/plugins/osmoda-bridge"
 info "Gateway:    http://localhost:18789 (SSH tunnel needed)"
 info "Workspace:  ~/.openclaw/workspace (+ ${WORKSPACE_DIR})"
-info "Skills:     ~/.openclaw/workspace/skills/ (15 system skills)"
+info "Skills:     ~/.openclaw/workspace/skills/ (16 system skills)"
 echo ""
 info "Access from your machine:"
 if [ -n "${SSH_KEY_OPT}" ]; then

@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 66 tools registered:
+ * 72 tools registered:
  *   agentd:  system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:  shell_exec, file_read, file_write, directory_list (4)
  *   systemd: service_status, journal_logs (2)
@@ -22,6 +22,7 @@
  *   mcp:     mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart (4, via osmoda-mcpd)
  *   teach:   teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create,
  *            teach_context, teach_optimize_suggest, teach_optimize_apply (8, via osmoda-teachd)
+ *   app:     app_deploy, app_list, app_logs, app_stop, app_restart, app_remove (6, direct systemd-run)
  *   safety:  safety_rollback, safety_status, safety_panic, safety_restart (4, direct shell)
  */
 
@@ -93,6 +94,84 @@ function sanitizeUnitName(name: string): string {
 function sanitizePriority(p: string): string {
   const valid = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"];
   return valid.includes(p) ? p : "info";
+}
+
+// ---------------------------------------------------------------------------
+// App process management — registry + systemd-run helpers
+// ---------------------------------------------------------------------------
+
+const APP_REGISTRY_PATH = "/var/lib/osmoda/apps/registry.json";
+const APP_UNIT_PREFIX = "osmoda-app-";
+
+interface AppEntry {
+  name: string;
+  command: string;
+  args?: string[];
+  working_dir?: string;
+  env?: Record<string, string>;
+  memory_max?: string;
+  cpu_quota?: string;
+  restart_policy: string;
+  port?: number;
+  user?: string;
+  created_at: string;
+  status: "running" | "stopped" | "removed";
+}
+
+interface AppRegistry {
+  apps: Record<string, AppEntry>;
+}
+
+function loadAppRegistry(): AppRegistry {
+  try {
+    const data = fs.readFileSync(APP_REGISTRY_PATH, "utf-8");
+    return JSON.parse(data) as AppRegistry;
+  } catch {
+    return { apps: {} };
+  }
+}
+
+function saveAppRegistry(registry: AppRegistry): void {
+  const dir = path.dirname(APP_REGISTRY_PATH);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = APP_REGISTRY_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(registry, null, 2), "utf-8");
+  fs.renameSync(tmp, APP_REGISTRY_PATH);
+}
+
+function getAppUnitName(name: string): string {
+  return APP_UNIT_PREFIX + name.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function getAppStatus(unitName: string): Record<string, unknown> {
+  try {
+    const raw = child_process.execFileSync("systemctl", [
+      "show", unitName,
+      "--property=ActiveState,MainPID,MemoryCurrent,CPUUsageNSec,ActiveEnterTimestamp",
+    ], { timeout: 5000, encoding: "utf-8" });
+    const props: Record<string, string> = {};
+    for (const line of raw.trim().split("\n")) {
+      const eq = line.indexOf("=");
+      if (eq > 0) props[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+    return {
+      active_state: props.ActiveState || "unknown",
+      pid: parseInt(props.MainPID || "0", 10) || null,
+      memory_bytes: props.MemoryCurrent === "[not set]" ? null : parseInt(props.MemoryCurrent || "0", 10) || null,
+      cpu_ns: parseInt(props.CPUUsageNSec || "0", 10) || null,
+      started_at: props.ActiveEnterTimestamp || null,
+    };
+  } catch {
+    return { active_state: "unknown", pid: null, memory_bytes: null, cpu_ns: null, started_at: null };
+  }
+}
+
+const VALID_RESTART_POLICIES = ["no", "on-failure", "on-abnormal", "on-watchdog", "on-abort", "always"];
+
+function validateRestartPolicy(policy: string | undefined): string {
+  if (!policy) return "on-failure";
+  if (VALID_RESTART_POLICIES.includes(policy)) return policy;
+  return "on-failure";
 }
 
 /** Allowed base directories for file read/write operations. */
@@ -1636,4 +1715,372 @@ export default function register(api: any) {
       }
     },
   }), { names: ["teach_optimize_apply"] });
+
+  // =========================================================================
+  // App management tools (systemd transient services + JSON registry)
+  // =========================================================================
+
+  // --- app_deploy ---
+  api.registerTool(() => ({
+    name: "app_deploy",
+    label: "Deploy App",
+    description: "Deploy an application as a managed systemd service. Uses systemd-run with DynamicUser isolation by default. Resource limits (memory, CPU) and restart policy are configurable. The app is registered for boot persistence.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "App name (1-64 chars, alphanumeric + dash/underscore)" },
+        command: { type: "string", description: "Absolute path to the binary or script to run" },
+        args: { type: "array", items: { type: "string" }, description: "Command arguments" },
+        working_dir: { type: "string", description: "Working directory (must exist)" },
+        env: { type: "object", additionalProperties: { type: "string" }, description: "Environment variables" },
+        memory_max: { type: "string", description: "Memory limit (e.g. '256M', '1G')" },
+        cpu_quota: { type: "string", description: "CPU quota percentage (e.g. '50%', '200%' for 2 cores)" },
+        restart_policy: { type: "string", description: "Restart policy: no, on-failure (default), on-abnormal, on-watchdog, on-abort, always" },
+        port: { type: "number", description: "Primary port the app listens on (informational, for discovery)" },
+        user: { type: "string", description: "Run as this user instead of DynamicUser (for filesystem access)" },
+      },
+      required: ["name", "command"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const name = String(params.name || "").trim();
+        if (!name || name.length > 64 || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(name)) {
+          return { output: JSON.stringify({ error: "name must be 1-64 chars, alphanumeric start, only [a-zA-Z0-9_-]" }) };
+        }
+        const command = String(params.command || "").trim();
+        if (!command || !command.startsWith("/")) {
+          return { output: JSON.stringify({ error: "command must be an absolute path" }) };
+        }
+
+        const unitName = getAppUnitName(name);
+
+        // Check if already running
+        try {
+          const state = child_process.execFileSync("systemctl", ["is-active", unitName], { timeout: 5000, encoding: "utf-8" }).trim();
+          if (state === "active" || state === "activating") {
+            return { output: JSON.stringify({ error: `app '${name}' is already running (unit: ${unitName})` }) };
+          }
+        } catch { /* not active, good */ }
+
+        const workingDir = params.working_dir ? String(params.working_dir) : undefined;
+        if (workingDir) {
+          try { fs.accessSync(workingDir, fs.constants.R_OK); } catch {
+            return { output: JSON.stringify({ error: `working_dir does not exist or is not readable: ${workingDir}` }) };
+          }
+        }
+
+        const restartPolicy = validateRestartPolicy(params.restart_policy as string | undefined);
+        const args: string[] = [
+          "--unit", unitName,
+          "--service-type=simple",
+          `--property=Restart=${restartPolicy}`,
+          "--property=StartLimitIntervalSec=0",
+          "--property=RestartSec=3",
+        ];
+
+        if (params.user) {
+          const user = String(params.user).replace(/[^a-zA-Z0-9_-]/g, "");
+          if (user) args.push(`--uid=${user}`);
+        } else {
+          args.push("--property=DynamicUser=yes");
+        }
+
+        if (workingDir) args.push(`--working-directory=${workingDir}`);
+        if (params.memory_max) args.push(`--property=MemoryMax=${String(params.memory_max)}`);
+        if (params.cpu_quota) args.push(`--property=CPUQuota=${String(params.cpu_quota)}`);
+
+        // Environment variables
+        const env = (params.env && typeof params.env === "object") ? params.env as Record<string, string> : {};
+        for (const [k, v] of Object.entries(env)) {
+          const safeKey = k.replace(/[^a-zA-Z0-9_]/g, "");
+          if (safeKey) args.push(`--setenv=${safeKey}=${v}`);
+        }
+
+        // The command + its args
+        args.push("--", command);
+        const cmdArgs = Array.isArray(params.args) ? (params.args as string[]).map(String) : [];
+        args.push(...cmdArgs);
+
+        const result = runExec("systemd-run", args, 15000);
+
+        // Update registry
+        const registry = loadAppRegistry();
+        registry.apps[name] = {
+          name,
+          command,
+          args: cmdArgs.length > 0 ? cmdArgs : undefined,
+          working_dir: workingDir,
+          env: Object.keys(env).length > 0 ? env : undefined,
+          memory_max: params.memory_max ? String(params.memory_max) : undefined,
+          cpu_quota: params.cpu_quota ? String(params.cpu_quota) : undefined,
+          restart_policy: restartPolicy,
+          port: typeof params.port === "number" ? params.port : undefined,
+          user: params.user ? String(params.user) : undefined,
+          created_at: new Date().toISOString(),
+          status: "running",
+        };
+        saveAppRegistry(registry);
+
+        // Log to agentd ledger
+        try {
+          await agentdRequest("POST", "/memory/ingest", {
+            event: {
+              category: "app_management", subcategory: "deploy", actor: "osmoda-bridge",
+              summary: `Deployed app '${name}': ${command}`,
+              detail: JSON.stringify({ name, command, unit: unitName, restart_policy: restartPolicy }),
+              metadata: { tags: ["app", "deploy", name] },
+            },
+          });
+        } catch { /* best-effort */ }
+
+        const status = getAppStatus(unitName);
+        return {
+          output: JSON.stringify({
+            deployed: true, name, unit: unitName, command,
+            restart_policy: restartPolicy, ...status,
+            systemd_run_output: result.trim(),
+          }),
+        };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["app_deploy"] });
+
+  // --- app_list ---
+  api.registerTool(() => ({
+    name: "app_list",
+    label: "List Apps",
+    description: "List all managed applications with their status, resource usage, and configuration.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        const registry = loadAppRegistry();
+        const apps = Object.values(registry.apps).map((app) => {
+          const unitName = getAppUnitName(app.name);
+          const status = getAppStatus(unitName);
+          return {
+            name: app.name, unit: unitName, command: app.command,
+            args: app.args, port: app.port, user: app.user,
+            registry_status: app.status, created_at: app.created_at,
+            limits: {
+              memory_max: app.memory_max || null,
+              cpu_quota: app.cpu_quota || null,
+              restart_policy: app.restart_policy,
+            },
+            ...status,
+          };
+        });
+        return { output: JSON.stringify({ apps, total: apps.length }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["app_list"] });
+
+  // --- app_logs ---
+  api.registerTool(() => ({
+    name: "app_logs",
+    label: "App Logs",
+    description: "Retrieve journal logs for a managed application.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "App name" },
+        lines: { type: "number", description: "Number of log lines (default 50, max 500)" },
+        since: { type: "string", description: "Show logs since this time (e.g. '1 hour ago', '2024-01-01')" },
+        priority: { type: "string", description: "Minimum priority: emerg, alert, crit, err, warning, notice, info, debug" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const name = String(params.name || "").trim();
+        const registry = loadAppRegistry();
+        if (!registry.apps[name]) {
+          return { output: JSON.stringify({ error: `app '${name}' not found in registry` }) };
+        }
+        const unitName = getAppUnitName(name);
+        const lines = Math.min(Math.max(parseInt(String(params.lines || "50"), 10) || 50, 1), 500);
+        const args = ["-u", unitName, "-n", String(lines), "--no-pager", "-o", "short-iso"];
+        if (params.since) args.push("--since", String(params.since));
+        if (params.priority) args.push("-p", sanitizePriority(String(params.priority)));
+        const logs = runExec("journalctl", args, 10000);
+        return { output: JSON.stringify({ app: name, unit: unitName, lines: lines, logs: logs.trim() }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["app_logs"] });
+
+  // --- app_stop ---
+  api.registerTool(() => ({
+    name: "app_stop",
+    label: "Stop App",
+    description: "Stop a running managed application. The app remains in the registry and can be restarted.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "App name" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const name = String(params.name || "").trim();
+        const registry = loadAppRegistry();
+        if (!registry.apps[name]) {
+          return { output: JSON.stringify({ error: `app '${name}' not found in registry` }) };
+        }
+        const unitName = getAppUnitName(name);
+        const result = runExec("systemctl", ["stop", unitName], 15000);
+
+        registry.apps[name].status = "stopped";
+        saveAppRegistry(registry);
+
+        // Log to agentd ledger
+        try {
+          await agentdRequest("POST", "/memory/ingest", {
+            event: {
+              category: "app_management", subcategory: "stop", actor: "osmoda-bridge",
+              summary: `Stopped app '${name}'`, detail: JSON.stringify({ name, unit: unitName }),
+              metadata: { tags: ["app", "stop", name] },
+            },
+          });
+        } catch { /* best-effort */ }
+
+        return { output: JSON.stringify({ stopped: true, name, unit: unitName, output: result.trim() }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["app_stop"] });
+
+  // --- app_restart ---
+  api.registerTool(() => ({
+    name: "app_restart",
+    label: "Restart App",
+    description: "Restart a managed application. If the unit is inactive, re-deploys from the registry.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "App name" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const name = String(params.name || "").trim();
+        const registry = loadAppRegistry();
+        const app = registry.apps[name];
+        if (!app) {
+          return { output: JSON.stringify({ error: `app '${name}' not found in registry` }) };
+        }
+        const unitName = getAppUnitName(name);
+
+        // Check if unit is active — if so, use systemctl restart
+        let isActive = false;
+        try {
+          const state = child_process.execFileSync("systemctl", ["is-active", unitName], { timeout: 5000, encoding: "utf-8" }).trim();
+          isActive = (state === "active" || state === "activating");
+        } catch { /* not active */ }
+
+        let result: string;
+        if (isActive) {
+          result = runExec("systemctl", ["restart", unitName], 15000);
+        } else {
+          // Re-deploy from registry
+          const args: string[] = [
+            "--unit", unitName,
+            "--service-type=simple",
+            `--property=Restart=${app.restart_policy}`,
+            "--property=StartLimitIntervalSec=0",
+            "--property=RestartSec=3",
+          ];
+          if (app.user) {
+            args.push(`--uid=${app.user}`);
+          } else {
+            args.push("--property=DynamicUser=yes");
+          }
+          if (app.working_dir) args.push(`--working-directory=${app.working_dir}`);
+          if (app.memory_max) args.push(`--property=MemoryMax=${app.memory_max}`);
+          if (app.cpu_quota) args.push(`--property=CPUQuota=${app.cpu_quota}`);
+          if (app.env) {
+            for (const [k, v] of Object.entries(app.env)) {
+              const safeKey = k.replace(/[^a-zA-Z0-9_]/g, "");
+              if (safeKey) args.push(`--setenv=${safeKey}=${v}`);
+            }
+          }
+          args.push("--", app.command);
+          if (app.args) args.push(...app.args);
+          result = runExec("systemd-run", args, 15000);
+        }
+
+        registry.apps[name].status = "running";
+        saveAppRegistry(registry);
+
+        // Log to agentd ledger
+        try {
+          await agentdRequest("POST", "/memory/ingest", {
+            event: {
+              category: "app_management", subcategory: "restart", actor: "osmoda-bridge",
+              summary: `Restarted app '${name}'`, detail: JSON.stringify({ name, unit: unitName, was_active: isActive }),
+              metadata: { tags: ["app", "restart", name] },
+            },
+          });
+        } catch { /* best-effort */ }
+
+        const status = getAppStatus(unitName);
+        return { output: JSON.stringify({ restarted: true, name, unit: unitName, re_deployed: !isActive, ...status, output: result.trim() }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["app_restart"] });
+
+  // --- app_remove ---
+  api.registerTool(() => ({
+    name: "app_remove",
+    label: "Remove App",
+    description: "Stop and permanently remove a managed application from the registry.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "App name" },
+      },
+      required: ["name"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const name = String(params.name || "").trim();
+        const registry = loadAppRegistry();
+        if (!registry.apps[name]) {
+          return { output: JSON.stringify({ error: `app '${name}' not found in registry` }) };
+        }
+        const unitName = getAppUnitName(name);
+
+        // Stop the unit (ignore errors if already stopped)
+        runExec("systemctl", ["stop", unitName], 15000);
+
+        // Remove from registry
+        delete registry.apps[name];
+        saveAppRegistry(registry);
+
+        // Log to agentd ledger
+        try {
+          await agentdRequest("POST", "/memory/ingest", {
+            event: {
+              category: "app_management", subcategory: "remove", actor: "osmoda-bridge",
+              summary: `Removed app '${name}'`, detail: JSON.stringify({ name, unit: unitName }),
+              metadata: { tags: ["app", "remove", name] },
+            },
+          });
+        } catch { /* best-effort */ }
+
+        return { output: JSON.stringify({ removed: true, name, unit: unitName }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["app_remove"] });
 }

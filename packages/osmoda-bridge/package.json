@@ -1,7 +1,7 @@
 {
   "name": "osmoda-bridge",
   "version": "0.1.0",
-  "description": "osModa Bridge — 66 system tools connecting OpenClaw to all osModa daemons",
+  "description": "osModa Bridge — 72 system tools connecting OpenClaw to all osModa daemons",
   "openclaw": {
     "extensions": ["./index.ts"]
   },
