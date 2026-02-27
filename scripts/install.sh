@@ -1071,6 +1071,28 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       APROVIDER=$(echo "$ACTION_JSON" | jq -r '.provider' 2>/dev/null)
       AKEY=$(echo "$ACTION_JSON" | jq -r '.key' 2>/dev/null) || continue
       if [ -n "$AKEY" ] && [ "$AKEY" != "null" ]; then
+        # Decrypt API key if encrypted (ENC:iv:tag:ciphertext format from spawn server)
+        if echo "$AKEY" | grep -q '^ENC:' && [ -n "$HBSECRET" ]; then
+          ENC_IV=$(echo "$AKEY" | cut -d: -f2)
+          ENC_TAG=$(echo "$AKEY" | cut -d: -f3)
+          ENC_CT=$(echo "$AKEY" | cut -d: -f4)
+          AKEY=$(echo "$ENC_CT" | openssl enc -aes-256-gcm -d -K "$(echo -n "$HBSECRET" | openssl dgst -sha256 -binary | xxd -p -c 64)" -iv "$ENC_IV" -nopad 2>/dev/null | xxd -r -p 2>/dev/null) || true
+          # openssl enc doesn't support GCM well in all versions — fall back to node
+          if [ -z "$AKEY" ] || echo "$AKEY" | grep -q '^ENC:'; then
+            AKEY=$(node -e "
+              var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
+              var dk=c.createHash('sha256').update(s).digest();
+              var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
+              d.setAuthTag(Buffer.from(tag,'hex'));
+              var pt=d.update(ct,'hex','utf8')+d.final('utf8');
+              process.stdout.write(pt);
+            " "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" 2>/dev/null) || true
+          fi
+          if [ -z "$AKEY" ]; then
+            echo "Failed to decrypt API key — skipping action $AID"
+            continue
+          fi
+        fi
         # Update stored API key
         printf '%s\n' "$AKEY" > "$STATE_DIR/config/api-key"
         chmod 600 "$STATE_DIR/config/api-key"
