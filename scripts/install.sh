@@ -648,10 +648,12 @@ PAYLOAD=$(jq -n \
 
 # Send heartbeat (with HMAC signature if secret is set)
 if [ -n "$HBSECRET" ]; then
-  SIGNATURE=$(printf '%s' "$OID" | openssl dgst -sha256 -hmac "$HBSECRET" 2>/dev/null | awk '{print $NF}')
+  HB_TS=$(date +%s000)
+  SIGNATURE=$(printf '%s:%s' "$OID" "$HB_TS" | openssl dgst -sha256 -hmac "$HBSECRET" 2>/dev/null | awk '{print $NF}')
   RESPONSE=$(curl -sf -X POST "$CBURL" \
     -H "Content-Type: application/json" \
     -H "X-Heartbeat-Signature: $SIGNATURE" \
+    -H "X-Heartbeat-Timestamp: $HB_TS" \
     -d "$PAYLOAD" 2>/dev/null) || exit 0
 else
   RESPONSE=$(curl -sf -X POST "$CBURL" \
@@ -833,10 +835,12 @@ echo ""
 if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
   log "Phoning home to spawn.os.moda..."
   if [ -n "$HEARTBEAT_SECRET" ]; then
-    HB_SIG=$(printf '%s' "$ORDER_ID" | openssl dgst -sha256 -hmac "$HEARTBEAT_SECRET" 2>/dev/null | awk '{print $NF}')
+    HB_TS=$(date +%s000)
+    HB_SIG=$(printf '%s:%s' "$ORDER_ID" "$HB_TS" | openssl dgst -sha256 -hmac "$HEARTBEAT_SECRET" 2>/dev/null | awk '{print $NF}')
     curl -sf -X POST "$CALLBACK_URL" \
       -H "Content-Type: application/json" \
       -H "X-Heartbeat-Signature: $HB_SIG" \
+      -H "X-Heartbeat-Timestamp: $HB_TS" \
       -d "{\"order_id\":\"$ORDER_ID\",\"status\":\"alive\",\"setup_complete\":true}" \
       || true
   else
