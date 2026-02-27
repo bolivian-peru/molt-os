@@ -504,7 +504,7 @@ if [ -n "$API_KEY" ]; then
     node -e "
       const fs = require('fs');
       const config = {
-        gateway: { auth: { mode: 'none' } },
+        gateway: { mode: 'local', auth: { mode: 'none' } },
         plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
         agents: {
           list: [
@@ -626,6 +626,7 @@ Restart=always
 RestartSec=5
 WorkingDirectory=$WORKSPACE_DIR
 EnvironmentFile=-$STATE_DIR/config/env
+Environment=HOME=/root
 Environment=NODE_ENV=production
 Environment=OSMODA_SOCKET=$RUN_DIR/agentd.sock
 Environment=OSMODA_KEYD_SOCKET=$RUN_DIR/keyd.sock
@@ -1112,7 +1113,28 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
             '{type: $type, provider: $provider, key: $key}' \
             > "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
         done
-        # Restart gateway to pick up new key
+        # Ensure OpenClaw gateway config exists (may not if no key at install time)
+        if [ ! -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
+          node -e "
+            var fs=require('fs');
+            var config={gateway:{auth:{mode:'none'}},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6',tools:{deny:['shell_exec','file_write','safety_panic','safety_rollback','app_deploy','app_remove','app_stop','app_restart','wallet_create','wallet_send','wallet_sign','wallet_delete','safe_switch_begin','safe_switch_commit','safe_switch_rollback','watcher_add','routine_add','mesh_invite_create','mesh_invite_accept','mesh_peer_disconnect','mesh_room_create','mesh_room_join','mcp_server_start','mcp_server_stop','mcp_server_restart','teach_knowledge_create','teach_optimize_suggest','teach_optimize_apply','incident_create','incident_step','backup_create']}}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+            fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+          " 2>/dev/null
+        fi
+        # Write gateway env vars for daemon sockets
+        cat > "$STATE_DIR/config/gateway-env" << 'GWENVEOF'
+OSMODA_SOCKET=/run/osmoda/agentd.sock
+OSMODA_KEYD_SOCKET=/run/osmoda/keyd.sock
+OSMODA_WATCH_SOCKET=/run/osmoda/watch.sock
+OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
+OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
+OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
+OSMODA_MCPD_SOCKET=/run/osmoda/mcpd.sock
+OSMODA_TEACHD_SOCKET=/run/osmoda/teachd.sock
+GWENVEOF
+        chmod 600 "$STATE_DIR/config/gateway-env"
+        # Enable + restart gateway to pick up new key + config
+        systemctl enable osmoda-gateway.service 2>/dev/null || true
         systemctl restart osmoda-gateway.service 2>/dev/null || true
         NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
       fi
