@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -60,7 +60,7 @@ pub enum PolicyDecision {
 
 /// Fixed-point amount with 18 decimal places (same precision as wei).
 /// Stored as u128 to handle amounts up to ~340 undecillion base units.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 struct FixedAmount(u128);
 
 const DECIMALS: u32 = 18;
@@ -123,6 +123,8 @@ impl std::fmt::Display for FixedAmount {
 }
 
 /// Tracks daily usage counters for policy enforcement.
+/// Persisted to disk so daemon restarts don't reset quotas.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DailyCounters {
     date: String,
     send_counts: HashMap<String, u32>,
@@ -149,6 +151,20 @@ impl DailyCounters {
             self.sign_count = 0;
         }
     }
+
+    /// Save counters to disk.
+    fn save(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load counters from disk if the file exists and the date matches today.
+    fn load(path: &Path) -> Option<Self> {
+        let data = std::fs::read_to_string(path).ok()?;
+        let counters: Self = serde_json::from_str(&data).ok()?;
+        if counters.date == today() { Some(counters) } else { None }
+    }
 }
 
 fn today() -> String {
@@ -158,6 +174,7 @@ fn today() -> String {
 pub struct PolicyEngine {
     policy: PolicyFile,
     counters: DailyCounters,
+    counters_path: PathBuf,
 }
 
 impl PolicyEngine {
@@ -182,10 +199,31 @@ impl PolicyEngine {
             default
         };
 
+        // Load persisted counters or start fresh
+        let counters_path = policy_path
+            .parent()
+            .unwrap_or(Path::new("/var/lib/osmoda/keyd"))
+            .join("counters.json");
+        let counters = DailyCounters::load(&counters_path)
+            .unwrap_or_else(DailyCounters::new);
+        tracing::info!(
+            date = %counters.date,
+            sign_count = counters.sign_count,
+            "loaded policy counters"
+        );
+
         Ok(Self {
             policy,
-            counters: DailyCounters::new(),
+            counters,
+            counters_path,
         })
+    }
+
+    /// Persist current counters to disk. Best-effort — logs warning on failure.
+    fn persist_counters(&self) {
+        if let Err(e) = self.counters.save(&self.counters_path) {
+            tracing::warn!(error = %e, "failed to persist policy counters");
+        }
     }
 
     /// Check whether a send operation is allowed by policy.
@@ -269,6 +307,7 @@ impl PolicyEngine {
             *current = new_total;
         }
 
+        self.persist_counters();
         PolicyDecision::Allowed
     }
 
@@ -289,6 +328,7 @@ impl PolicyEngine {
         }
 
         self.counters.sign_count += 1;
+        self.persist_counters();
         PolicyDecision::Allowed
     }
 

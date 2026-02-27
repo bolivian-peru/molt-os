@@ -7,10 +7,12 @@ mod peers;
 mod receipt;
 mod transport;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use clap::Parser;
@@ -80,10 +82,15 @@ pub struct MeshState {
     pub listen_endpoint: String,
     pub receipt_logger: ReceiptLogger,
     pub rooms: Vec<Room>,
+    /// SHA-256 hashes of accepted invite codes — enforces single-use.
+    pub used_invites: HashSet<String>,
 }
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -124,6 +131,7 @@ async fn main() {
         listen_endpoint: listen_endpoint.clone(),
         receipt_logger: ReceiptLogger::new(&args.agentd_socket),
         rooms: Vec::new(),
+        used_invites: HashSet::new(),
     }));
 
     let cancel = CancellationToken::new();
@@ -164,6 +172,7 @@ async fn main() {
         .route("/room/history", get(api::room_history_handler))
         // Health
         .route("/health", get(api::health_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state);
 
     // Set up Unix socket
@@ -282,6 +291,12 @@ const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10
 /// Maximum unknown inbound peers allowed before rejecting new unknowns.
 const MAX_UNKNOWN_INBOUND_PEERS: usize = 8;
 
+/// Maximum handshake attempts per IP within the rate limit window.
+const MAX_ATTEMPTS_PER_IP: u32 = 5;
+
+/// Rate limit window for per-IP handshake attempts.
+const ATTEMPT_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Background loop that accepts incoming TCP connections from peers.
 /// Security: semaphore caps concurrent handshakes, timeout prevents slow-loris,
 /// unknown inbound peers are capped to prevent stranger accumulation.
@@ -314,6 +329,9 @@ async fn tcp_accept_loop(
 
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_HANDSHAKES));
 
+    // Per-IP rate limiting: tracks (window_start, attempt_count) per IP
+    let mut ip_attempts: HashMap<IpAddr, (std::time::Instant, u32)> = HashMap::new();
+
     tracing::info!(addr = %addr, "TCP peer listener started");
 
     loop {
@@ -325,6 +343,20 @@ async fn tcp_accept_loop(
             result = listener.accept() => {
                 match result {
                     Ok((mut stream, peer_addr)) => {
+                        // Per-IP rate limiting
+                        let ip = peer_addr.ip();
+                        let now_instant = std::time::Instant::now();
+                        let entry = ip_attempts.entry(ip).or_insert((now_instant, 0));
+                        if now_instant.duration_since(entry.0) > ATTEMPT_WINDOW {
+                            *entry = (now_instant, 0);
+                        }
+                        entry.1 += 1;
+                        if entry.1 > MAX_ATTEMPTS_PER_IP {
+                            tracing::warn!(%ip, "rate limited: too many handshake attempts");
+                            drop(stream);
+                            continue;
+                        }
+
                         // Acquire semaphore permit — reject if too many concurrent handshakes
                         let permit = match semaphore.clone().try_acquire_owned() {
                             Ok(p) => p,

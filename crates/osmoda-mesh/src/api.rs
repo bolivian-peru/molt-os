@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
 use crate::identity::MeshPublicIdentity;
@@ -10,6 +11,13 @@ use crate::invite::InvitePayload;
 use crate::messages::MeshMessage;
 use crate::peers::{ConnectionState, PeerInfo};
 use crate::{MeshState, Room, RoomMessage};
+
+/// Hash an invite code to a hex string for single-use tracking.
+fn sha256_hex(data: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data.as_bytes());
+    hex::encode(hasher.finalize())
+}
 
 pub type SharedState = Arc<Mutex<MeshState>>;
 
@@ -69,6 +77,7 @@ pub struct AcceptInviteResponse {
 }
 
 /// POST /invite/accept — accept an invite code and connect to the peer.
+/// Each invite code can only be used once (single-use enforcement).
 pub async fn invite_accept_handler(
     State(state): State<SharedState>,
     Json(body): Json<AcceptInviteRequest>,
@@ -82,6 +91,15 @@ pub async fn invite_accept_handler(
 
     let (peer_id, endpoint) = {
         let mut st = state.lock().await;
+
+        // Enforce single-use: hash the invite code and check against used set
+        let invite_hash = sha256_hex(&body.invite_code);
+        if !st.used_invites.insert(invite_hash) {
+            return Err((
+                axum::http::StatusCode::CONFLICT,
+                "invite already used".to_string(),
+            ));
+        }
 
         // Check if we already know this peer
         if st.peers.iter().any(|p| p.id == payload.instance_id) {

@@ -5,6 +5,7 @@ mod server;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
@@ -58,6 +59,9 @@ pub struct McpdState {
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -135,6 +139,7 @@ async fn main() {
         .route("/server/{name}/stop", post(api::server_stop_handler))
         .route("/server/{name}/restart", post(api::server_restart_handler))
         .route("/reload", post(api::reload_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state.clone());
 
     // Remove existing socket

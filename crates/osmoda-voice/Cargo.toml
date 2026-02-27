@@ -7,6 +7,7 @@ description = "osModa voice daemon — STT (whisper.cpp) + TTS (piper) over Pipe
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

@@ -5,6 +5,7 @@ mod state;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
@@ -30,6 +31,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -97,6 +101,7 @@ async fn main() {
         .route("/backup/create", post(api::backup::backup_create_handler))
         .route("/backup/list", get(api::backup::backup_list_handler))
         .route("/backup/restore", post(api::backup::backup_restore_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(shared_state.clone());
 
     // Remove existing socket file if present

@@ -39,6 +39,9 @@ struct ProxyState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -152,6 +155,21 @@ async fn shutdown_signal() {
     }
 }
 
+/// Check if an IP address is internal/private (SSRF protection).
+fn is_internal_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || (v4.octets()[0] == 169 && v4.octets()[1] == 254) // metadata
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+        }
+        std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+    }
+}
+
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     state: Arc<ProxyState>,
@@ -160,6 +178,17 @@ async fn handle_request(
     if req.method() == Method::CONNECT {
         // CONNECT tunnel — extract host
         let host = req.uri().authority().map(|a| a.host().to_lowercase());
+        let port = req.uri().authority().and_then(|a| a.port_u16()).unwrap_or(443);
+
+        // S-8: Only allow port 443 (HTTPS) — prevents tunneling to arbitrary ports
+        if port != 443 {
+            warn!("CONNECT denied: port {port} (from {peer_addr}) — only port 443 allowed");
+            let mut resp = Response::new(Full::from(
+                format!("Only port 443 allowed, got port {port}"),
+            ));
+            *resp.status_mut() = StatusCode::FORBIDDEN;
+            return Ok(resp);
+        }
 
         match host {
             Some(ref domain) if state.allowed_domains.contains(domain.as_str()) => {
@@ -211,7 +240,26 @@ async fn tunnel(
     upgraded: hyper::upgrade::Upgraded,
     target: &str,
 ) -> Result<()> {
-    let mut server = TcpStream::connect(target)
+    // S-9: DNS rebinding / SSRF protection — resolve hostname and validate IPs
+    // before connecting, to prevent DNS rebinding to internal addresses.
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host(target)
+        .await
+        .with_context(|| format!("DNS resolution failed for {target}"))?
+        .collect();
+
+    if addrs.is_empty() {
+        anyhow::bail!("DNS resolution returned no addresses for {target}");
+    }
+
+    for addr in &addrs {
+        if is_internal_ip(&addr.ip()) {
+            warn!("SSRF blocked: {target} resolved to internal IP {}", addr.ip());
+            anyhow::bail!("target {target} resolves to internal IP {} — blocked", addr.ip());
+        }
+    }
+
+    // Connect to the first valid resolved address
+    let mut server = TcpStream::connect(addrs.as_slice())
         .await
         .with_context(|| format!("Failed to connect to upstream {target}"))?;
 

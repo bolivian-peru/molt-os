@@ -120,6 +120,8 @@ impl Ledger {
     const CURRENT_SCHEMA_VERSION: i64 = 3;
 
     /// Run any pending migrations.
+    /// Schema versions are one-way: once at the current version, never downgrade.
+    /// `rehash_chain` is intentionally not exposed via any API endpoint.
     fn migrate(&mut self) -> Result<()> {
         let version: i64 = self.conn
             .query_row(
@@ -128,6 +130,11 @@ impl Ledger {
                 |row| row.get(0),
             )
             .unwrap_or(0);
+
+        // Already at current version — no migration needed, never downgrade
+        if version >= Self::CURRENT_SCHEMA_VERSION {
+            return Ok(());
+        }
 
         if version < 2 && version > 0 {
             // Migration from v1 (no delimiters) to v2 (pipe-delimited hashes):

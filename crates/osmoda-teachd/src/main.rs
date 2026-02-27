@@ -9,6 +9,7 @@ mod teacher;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
@@ -52,6 +53,9 @@ pub struct TeachdState {
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -117,6 +121,7 @@ async fn main() {
         .route("/optimize/approve/{id}", post(api::optimize_approve_handler))
         .route("/optimize/apply/{id}", post(api::optimize_apply_handler))
         .route("/optimizations", get(api::optimizations_list_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state.clone());
 
     // Remove existing socket

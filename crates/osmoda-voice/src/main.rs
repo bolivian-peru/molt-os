@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
@@ -287,6 +288,9 @@ async fn voice_listen(
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -328,6 +332,7 @@ async fn main() {
         .route("/voice/speak", post(voice_speak))
         .route("/voice/record", post(voice_record))
         .route("/voice/listen", post(voice_listen))
+        .layer(DefaultBodyLimit::max(256 * 1024)) // 256 KiB — voice handles short text/paths only
         .with_state(state);
 
     // Remove existing socket

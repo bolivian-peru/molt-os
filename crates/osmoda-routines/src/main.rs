@@ -5,6 +5,7 @@ mod scheduler;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use clap::Parser;
@@ -41,6 +42,9 @@ pub struct RoutinesState {
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -78,6 +82,7 @@ async fn main() {
         .route("/routine/trigger/{id}", post(api::routine_trigger_handler))
         .route("/routine/history", get(api::routine_history_handler))
         .route("/health", get(api::health_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state);
 
     // Remove existing socket

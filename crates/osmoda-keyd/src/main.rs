@@ -6,6 +6,7 @@ mod signer;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
@@ -48,6 +49,9 @@ pub struct KeydState {
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -86,6 +90,7 @@ async fn main() {
         .route("/wallet/send", post(api::wallet_send_handler))
         .route("/wallet/delete", post(api::wallet_delete_handler))
         .route("/health", get(api::health_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state);
 
     // Remove existing socket file if present

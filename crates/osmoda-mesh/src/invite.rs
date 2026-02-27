@@ -15,6 +15,9 @@ pub struct InvitePayload {
     pub expires_at: String,
 }
 
+/// Maximum invite TTL: 1 hour. Prevents long-lived invite codes.
+const MAX_INVITE_TTL_SECS: u64 = 3600;
+
 impl InvitePayload {
     /// Create a new invite from our identity and listen address.
     pub fn new(
@@ -24,7 +27,8 @@ impl InvitePayload {
         instance_id: &str,
         ttl_secs: Option<u64>,
     ) -> Self {
-        let ttl = ttl_secs.unwrap_or(DEFAULT_INVITE_TTL_SECS);
+        // Clamp TTL to MAX_INVITE_TTL_SECS (1 hour)
+        let ttl = ttl_secs.unwrap_or(DEFAULT_INVITE_TTL_SECS).min(MAX_INVITE_TTL_SECS);
         let expires_at = chrono::Utc::now()
             + chrono::Duration::seconds(ttl as i64);
 

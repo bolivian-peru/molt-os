@@ -102,13 +102,28 @@ const ALLOWED_FILE_PATHS = ["/var/lib/osmoda/", "/etc/nixos/", "/home/", "/tmp/"
 function validateFilePath(filePath: string): string | null {
   if (filePath.includes("..")) return "path must not contain '..'";
   const resolved = path.resolve(filePath);
+  // Check logical path first (fast path)
   if (!ALLOWED_FILE_PATHS.some((base) => resolved.startsWith(base))) {
     return `path must be under one of: ${ALLOWED_FILE_PATHS.join(", ")}`;
+  }
+  // Resolve symlinks and re-check — prevents symlink escape
+  try {
+    const real = fs.realpathSync(resolved);
+    if (!ALLOWED_FILE_PATHS.some((base) => real.startsWith(base))) {
+      return `resolved symlink target must be under one of: ${ALLOWED_FILE_PATHS.join(", ")}`;
+    }
+  } catch {
+    // Path doesn't exist yet (file_write creating new file) — logical check is sufficient
   }
   return null;
 }
 
-/** Known dangerous commands that must be blocked or routed through agentd APIs. */
+/**
+ * Defense-in-depth command blocklist. NOT a security boundary.
+ * Ring 0 agent has full system access by design.
+ * This catches obvious destructive patterns from prompt injection.
+ * Real protection comes from: NixOS atomicity, approval policies, audit trail.
+ */
 const DANGEROUS_COMMANDS = [
   "rm -rf", "mkfs", "dd if=", "format", "> /dev/", "shred", "wipefs",
   "chmod 777", "chmod -R", "chown -R /",
@@ -116,6 +131,11 @@ const DANGEROUS_COMMANDS = [
   "> /dev/sd", "shutdown", "reboot", "halt", "init 0", "init 6",
   "nix-collect-garbage", "nixos-rebuild",
 ];
+
+/** Rate limit shell_exec: 30 calls per 60 seconds. */
+const shellExecTimestamps: number[] = [];
+const SHELL_EXEC_RATE_LIMIT = 30;
+const SHELL_EXEC_WINDOW_MS = 60000;
 
 // ---------------------------------------------------------------------------
 // Plugin registration
@@ -269,7 +289,16 @@ export default function register(api: any) {
     async execute(_id: string, params: Record<string, unknown>) {
       const cmd = String(params.command);
       const timeout = Math.min(Number(params.timeout) || 30000, 120000); // Cap at 120s
-      // Block dangerous commands — must use proper agentd APIs instead
+      // Rate limit shell_exec
+      const now = Date.now();
+      shellExecTimestamps.push(now);
+      while (shellExecTimestamps.length > 0 && shellExecTimestamps[0] < now - SHELL_EXEC_WINDOW_MS) {
+        shellExecTimestamps.shift();
+      }
+      if (shellExecTimestamps.length > SHELL_EXEC_RATE_LIMIT) {
+        return { output: JSON.stringify({ error: "Rate limit exceeded: max 30 shell_exec calls per minute" }) };
+      }
+      // Block dangerous commands — defense-in-depth, not a security boundary
       const matched = DANGEROUS_COMMANDS.find((d) => cmd.includes(d));
       if (matched) {
         agentdRequest("POST", "/memory/ingest", {
@@ -307,6 +336,10 @@ export default function register(api: any) {
         const filePath = String(params.path);
         const pathErr = validateFilePath(filePath);
         if (pathErr) return { output: JSON.stringify({ error: pathErr, path: filePath }) };
+        const stat = fs.statSync(filePath);
+        if (stat.size > 10 * 1024 * 1024) {
+          return { output: JSON.stringify({ error: "File too large (>10MB)", path: filePath, size: stat.size }) };
+        }
         const content = fs.readFileSync(filePath, "utf-8");
         const lines = content.split("\n");
         const limit = Math.min(Number(params.maxLines) || 500, 2000);

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use clap::Parser;
@@ -85,6 +86,9 @@ pub async fn agentd_post_event(socket_path: &str, event_type: &str, payload: &st
 
 #[tokio::main]
 async fn main() {
+    // SECURITY: restrict file creation permissions — no world/group access
+    unsafe { libc::umask(0o077); }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -136,6 +140,7 @@ async fn main() {
         .route("/watcher/remove/{id}", delete(api::watcher_remove_handler))
         // Health
         .route("/health", get(api::health_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state);
 
     // Remove existing socket
