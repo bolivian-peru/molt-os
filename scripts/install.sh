@@ -596,6 +596,38 @@ Environment=RUST_LOG=info
 WantedBy=multi-user.target
 EOF
 
+# voice
+cat > "$SYSTEMD_DIR/osmoda-voice.service" <<EOF
+[Unit]
+Description=osModa Voice (STT/TTS)
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-voice --socket $RUN_DIR/voice.sock --agentd-socket $RUN_DIR/agentd.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# egress
+cat > "$SYSTEMD_DIR/osmoda-egress.service" <<EOF
+[Unit]
+Description=osModa Egress Proxy
+After=osmoda-agentd.service
+Requires=osmoda-agentd.service
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/osmoda-egress --listen 127.0.0.1:3128 --agentd-socket $RUN_DIR/agentd.sock
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # Heartbeat timer (phones home to spawn.os.moda)
 if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
 
@@ -807,7 +839,7 @@ else
 fi
 
 # Start all daemons
-for svc in osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd; do
+for svc in osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice osmoda-egress; do
   if [ -f "$SYSTEMD_DIR/${svc}.service" ]; then
     systemctl enable "${svc}.service"
     systemctl start "${svc}.service"
