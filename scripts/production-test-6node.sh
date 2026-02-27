@@ -32,7 +32,7 @@ IMAGE="ubuntu-24.04"
 LOCATION="fsn1"
 LABEL_KEY="managed_by"
 LABEL_VAL="osmoda-prod-test"
-SSH_KEY="${REPO_ROOT}/~/.ssh/id_ed25519"
+SSH_KEY="${SSH_KEY_PATH:-${HOME}/.ssh/id_ed25519}"
 SSH_KEY_PUB="${SSH_KEY}.pub"
 MESH_PORT=18800
 REMOTE_DIR="/opt/osmoda"
@@ -1260,7 +1260,7 @@ if [ "$KEEP_SERVERS" = true ]; then
   echo -e "${BOLD}${CYAN}═══ SSH Access ═══${NC}"
   for i in $(seq 1 $NODE_COUNT); do
     ip="${SERVERS[$((i-1))]}"
-    info "  node-$i: ssh -i ~/.ssh/id_ed25519 root@${ip}"
+    info "  node-$i: ssh -i ${SSH_KEY} root@${ip}"
   done
 
   echo ""

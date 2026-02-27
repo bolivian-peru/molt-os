@@ -33,15 +33,22 @@ result-*
 secrets/
 .keys/
 
-# Internal planning docs (not published)
+# Internal docs (not published)
 docs/planning/
 docs/SPRINT-*
 docs/DEPLOY-*
+docs/INDEX.md
 docs/MONETIZATION.md
 docs/ARCHETYPES.md
 docs/DEMO-SCRIPT.md
 docs/TWITTER-ROBOTICS.md
+docs/PENTEST-PROCESS.md
+docs/6NODE-TEST-FINDINGS.md
 docs/GO-TO-MARKET.md
+
+# Internal test scripts (contain infrastructure references)
+scripts/security-stress-test.sh
+scripts/mesh-test-5node.sh
 
 # Apps (separate repos, not part of open source OS)
 apps/
