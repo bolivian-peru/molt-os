@@ -21,7 +21,10 @@
 # Tested on: Hetzner Cloud, DigitalOcean, bare metal
 # =============================================================================
 
-set -euo pipefail
+set -eo pipefail
+
+# Ensure HOME is set (cloud-init may not set it)
+export HOME="${HOME:-/root}"
 
 VERSION="0.1.0"
 REPO_URL="https://github.com/bolivian-peru/os-moda.git"
@@ -102,15 +105,18 @@ echo ""
 # Progress reporting (sends live step updates to spawn.os.moda dashboard)
 # ---------------------------------------------------------------------------
 report_progress() {
-  local step="$1" step_status="$2" detail="$3"
-  if [ -z "$ORDER_ID" ] || [ -z "$CALLBACK_URL" ]; then return 0; fi
+  local step="$1" step_status="$2" detail="${3:-}"
+  if [ -z "${ORDER_ID:-}" ] || [ -z "${CALLBACK_URL:-}" ]; then return 0; fi
   local BASE_URL="${CALLBACK_URL%/api/heartbeat}"
   curl -sf -X POST "$BASE_URL/api/provision-progress" \
     -H "Content-Type: application/json" \
-    -H "X-Heartbeat-Secret: $HEARTBEAT_SECRET" \
+    -H "X-Heartbeat-Secret: ${HEARTBEAT_SECRET:-}" \
     -d "{\"order_id\":\"$ORDER_ID\",\"step\":\"$step\",\"status\":\"$step_status\",\"detail\":\"$detail\"}" \
     >/dev/null 2>&1 &
 }
+
+# Report errors on exit so dashboard shows failure
+trap 'if [ $? -ne 0 ]; then report_progress "error" "error" "Install failed at line $LINENO (exit $?)"; wait; fi' EXIT
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks
