@@ -133,6 +133,9 @@ log "Pre-flight checks passed."
 # ---------------------------------------------------------------------------
 # Step 1: NixOS installation (via nixos-infect)
 # ---------------------------------------------------------------------------
+# Step 1: NixOS conversion (only when explicitly requested — NOT during spawn deploys)
+# Spawn cloud-init always passes --skip-nixos. This block only runs for manual installs
+# that want to convert Ubuntu/Debian to NixOS (interactive use case).
 if [ "$SKIP_NIXOS" = false ]; then
   echo ""
   warn "Step 1: NixOS Installation"
@@ -145,7 +148,6 @@ if [ "$SKIP_NIXOS" = false ]; then
     log "This takes 5-10 minutes. The server will reboot automatically."
     echo ""
 
-    # nixos-infect handles everything
     # Auto-detect cloud provider from metadata endpoints
     PROVIDER="generic"
     if curl -sf -m 2 http://169.254.169.254/hetzner/v1/metadata >/dev/null 2>&1; then
@@ -157,16 +159,20 @@ if [ "$SKIP_NIXOS" = false ]; then
     fi
     log "Detected cloud provider: $PROVIDER"
 
-    curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect \
-      | NIX_CHANNEL=nixos-unstable PROVIDER="$PROVIDER" bash -x
-
-    # If we get here, infect didn't reboot (shouldn't happen)
-    warn "nixos-infect complete. Please reboot and re-run this script with --skip-nixos"
-    exit 0
+    if curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect \
+      | NIX_CHANNEL=nixos-unstable PROVIDER="$PROVIDER" bash -x; then
+      # If we get here, infect didn't reboot (shouldn't happen)
+      warn "nixos-infect complete. Please reboot and re-run this script with --skip-nixos"
+      exit 0
+    else
+      error "nixos-infect failed (exit code $?). Falling through to install on current OS."
+      warn "osModa will install on $OS_TYPE instead. NixOS conversion can be retried later."
+      # Don't exit — continue installing daemons on the existing OS
+    fi
   else
     warn "NixOS installation not supported for $OS_TYPE."
-    warn "Please install NixOS manually, then re-run with --skip-nixos"
-    exit 1
+    warn "Continuing install on $OS_TYPE..."
+    # Don't exit — install daemons on whatever OS is present
   fi
 fi
 
@@ -1006,10 +1012,12 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       # Accept a mesh invite on this server
       INVITE_CODE=$(echo "$ACTION_JSON" | jq -r '.invite_code' 2>/dev/null)
       if [ -n "$INVITE_CODE" ] && [ "$INVITE_CODE" != "null" ]; then
+        # Use jq for safe JSON construction (no shell interpolation of invite code)
+        ACCEPT_BODY=$(jq -n --arg code "$INVITE_CODE" '{invite_code: $code}')
         curl -sf --unix-socket "$RUN_DIR/mesh.sock" \
           -X POST http://l/invite/accept \
           -H "Content-Type: application/json" \
-          -d "{\"invite_code\": \"$INVITE_CODE\"}" 2>/dev/null || true
+          -d "$ACCEPT_BODY" 2>/dev/null || true
         NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
       fi
       ;;
@@ -1169,22 +1177,11 @@ info "Documentation: https://os.moda"
 info "Report issues: https://github.com/bolivian-peru/os-moda/issues"
 echo ""
 
-# Phone home on install completion (if spawned)
-if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
-  log "Phoning home to spawn.os.moda..."
-  if [ -n "$HEARTBEAT_SECRET" ]; then
-    HB_TS=$(date +%s000)
-    HB_SIG=$(printf '%s:%s' "$ORDER_ID" "$HB_TS" | openssl dgst -sha256 -hmac "$HEARTBEAT_SECRET" 2>/dev/null | awk '{print $NF}')
-    curl -sf -X POST "$CALLBACK_URL" \
-      -H "Content-Type: application/json" \
-      -H "X-Heartbeat-Signature: $HB_SIG" \
-      -H "X-Heartbeat-Timestamp: $HB_TS" \
-      -d "{\"order_id\":\"$ORDER_ID\",\"status\":\"alive\",\"setup_complete\":true}" \
-      || true
-  else
-    curl -sf -X POST "$CALLBACK_URL" \
-      -H "Content-Type: application/json" \
-      -d "{\"order_id\":\"$ORDER_ID\",\"status\":\"alive\",\"setup_complete\":true}" \
-      || true
-  fi
+# Fire immediate heartbeat on install completion (don't wait for timer)
+# This sends full health data + processes any queued actions (API key, SSH keys, etc.)
+if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ] && [ -x "$INSTALL_DIR/bin/osmoda-heartbeat.sh" ]; then
+  log "Sending initial heartbeat to spawn.os.moda..."
+  "$INSTALL_DIR/bin/osmoda-heartbeat.sh" 2>/dev/null || true
+  # Run a second time after 10s to pick up any actions returned by the first heartbeat
+  ( sleep 10 && "$INSTALL_DIR/bin/osmoda-heartbeat.sh" 2>/dev/null || true ) &
 fi
