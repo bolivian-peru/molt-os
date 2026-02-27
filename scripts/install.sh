@@ -108,7 +108,7 @@ report_progress() {
   local step="$1" step_status="$2" detail="${3:-}"
   if [ -z "${ORDER_ID:-}" ] || [ -z "${CALLBACK_URL:-}" ]; then return 0; fi
   local BASE_URL="${CALLBACK_URL%/api/heartbeat}"
-  curl -sf -X POST "$BASE_URL/api/provision-progress" \
+  curl -sf --max-time 10 -X POST "$BASE_URL/api/provision-progress" \
     -H "Content-Type: application/json" \
     -H "X-Heartbeat-Secret: ${HEARTBEAT_SECRET:-}" \
     -d "{\"order_id\":\"$ORDER_ID\",\"step\":\"$step\",\"status\":\"$step_status\",\"detail\":\"$detail\"}" \
@@ -259,16 +259,16 @@ log "Step 3: Getting osModa source..."
 if [ -d "$INSTALL_DIR/.git" ]; then
   log "Updating existing installation..."
   cd "$INSTALL_DIR"
-  git fetch origin "$BRANCH"
+  timeout 120 git fetch origin "$BRANCH" || die "git fetch timed out (120s)"
   git reset --hard "origin/$BRANCH"
 elif [ -d "$INSTALL_DIR" ]; then
   log "Removing stale installation at $INSTALL_DIR..."
   rm -rf "$INSTALL_DIR"
-  git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  timeout 300 git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR" || die "git clone timed out (300s)"
   cd "$INSTALL_DIR"
 else
   log "Cloning osModa..."
-  git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  timeout 300 git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR" || die "git clone timed out (300s)"
   cd "$INSTALL_DIR"
 fi
 
@@ -908,7 +908,7 @@ fi
 # Write heartbeat script (more capable than inline bash)
 cat > "$INSTALL_DIR/bin/osmoda-heartbeat.sh" <<'HBEOF'
 #!/usr/bin/env bash
-set -uo pipefail
+set -o pipefail
 STATE_DIR="/var/lib/osmoda"
 RUN_DIR="/run/osmoda"
 
@@ -916,8 +916,8 @@ OID=$(cat "$STATE_DIR/config/order-id" 2>/dev/null) || exit 0
 CBURL=$(cat "$STATE_DIR/config/callback-url" 2>/dev/null) || exit 0
 HBSECRET=$(cat "$STATE_DIR/config/heartbeat-secret" 2>/dev/null || echo "")
 
-# Collect health from agentd
-HEALTH=$(curl -sf --unix-socket "$RUN_DIR/agentd.sock" http://l/health 2>/dev/null || echo "{}")
+# Collect health from agentd (5s timeout to prevent hangs)
+HEALTH=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/agentd.sock" http://l/health 2>/dev/null || echo "{}")
 CPU=$(echo "$HEALTH" | grep -o '"cpu":[0-9.]*' | head -1 | cut -d: -f2)
 RAM=$(echo "$HEALTH" | grep -o '"ram":[0-9.]*' | head -1 | cut -d: -f2)
 DISK=$(echo "$HEALTH" | grep -o '"disk":[0-9.]*' | head -1 | cut -d: -f2)
@@ -959,9 +959,9 @@ for svc in agentd keyd watch routines mesh mcpd teachd voice egress gateway; do
     '.[$name] = {active: $active, pid: (if $pid == 0 then null else $pid end)}')
 done
 
-# Collect mesh identity + peers
-MESH_IDENTITY=$(curl -sf --unix-socket "$RUN_DIR/mesh.sock" http://l/identity 2>/dev/null || echo "{}")
-MESH_PEERS=$(curl -sf --unix-socket "$RUN_DIR/mesh.sock" http://l/peers 2>/dev/null || echo "[]")
+# Collect mesh identity + peers (5s timeout)
+MESH_IDENTITY=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/mesh.sock" http://l/identity 2>/dev/null || echo "{}")
+MESH_PEERS=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/mesh.sock" http://l/peers 2>/dev/null || echo "[]")
 MESH_PEERS_SLIM=$(echo "$MESH_PEERS" | jq '[.[] | {id: .id, label: .label, state: (.connection_state // "unknown")}]' 2>/dev/null || echo "[]")
 
 # Build payload (use jq for safe JSON construction)
@@ -984,13 +984,13 @@ PAYLOAD=$(jq -n \
 if [ -n "$HBSECRET" ]; then
   HB_TS=$(date +%s000)
   SIGNATURE=$(printf '%s:%s' "$OID" "$HB_TS" | openssl dgst -sha256 -hmac "$HBSECRET" 2>/dev/null | awk '{print $NF}')
-  RESPONSE=$(curl -sf -X POST "$CBURL" \
+  RESPONSE=$(curl -sf --max-time 15 -X POST "$CBURL" \
     -H "Content-Type: application/json" \
     -H "X-Heartbeat-Signature: $SIGNATURE" \
     -H "X-Heartbeat-Timestamp: $HB_TS" \
     -d "$PAYLOAD" 2>/dev/null) || exit 0
 else
-  RESPONSE=$(curl -sf -X POST "$CBURL" \
+  RESPONSE=$(curl -sf --max-time 15 -X POST "$CBURL" \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" 2>/dev/null) || exit 0
 fi
@@ -1013,7 +1013,7 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       if [ -n "$AKEY" ] && [ "$AKEY" != "null" ]; then
         mkdir -p /root/.ssh && chmod 700 /root/.ssh
         if ! grep -qF "$AKEY" /root/.ssh/authorized_keys 2>/dev/null; then
-          echo "$AKEY" >> /root/.ssh/authorized_keys
+          printf '%s\n' "$AKEY" >> /root/.ssh/authorized_keys
           chmod 600 /root/.ssh/authorized_keys
         fi
         NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
@@ -1032,7 +1032,7 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       # Create a mesh invite on this server, report back the invite code
       TARGET_IP=$(echo "$ACTION_JSON" | jq -r '.target_server_ip' 2>/dev/null)
       TARGET_PORT=$(echo "$ACTION_JSON" | jq -r '.target_mesh_port' 2>/dev/null)
-      INVITE_RESULT=$(curl -sf --unix-socket "$RUN_DIR/mesh.sock" \
+      INVITE_RESULT=$(curl -sf --max-time 10 --unix-socket "$RUN_DIR/mesh.sock" \
         -X POST http://l/invite/create \
         -H "Content-Type: application/json" \
         -d '{"ttl_secs": 3600}' 2>/dev/null)
@@ -1051,7 +1051,7 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       if [ -n "$INVITE_CODE" ] && [ "$INVITE_CODE" != "null" ]; then
         # Use jq for safe JSON construction (no shell interpolation of invite code)
         ACCEPT_BODY=$(jq -n --arg code "$INVITE_CODE" '{invite_code: $code}')
-        curl -sf --unix-socket "$RUN_DIR/mesh.sock" \
+        curl -sf --max-time 10 --unix-socket "$RUN_DIR/mesh.sock" \
           -X POST http://l/invite/accept \
           -H "Content-Type: application/json" \
           -d "$ACCEPT_BODY" 2>/dev/null || true
@@ -1062,7 +1062,7 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       # Disconnect a mesh peer
       PEER_ID=$(echo "$ACTION_JSON" | jq -r '.peer_instance_id' 2>/dev/null)
       if [ -n "$PEER_ID" ] && [ "$PEER_ID" != "null" ]; then
-        curl -sf --unix-socket "$RUN_DIR/mesh.sock" \
+        curl -sf --max-time 10 --unix-socket "$RUN_DIR/mesh.sock" \
           -X DELETE "http://l/peer/$PEER_ID" 2>/dev/null || true
         NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
       fi

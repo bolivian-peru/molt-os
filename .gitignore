@@ -32,6 +32,7 @@ result-*
 *.key
 secrets/
 .keys/
+server-audit.md
 
 # Internal docs (not published)
 docs/planning/
