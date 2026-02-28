@@ -36,7 +36,7 @@ Cloud VMs solve the resource problem but create new ones: no self-healing (your 
 ### How osModa Solves It
 
 ```
-osModa Server ($20.99/mo)
+osModa Server
 ├── agentd: full system access for your AI agent
 ├── Self-healing: agent crashes → auto-restart in <5s
 ├── Watcher: health checks every 30s, escalation chain
@@ -59,7 +59,7 @@ osModa Server ($20.99/mo)
 
 | Feature | Mac Studio | AWS EC2 | Railway/Render | osModa |
 |---------|-----------|---------|---------------|--------|
-| Cost (8GB) | $3,499 one-time | ~$70/mo | ~$25-40/mo | $20.99/mo |
+| Cost (8GB) | $3,499 one-time | ~$70/mo | ~$25-40/mo | See pricing |
 | Concurrent agents | 4-5 (shared) | Unlimited (unmanaged) | Container-limited | 10+ (dedicated) |
 | Self-healing | No | DIY | Basic restart | Full: restart → rollback → notify |
 | Audit trail | No | CloudTrail ($) | Logs only | Hash-chained, tamper-evident |
@@ -177,7 +177,7 @@ osModa Validator Node
 
 **Economics:**
 - Standard validator hosting: $500-2,000/mo (Ethereum), $4,000+/mo (Solana)
-- osModa on Hetzner: $62.99/mo (Production tier, 8 vCPU, 16GB)
+- osModa: fraction of the cost (see spawn.os.moda for current pricing)
 - Savings: 70-95% vs. current validator hosting providers
 - ROI: if better uptime prevents even one slashing event, saves $10,000-$100,000+
 
@@ -240,8 +240,8 @@ osModa Inference Cluster (3-node mesh)
 
 **Economics:**
 - Cloud inference (GPT-4): $0.03/1K tokens × 2M tokens/day = $1,800/mo
-- osModa + Hetzner GPU (GEX44, RTX 4000 SFF, 20GB VRAM): ~$184/mo
-- 3-node CPU cluster for smaller models: $62.97/mo
+- osModa on dedicated GPU: fraction of the cost
+- Multi-node CPU clusters: even more cost-effective
 - Payback period: 1-3 days vs. cloud inference
 
 **Target customers:**
@@ -304,7 +304,7 @@ osModa IoT Gateway
 - Self-healing when sensors or drivers fail
 - NixOS reproducibility across fleets of gateways
 - Mesh networking between gateways (no central coordinator)
-- Fraction of the cost ($20.99/mo vs. $5,000+ hardware gateways)
+- Fraction of the cost of dedicated hardware gateways
 
 **Target customers:**
 - Manufacturing plants with sensor networks
@@ -371,7 +371,7 @@ osModa HIPAA Node
 - Voice interface keeps doctors' hands free — processed entirely on-device (no cloud transcription of patient data)
 - NixOS immutability = smaller attack surface than Ubuntu/RHEL
 - Self-healing reduces the "vendor breach" vector by 59% (the system manages itself, fewer third-party touchpoints)
-- All-in cost: $62.99-125.99/mo vs. $300-700/mo for specialized HIPAA hosting
+- Significantly lower cost than specialized HIPAA hosting
 
 **Target customers:**
 - Small medical practices (1-10 providers) who can't afford enterprise HIPAA hosting

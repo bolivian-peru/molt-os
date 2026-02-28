@@ -339,39 +339,9 @@ cargo test --workspace
 
 ---
 
-## spawn.os.moda — Provisioning Service
+## spawn.os.moda — Hosted Provisioning
 
-Separate private repo (`apps/spawn/`). Not part of the open source OS.
-
-| Component | Maturity | Notes |
-|-----------|----------|-------|
-| Landing page (index.html) | **Solid** | Spirit orb, plan selection, x402 payments, responsive |
-| x402 USDC payments (Base) | **Solid** | MetaMask flow, on-chain verification, replay prevention |
-| x402 USDC payments (Solana) | **Solid** | Phantom flow, SPL token transfer, ATA creation |
-| Hetzner provisioning | **Functional** | Creates server, passes cloud-init; needs end-to-end testing |
-| Lead capture | **Solid** | Email + plan, AES-256-GCM encrypted storage, honeypot, rate limits |
-| Cloud-init with order_id | **Solid** | Passes order_id + callback URL to install.sh |
-| `POST /api/heartbeat` | **Solid** | Rate-limited, validates order_id, stores health data, promotes status |
-| `GET /api/status/:id` | **Solid** | Returns plan details, health, computed SSH/tunnel commands |
-| Management dashboard | **Solid** | Order lookup, status card, health metrics, quick actions, upsells, auto-refresh |
-| Heartbeat systemd timer | **Solid** | In install.sh; 30s after boot, then every 5 min |
-| Phone-home on install | **Solid** | Curls callback URL on install completion |
-
-### Spawn architecture
-
-```
-User pays USDC → spawn.os.moda → Hetzner API (create server)
-                                       ↓
-                              cloud-init runs install.sh
-                              --order-id UUID --callback-url URL
-                                       ↓
-                              install completes → phone home
-                                       ↓
-                              heartbeat timer (every 5 min)
-                              sends: status, cpu, ram, disk
-                                       ↓
-                              /manage?id=UUID → dashboard
-```
+Separate private repo. Not part of the open source OS. Visit [spawn.os.moda](https://spawn.os.moda) to deploy a managed osModa server.
 
 ---
 
@@ -409,9 +379,9 @@ Daemon health:         7/7 PASS (headless; voice + egress skip on servers withou
 Injection attacks:     3/3 PASS (SQL injection, path traversal, shell injection)
 Payload bombs:         PASS (agentd survived 1MB payload)
 Error hardening:       PASS (no stack trace leak)
-Data preservation:     PASS (14,462 teachd observations, keyd policy, spawn orders)
+Data preservation:     PASS (teachd observations, keyd policy, all persistent state)
 Hash chain integrity:  PASS (321 events, all valid, zero broken chain links)
-Rate limiting:         PASS (spawn /api/spawn returns 429)
+Rate limiting:         PASS (all public endpoints enforce rate limits)
 umask enforcement:     PASS (all 9 daemons call umask(0o077) at startup)
 Body size limits:      PASS (all 8 socket daemons have DefaultBodyLimit)
 Stress test:           PASS (700/700 concurrent health checks, 50 concurrent queries)

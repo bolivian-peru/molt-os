@@ -86,7 +86,7 @@ services.osmoda.channels.whatsapp = {
 
 ```bash
 # Save token first
-echo '7123456789:AAHxxxx' > /var/lib/osmoda/secrets/telegram-bot-token
+echo 'YOUR_BOT_TOKEN_FROM_BOTFATHER' > /var/lib/osmoda/secrets/telegram-bot-token
 chmod 600 /var/lib/osmoda/secrets/telegram-bot-token
 
 # Apply

@@ -965,8 +965,9 @@ function connect() {
       pendingChat[reqId] = true;
       local.send(JSON.stringify({
         type: "req", id: reqId, method: "chat.send",
-        params: { text: msg.text, sessionKey: sessionKey }
+        params: { message: msg.text, idempotencyKey: reqId, sessionKey: sessionKey, agentId: "osmoda" }
       }));
+      console.log("[ws-relay] sending chat.send:", msg.text.slice(0, 50));
       return;
     }
 
@@ -988,11 +989,7 @@ function connect() {
       return;
     }
 
-    // Pass through any raw OpenClaw protocol messages
-    if (msg.type === "req") {
-      local.send(str);
-      return;
-    }
+    // Do NOT pass through raw req messages — only allow specific methods above
   });
 
   upstream.on("close", () => {
@@ -1280,6 +1277,81 @@ GWENVEOF
         chmod 600 "$STATE_DIR/config/gateway-env"
         # Enable + restart gateway to pick up new key + config
         systemctl enable osmoda-gateway.service 2>/dev/null || true
+        systemctl restart osmoda-gateway.service 2>/dev/null || true
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
+    connect_channel)
+      ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
+      ATOKEN=$(echo "$ACTION_JSON" | jq -r '.token' 2>/dev/null) || continue
+      # Sanitize channel name to prevent path traversal
+      ACHANNEL=$(echo "$ACHANNEL" | tr -cd 'a-z')
+      if [ -n "$ACHANNEL" ] && [ "$ACHANNEL" != "null" ] && [ -n "$ATOKEN" ] && [ "$ATOKEN" != "null" ]; then
+        # Decrypt token if encrypted
+        if echo "$ATOKEN" | grep -q '^ENC:' && [ -n "$HBSECRET" ]; then
+          ENC_IV=$(echo "$ATOKEN" | cut -d: -f2)
+          ENC_TAG=$(echo "$ATOKEN" | cut -d: -f3)
+          ENC_CT=$(echo "$ATOKEN" | cut -d: -f4)
+          ATOKEN=$(node -e "
+            var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
+            var dk=c.createHash('sha256').update(s).digest();
+            var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
+            d.setAuthTag(Buffer.from(tag,'hex'));
+            var pt=d.update(ct,'hex','utf8')+d.final('utf8');
+            process.stdout.write(pt);
+          " "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" 2>/dev/null) || true
+          if [ -z "$ATOKEN" ]; then
+            echo "Failed to decrypt channel token — skipping action $AID"
+            continue
+          fi
+        fi
+        # Save token to secrets file
+        mkdir -p "$STATE_DIR/secrets"
+        printf '%s' "$ATOKEN" > "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
+        chmod 600 "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
+        # Update openclaw.json to add channel config
+        if [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
+          node -e "
+            var fs=require('fs'),ch=process.argv[1],tf=process.argv[2];
+            var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
+            if(!config.channels)config.channels={};
+            config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:'open',allowFrom:['*']};
+            fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+          " "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" 2>/dev/null
+        fi
+        # Restart gateway to pick up new channel
+        systemctl restart osmoda-gateway.service 2>/dev/null || true
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
+    pairing_approve)
+      ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
+      ACODE=$(echo "$ACTION_JSON" | jq -r '.code' 2>/dev/null) || continue
+      if [ -n "$ACHANNEL" ] && [ "$ACHANNEL" != "null" ] && [ -n "$ACODE" ] && [ "$ACODE" != "null" ]; then
+        # Sanitize: only allow alphanumeric codes
+        SAFE_CODE=$(echo "$ACODE" | tr -cd 'A-Z0-9')
+        SAFE_CHANNEL=$(echo "$ACHANNEL" | tr -cd 'a-z')
+        openclaw pairing approve "$SAFE_CHANNEL" "$SAFE_CODE" 2>/dev/null || true
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      fi
+      ;;
+    disconnect_channel)
+      ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
+      # Sanitize channel name to prevent path traversal
+      ACHANNEL=$(echo "$ACHANNEL" | tr -cd 'a-z')
+      if [ -n "$ACHANNEL" ] && [ "$ACHANNEL" != "null" ]; then
+        # Remove token file
+        rm -f "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
+        # Remove channel from openclaw.json
+        if [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
+          node -e "
+            var fs=require('fs'),ch=process.argv[1];
+            var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
+            if(config.channels&&config.channels[ch])delete config.channels[ch];
+            fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+          " "$ACHANNEL" 2>/dev/null
+        fi
+        # Restart gateway to apply change
         systemctl restart osmoda-gateway.service 2>/dev/null || true
         NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
       fi

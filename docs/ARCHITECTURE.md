@@ -381,32 +381,9 @@ Ground truth: Markdown files at /var/lib/osmoda/memory/
 Vector indexes (when wired) are derived and always rebuildable.
 ```
 
-## Provisioning Layer (spawn.os.moda)
+## Hosted Provisioning (spawn.os.moda)
 
-spawn.os.moda is the commercial provisioning service (separate private repo). It handles payment, server creation, and ongoing management.
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  spawn.os.moda (Node.js + Express)                        │
-│                                                            │
-│  Landing page → USDC payment → Hetzner API → cloud-init   │
-│  Management dashboard → status API → heartbeat receiver    │
-└──────────┬───────────────────────────────────┬────────────┘
-           │ creates server                     │ receives heartbeats
-           ▼                                    ▲
-┌──────────────────────────────────────────────────────────┐
-│  osModa Server (provisioned)                               │
-│                                                            │
-│  install.sh --order-id UUID --callback-url URL             │
-│  Stores config in /var/lib/osmoda/config/                  │
-│  osmoda-heartbeat.timer → POST /api/heartbeat (5 min)     │
-│  Sends: order_id, status, cpu, ram, disk, openclaw_ready  │
-└──────────────────────────────────────────────────────────┘
-```
-
-**Auth model:** Order UUID = auth token. 128-bit unguessable. No passwords, no OAuth, no sessions. Rate-limited.
-
-**Management dashboard:** User visits `/manage?id=UUID` → sees server status, health metrics, SSH/tunnel commands, upsell grid. Auto-refreshes every 30 seconds.
+spawn.os.moda is the hosted option for deploying osModa servers. Handles payment, server creation, and ongoing management via a web dashboard. Separate private repo — not part of the open source OS.
 
 ## Security Model
 

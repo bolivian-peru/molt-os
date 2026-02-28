@@ -3,7 +3,7 @@
 # Deployment (tested approach — nixos-infect):
 #   1. Create Hetzner Cloud server with Ubuntu 24.04
 #   2. Add your SSH key in Hetzner dashboard (Security > SSH Keys)
-#   3. SSH in: ssh -i ~/.ssh/id_ed25519 root@<server-ip>
+#   3. SSH in: ssh root@<server-ip>
 #   4. Run nixos-infect:
 #      curl -sL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect \
 #        | NIX_CHANNEL=nixos-unstable PROVIDER=hetznercloud bash -x
@@ -17,8 +17,8 @@
 #   nix run github:nix-community/nixos-anywhere -- --flake .#osmoda-hetzner root@<server-ip>
 #
 # Access:
-#   ssh -i ~/.ssh/id_ed25519 agent@<server-ip>
-#   ssh -i ~/.ssh/id_ed25519 -L 18789:localhost:18789 agent@<server-ip>
+#   ssh agent@<server-ip>
+#   ssh -L 18789:localhost:18789 agent@<server-ip>
 #   Then open localhost:18789 in browser
 #
 # IMPORTANT: After nixos-infect, the boot loader is GRUB (not systemd-boot).
@@ -101,7 +101,7 @@
     extraGroups = [ "wheel" ];
     openssh.authorizedKeys.keys = [
       # Replace with your SSH public key:
-      #   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+      #   ssh-keygen -t ed25519 -N ""
       #   cat ~/.ssh/id_ed25519.pub
       "ssh-ed25519 AAAA_YOUR_PUBLIC_KEY_HERE osmoda-hetzner"
     ];
