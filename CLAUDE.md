@@ -83,7 +83,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 11. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
-   file-manager, network-manager, service-explorer, app-deployer.
+   file-manager, network-manager, service-explorer, app-deployer, deploy-ai-agent.
 
 12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
    Generates multi-agent OpenClaw config from NixOS options (agents, bindings, channels, plugins).
@@ -92,7 +92,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    and credential management; actual connections handled by OpenClaw.
 
 13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 72 tools, all 16 skills, full system access
+   - `osmoda` (default): Claude Opus, all 72 tools, all 17 skills, full system access
    - `mobile`: Claude Sonnet, read-only tools, monitoring skills, for Telegram/WhatsApp
    Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
@@ -215,7 +215,8 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── file-manager/SKILL.md
   ├── network-manager/SKILL.md
   ├── service-explorer/SKILL.md
-  └── app-deployer/SKILL.md              # Deploy + manage user applications
+  ├── app-deployer/SKILL.md              # Deploy + manage user applications
+  └── deploy-ai-agent/SKILL.md           # Deploy AI agent workloads (LangChain, CrewAI, etc.)
 ./templates/
   ├── AGENTS.md                          # "You ARE the operating system" (main agent)
   ├── SOUL.md                            # Calm, competent, omniscient (main agent)

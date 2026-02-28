@@ -133,17 +133,6 @@ Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/i
 |------|-------------|
 | `network_info` | Network interfaces (ip addr) and listening ports (ss -tlnp) |
 
-### Wallet tools (via osmoda-keyd at `/run/osmoda/keyd.sock`)
-
-| Tool | Description |
-|------|-------------|
-| `wallet_create` | Create a new ETH or SOL wallet (encrypted, policy-gated) |
-| `wallet_list` | List all wallets with addresses, labels, and chains |
-| `wallet_sign` | Sign raw bytes with a wallet (policy-gated, daily limits) |
-| `wallet_send` | Build + sign a transaction (returns signed tx for external broadcast) |
-| `wallet_delete` | Permanently delete a wallet (removes key file, zeroizes cached key, updates index) |
-| `wallet_receipt` | Query wallet operation receipts from the audit ledger |
-
 ### SafeSwitch tools (via osmoda-watch at `/run/osmoda/watch.sock`)
 
 | Tool | Description |
@@ -288,3 +277,16 @@ Emergency controls that execute immediately without AI involvement. The user alw
 | `safety_status` | Raw system health dump. Tries agentd, falls back to shell if agentd is down |
 | `safety_panic` | Stop all osModa services (except agentd) + rollback NixOS |
 | `safety_restart` | Restart the OpenClaw gateway service |
+
+### Wallet tools — optional (via osmoda-keyd at `/run/osmoda/keyd.sock`)
+
+For AI agent workloads that need cryptographic signing. Not required for core system management.
+
+| Tool | Description |
+|------|-------------|
+| `wallet_create` | Create a new ETH or SOL wallet (encrypted, policy-gated) |
+| `wallet_list` | List all wallets with addresses, labels, and chains |
+| `wallet_sign` | Sign raw bytes with a wallet (policy-gated, daily limits) |
+| `wallet_send` | Build + sign an intent (returns signed data for external broadcast — not a fully-encoded transaction) |
+| `wallet_delete` | Permanently delete a wallet (removes key file, zeroizes cached key, updates index) |
+| `wallet_receipt` | Query wallet operation receipts from the audit ledger |

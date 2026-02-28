@@ -337,7 +337,7 @@ osModa HIPAA Node
 │   - Every access logged with cryptographic proof
 │   - Tamper-evident (any modification detectable)
 │   - Exportable for HIPAA auditors (PDF + JSON)
-│   - Meets HIPAA §164.312(b): audit controls
+│   - Contributes to HIPAA §164.312(b) audit control requirements
 │
 ├── Self-healing:
 │   - Database crashes → auto-restart + integrity check
@@ -360,9 +360,9 @@ osModa HIPAA Node
 │   - "Show me patient 4472's labs from last week"
 │   - No audio data leaves the machine
 │
-└── Compliance exports:
-    - SOC2-ready evidence packages
-    - HIPAA audit report generation
+└── Compliance evidence (supporting, not standalone):
+    - Generates evidence useful for SOC 2 audits
+    - Audit trail exports for HIPAA review (additional compliance work required)
     - Incident workspace with timeline reconstruction
 ```
 

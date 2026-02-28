@@ -20,7 +20,7 @@ Last updated: 2026-02-27
 | Rust crates | 10 (9 daemons + 1 CLI) |
 | Tests passing | 136 |
 | Bridge tools registered | 72 |
-| System skills | 16 |
+| System skills | 17 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 
 ---
@@ -402,13 +402,13 @@ Stress test:           PASS (700/700 concurrent health checks, 50 concurrent que
 
 ## What's Next
 
-1. **Wire semantic memory** — connect usearch + fastembed so `memory/recall` returns hybrid BM25 + vector results
-2. **Real transaction building** — RLP encoding for ETH, Solana transaction structs
+1. **Approval gate for destructive ops** — code-enforced confirmation before destructive operations (currently convention-based via agent prompt, not runtime-enforced). This is the #1 safety priority.
+2. **Ring 1/Ring 2 sandbox implementation** — enforce the trust ring model with bubblewrap isolation + egress proxy for third-party tools
 3. **End-to-end VM test** — boot the dev VM, verify all daemons start and communicate
 4. **Integration tests** — bridge → daemon → ledger pipeline tests
-5. **Token-based socket auth** — capability tokens for fine-grained access control
-6. **Persistent mesh sessions** — save/restore transport state across daemon restarts
-7. **NixOS-native deploy** — replace imperative nohup/iptables with osmoda.nix module on Hetzner
-8. **Telegram bot** — `/start <order_id>` for server management via Telegram
-9. **Email notifications** — send order_id + manage link after spawn
-10. **Plan upgrades** — resize Hetzner server via management dashboard
+5. **Wire semantic memory** — connect usearch + fastembed so `memory/recall` returns hybrid BM25 + vector results
+6. **Token-based socket auth** — capability tokens for fine-grained access control
+7. **Persistent mesh sessions** — save/restore transport state across daemon restarts
+8. **External security audit** — independent review of mesh crypto (Noise_XX + ML-KEM-768)
+9. **Real transaction building** — RLP encoding for ETH, Solana transaction structs (lower priority — not the core value prop)
+10. **Web dashboard with live chat** — server management from browser

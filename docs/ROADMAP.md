@@ -2,29 +2,31 @@
 
 Last updated: 2026-02-27
 
-Current state: 136 tests passing, 10 Rust crates (9 daemons + 1 CLI), 72 bridge tools, 16 skills.
+Current state: 136 tests passing, 10 Rust crates (9 daemons + 1 CLI), 72 bridge tools, 17 skills.
 This document covers what shipped and what's next, in priority order.
 
 ---
 
 ## What's Live Today
 
-| Feature | Where |
-|---------|-------|
-| Full system access (processes, files, services, kernel) | agentd + bridge |
-| Crypto wallets — ETH + SOL, AES-256-GCM, policy-gated | osmoda-keyd |
-| SafeSwitch deploys with auto-rollback | osmoda-watch |
-| Background automation (cron, interval, event) | osmoda-routines |
-| Voice — 100% local STT + TTS, no cloud | osmoda-voice |
-| Hash-chained audit ledger | agentd ledger |
-| Telegram + WhatsApp channel config | osmoda.nix |
-| Web chat UI | osmoda-ui |
-| One-command server provisioning with USDC payments | spawn.os.moda |
-| **P2P encrypted agent-to-agent mesh** | **osmoda-mesh** |
-| **MCP server lifecycle management** | **osmoda-mcpd** |
-| **System learning & self-optimization** | **osmoda-teachd** |
-| **One-command installer + Hetzner deploy** | **scripts/install.sh, deploy-hetzner.sh** |
-| **App process management** (deploy, manage, resource-limit user apps) | **osmoda-bridge (6 tools) + systemd-run** |
+| Feature | Where | Maturity |
+|---------|-------|----------|
+| Full system access (processes, files, services, kernel) | agentd + bridge | **Solid** |
+| SafeSwitch deploys with auto-rollback | osmoda-watch | **Functional** |
+| Background automation (cron, interval, event) | osmoda-routines | **Functional** |
+| Hash-chained audit ledger | agentd ledger | **Solid** |
+| Telegram + WhatsApp channel config | osmoda.nix | **Functional** |
+| Web chat UI | osmoda-ui | **Functional** |
+| P2P encrypted agent-to-agent mesh | osmoda-mesh | **Functional** (31 tests) |
+| MCP server lifecycle management | osmoda-mcpd | **Functional** (8 tests) |
+| System learning & self-optimization | osmoda-teachd | **Functional** (15 tests) |
+| One-command installer + Hetzner deploy | scripts/ | **Functional** |
+| App process management (deploy, manage, resource-limit) | osmoda-bridge + systemd-run | **Functional** |
+| Voice — 100% local STT + TTS, no cloud | osmoda-voice | **Functional** |
+| Crypto wallets — ETH + SOL, AES-256-GCM, policy-gated | osmoda-keyd (optional) | **Solid** (21 tests) |
+| One-command server provisioning with USDC payments | spawn.os.moda (private) | **Functional** |
+
+Maturity levels: **Solid** = has tests, handles edge cases. **Functional** = works but has known limitations. See [STATUS.md](STATUS.md) for full details.
 
 ### osmoda-mesh — what it does
 

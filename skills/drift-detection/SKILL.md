@@ -78,4 +78,4 @@ On NixOS with osModa, you can:
 3. **Prove** with the audit ledger that nothing unauthorized happened
 4. **Reproduce** the exact system state on new hardware
 
-This is SOC2/compliance gold.
+This is useful supporting evidence for compliance programs (SOC 2, etc.) — though not by itself proof of regulatory readiness.

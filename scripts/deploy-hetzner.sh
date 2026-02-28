@@ -837,7 +837,7 @@ info "Socket:     ${OSMODA_RUN}/agentd.sock"
 info "Plugin:     ~/.openclaw/plugins/osmoda-bridge"
 info "Gateway:    http://localhost:18789 (SSH tunnel needed)"
 info "Workspace:  ~/.openclaw/workspace (+ ${WORKSPACE_DIR})"
-info "Skills:     ~/.openclaw/workspace/skills/ (16 system skills)"
+info "Skills:     ~/.openclaw/workspace/skills/ (17 system skills)"
 echo ""
 info "Access from your machine:"
 if [ -n "${SSH_KEY_OPT}" ]; then

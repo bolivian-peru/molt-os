@@ -79,7 +79,9 @@ mesh also listens on TCP :18800 for peer-to-peer connections
 - **Backup**: Daily systemd timer backs up SQLite state with WAL checkpointing. 7-day retention with automatic cleanup.
 - **Hardening**: Graceful shutdown (SIGTERM/SIGINT), subprocess timeout protection, input validation with path traversal rejection.
 
-### osmoda-keyd — Crypto Wallets
+### osmoda-keyd — Crypto Wallets (Optional)
+
+Optional module for AI agent workloads that need cryptographic signing. Not required for core system management.
 
 - **Socket**: `/run/osmoda/keyd.sock` (permissions: 0600)
 - **State**: `/var/lib/osmoda/keyd/`
@@ -207,7 +209,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
               │  (default)     │    │                    │
               │  Opus 4.6      │    │  Sonnet 4.6        │
               │  72 tools      │    │  Read-only tools   │
-              │  16 skills     │    │  5 monitoring      │
+              │  17 skills     │    │  5 monitoring      │
               │  Full access   │    │  skills             │
               │                │    │  No destructive ops │
               │  ← Web chat    │    │  ← Telegram         │
@@ -219,7 +221,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 
 | Agent | Model | Tools | Skills | Channels |
 |-------|-------|-------|--------|----------|
-| `osmoda` (default) | claude-opus-4-6 | All 72 | All 16 | Web chat (default) |
+| `osmoda` (default) | claude-opus-4-6 | All 72 | All 17 | Web chat (default) |
 | `mobile` | claude-sonnet-4-6 | Read-only subset | 5 monitoring | Telegram, WhatsApp |
 
 **Routing rules:** Bindings route Telegram and WhatsApp to `mobile`. Everything else (web chat) falls through to `osmoda` (marked as `default: true`).
@@ -384,6 +386,31 @@ Vector indexes (when wired) are derived and always rebuildable.
 ## Hosted Provisioning (spawn.os.moda)
 
 spawn.os.moda is the hosted option for deploying osModa servers. Handles payment, server creation, and ongoing management via a web dashboard. Separate private repo — not part of the open source OS.
+
+## Safety Boundaries
+
+### What's enforced today
+
+| Protection | Implementation | Verified |
+|-----------|---------------|----------|
+| **Hash-chained audit ledger** | SHA-256 chain in SQLite, every mutation logged, verifiable with `agentctl verify-ledger` | 321+ events, zero broken links |
+| **SafeSwitch deploys** | Health checks + TTL + auto-rollback on failure via osmoda-watch | Functional, tested |
+| **Command blocklist** | 17 dangerous patterns blocked in shell_exec (rm -rf, dd, mkfs, etc.) | Pentest verified |
+| **Rate limiting** | shell_exec 30/60s, mesh TCP 5/60s, file_read 10 MiB cap | Pentest verified |
+| **Socket permissions** | All sockets 0600, all 9 daemons enforce umask(0o077) at startup | Pentest verified |
+| **Input validation** | Path traversal rejection, symlink escape prevention, payload size limits, arg metachar rejection | Pentest verified |
+| **Safety commands** | safety_rollback/panic/status/restart bypass the AI entirely | Functional |
+| **NixOS atomicity** | Every system change is a generation, rollback is one command | Core NixOS feature |
+| **Pentest results** | SQL injection, path traversal, shell injection, payload bombs, error hardening, stress testing | All pass (2026-02-27) |
+
+### What's planned but not yet implemented
+
+| Feature | Status | Why it matters |
+|---------|--------|---------------|
+| **Approval gate for destructive ops** | Planned (#1 priority) | Currently convention-based (agent prompt says "ask before destructive actions") — not enforced by code |
+| **Ring 1/Ring 2 sandbox** | Designed, not enforced | Third-party tools should run in bubblewrap isolation with egress proxy, but this isn't wired yet |
+| **Capability tokens** | Planned | Fine-grained, time-limited access tokens for socket auth; currently file-permissions only |
+| **External security audit** | Planned | Mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but needs independent review |
 
 ## Security Model
 
