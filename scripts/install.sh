@@ -499,12 +499,19 @@ if [ -n "$API_KEY" ]; then
     fi
   done
 
+  # Generate gateway token for WS relay auth
+  GATEWAY_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
+  printf '%s' "$GATEWAY_TOKEN" > "$STATE_DIR/config/gateway-token"
+  chmod 600 "$STATE_DIR/config/gateway-token"
+  log "Generated gateway token for relay auth"
+
   # Generate multi-agent OpenClaw config (JSON5)
   if command -v node &>/dev/null; then
     node -e "
       const fs = require('fs');
+      const gwToken = process.argv[1] || '';
       const config = {
-        gateway: { mode: 'local', auth: { mode: 'none' } },
+        gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } }," "$GATEWAY_TOKEN"
         plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
         agents: {
           list: [
@@ -811,17 +818,23 @@ if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
 
 cat > "$INSTALL_DIR/bin/osmoda-ws-relay.js" <<'WSEOF'
 #!/usr/bin/env node
+// osModa WS Relay — bridges spawn.os.moda dashboard chat to local OpenClaw gateway.
+// Handles OpenClaw's protocol-v3 connect handshake, then translates between
+// simple dashboard JSON and OpenClaw's RPC wire format.
 const WebSocket = require("ws");
 const fs = require("fs");
 const crypto = require("crypto");
 
 const STATE_DIR = "/var/lib/osmoda";
 const RECONNECT_DELAY = 5000;
+const OC_URL = "ws://127.0.0.1:18789";
 
 function readConfig(name) {
   try { return fs.readFileSync(`${STATE_DIR}/config/${name}`, "utf8").trim(); }
   catch { return ""; }
 }
+
+function uid() { return crypto.randomUUID(); }
 
 function connect() {
   const orderId = readConfig("order-id");
@@ -843,33 +856,154 @@ function connect() {
   });
 
   let local = null;
+  let ocReady = false;       // true after OpenClaw connect handshake
+  let connectId = null;      // pending connect request id
+  let sessionKey = "spawn-" + orderId.slice(0, 8);
+  let pendingChat = {};      // id → upstream tracking
+  let instanceId = uid();
+
+  function sendOcConnect() {
+    connectId = uid();
+    const token = readConfig("gateway-token");
+    const msg = {
+      type: "req", id: connectId, method: "connect",
+      params: {
+        minProtocol: 3, maxProtocol: 3,
+        client: {
+          id: "gateway-client", version: "1.0.0",
+          platform: "linux", mode: "webchat", instanceId: instanceId
+        },
+        role: "operator",
+        scopes: ["operator.admin"],
+        caps: [],
+        userAgent: "osmoda-ws-relay/1.0", locale: "en"
+      }
+    };
+    if (token) msg.params.auth = { token: token };
+    local.send(JSON.stringify(msg));
+  }
 
   upstream.on("open", () => {
     console.log("[ws-relay] connected to spawn server");
-    local = new WebSocket("ws://127.0.0.1:18789");
-    local.on("open", () => console.log("[ws-relay] connected to OpenClaw"));
-    local.on("message", (data) => {
-      if (upstream.readyState === WebSocket.OPEN) upstream.send(data);
+    local = new WebSocket(OC_URL, { headers: { origin: "http://127.0.0.1:18789" } });
+
+    local.on("open", () => {
+      console.log("[ws-relay] connected to OpenClaw, handshaking...");
+      sendOcConnect();
     });
+
+    local.on("message", (data) => {
+      const str = data.toString();
+      let msg;
+      try { msg = JSON.parse(str); } catch { return; }
+
+      // Handle connect handshake
+      if (!ocReady) {
+        if (msg.type === "event" && msg.event === "connect.challenge") {
+          // Challenge is informational — store nonce for future reconnects.
+          // Do NOT re-send connect; the response to our original request follows.
+          console.log("[ws-relay] got challenge (storing nonce for future use)");
+          return;
+        }
+        if (msg.type === "res" && msg.id === connectId) {
+          if (msg.ok) {
+            ocReady = true;
+            console.log("[ws-relay] OpenClaw handshake complete");
+            if (upstream.readyState === WebSocket.OPEN) {
+              upstream.send(JSON.stringify({ type: "status", openclaw_connected: true }));
+            }
+          } else {
+            console.error("[ws-relay] OpenClaw connect rejected:", JSON.stringify(msg.error));
+            local.close();
+          }
+          return;
+        }
+        // Other pre-handshake messages — ignore
+        return;
+      }
+
+      // Post-handshake: translate OpenClaw events to dashboard format
+      if (msg.type === "event") {
+        // Forward relevant events to dashboard
+        if (upstream.readyState === WebSocket.OPEN) {
+          upstream.send(JSON.stringify(msg));
+        }
+        return;
+      }
+
+      // Response to a chat.send or other request
+      if (msg.type === "res") {
+        if (upstream.readyState === WebSocket.OPEN) {
+          upstream.send(JSON.stringify(msg));
+        }
+        delete pendingChat[msg.id];
+        return;
+      }
+    });
+
     local.on("close", () => {
       console.log("[ws-relay] OpenClaw disconnected, reconnecting...");
+      ocReady = false;
       upstream.close();
     });
-    local.on("error", () => {});
+
+    local.on("error", (err) => {
+      console.error("[ws-relay] OpenClaw error:", err.message);
+    });
   });
 
   upstream.on("message", (data) => {
-    if (local && local.readyState === WebSocket.OPEN) local.send(data);
+    if (!local || local.readyState !== WebSocket.OPEN || !ocReady) return;
+    const str = data.toString();
+    let msg;
+    try { msg = JSON.parse(str); } catch { return; }
+
+    // Dashboard sends simple chat: { type: "chat", text: "..." }
+    // Translate to OpenClaw RPC: { type: "req", method: "chat.send", params: {...} }
+    if (msg.type === "chat" && msg.text) {
+      const reqId = uid();
+      pendingChat[reqId] = true;
+      local.send(JSON.stringify({
+        type: "req", id: reqId, method: "chat.send",
+        params: { text: msg.text, sessionKey: sessionKey }
+      }));
+      return;
+    }
+
+    // Dashboard sends chat abort: { type: "chat_abort" }
+    if (msg.type === "chat_abort") {
+      local.send(JSON.stringify({
+        type: "req", id: uid(), method: "chat.abort",
+        params: { sessionKey: sessionKey }
+      }));
+      return;
+    }
+
+    // Dashboard sends chat history request: { type: "chat_history" }
+    if (msg.type === "chat_history") {
+      local.send(JSON.stringify({
+        type: "req", id: uid(), method: "chat.history",
+        params: { sessionKey: sessionKey }
+      }));
+      return;
+    }
+
+    // Pass through any raw OpenClaw protocol messages
+    if (msg.type === "req") {
+      local.send(str);
+      return;
+    }
   });
 
   upstream.on("close", () => {
     console.log("[ws-relay] spawn disconnected, reconnecting...");
+    ocReady = false;
     if (local) local.close();
     setTimeout(connect, RECONNECT_DELAY);
   });
 
   upstream.on("error", (err) => {
-    console.error("[ws-relay] error:", err.message);
+    console.error("[ws-relay] spawn error:", err.message);
   });
 }
 
@@ -1115,11 +1249,22 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
         done
         # Ensure OpenClaw gateway config exists (may not if no key at install time)
         if [ ! -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
+          # Ensure gateway token exists for relay auth
+          HBGWTOKEN=""
+          if [ -f "$STATE_DIR/config/gateway-token" ]; then
+            HBGWTOKEN=$(cat "$STATE_DIR/config/gateway-token")
+          fi
+          if [ -z "$HBGWTOKEN" ]; then
+            HBGWTOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
+            printf '%s' "$HBGWTOKEN" > "$STATE_DIR/config/gateway-token"
+            chmod 600 "$STATE_DIR/config/gateway-token"
+          fi
           node -e "
-            var fs=require('fs');
-            var config={gateway:{auth:{mode:'none'}},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6',tools:{deny:['shell_exec','file_write','safety_panic','safety_rollback','app_deploy','app_remove','app_stop','app_restart','wallet_create','wallet_send','wallet_sign','wallet_delete','safe_switch_begin','safe_switch_commit','safe_switch_rollback','watcher_add','routine_add','mesh_invite_create','mesh_invite_accept','mesh_peer_disconnect','mesh_room_create','mesh_room_join','mcp_server_start','mcp_server_stop','mcp_server_restart','teach_knowledge_create','teach_optimize_suggest','teach_optimize_apply','incident_create','incident_step','backup_create']}}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+            var fs=require('fs'),t=process.argv[1]||'';
+            var auth=t?{mode:'token',token:t}:{mode:'none'};
+            var config={gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6',tools:{deny:['shell_exec','file_write','safety_panic','safety_rollback','app_deploy','app_remove','app_stop','app_restart','wallet_create','wallet_send','wallet_sign','wallet_delete','safe_switch_begin','safe_switch_commit','safe_switch_rollback','watcher_add','routine_add','mesh_invite_create','mesh_invite_accept','mesh_peer_disconnect','mesh_room_create','mesh_room_join','mcp_server_start','mcp_server_stop','mcp_server_restart','teach_knowledge_create','teach_optimize_suggest','teach_optimize_apply','incident_create','incident_step','backup_create']}}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
             fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
-          " 2>/dev/null
+          " "$HBGWTOKEN" 2>/dev/null
         fi
         # Write gateway env vars for daemon sockets
         cat > "$STATE_DIR/config/gateway-env" << 'GWENVEOF'
