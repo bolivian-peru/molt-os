@@ -87,16 +87,16 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 
 12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
    Generates multi-agent OpenClaw config from NixOS options (agents, bindings, channels, plugins).
-   Multi-agent routing: `osmoda` (Opus, full access, web default) + `mobile` (Sonnet, read-only, Telegram/WhatsApp).
+   Multi-agent routing: `osmoda` (Opus, full access, web default) + `mobile` (Sonnet, full access, Telegram/WhatsApp).
    Channel options: `channels.telegram` and `channels.whatsapp` — config generation
    and credential management; actual connections handled by OpenClaw.
 
 13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
    - `osmoda` (default): Claude Opus, all 72 tools, all 17 skills, full system access
-   - `mobile`: Claude Sonnet, read-only tools, monitoring skills, for Telegram/WhatsApp
+   - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
-   Per-agent tool deny lists prevent mobile agent from executing destructive operations.
+   Both agents have full tool access; mobile agent uses concise, phone-optimized response style.
 
 ## Repo layout
 
@@ -225,8 +225,8 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── USER.md                            # Learned user preferences template
   ├── HEARTBEAT.md                       # Periodic task scheduling template
   └── agents/
-      └── mobile/                        # Mobile agent (Sonnet, read-only)
-          ├── AGENTS.md                  # Read-only OS monitor for mobile
+      └── mobile/                        # Mobile agent (Sonnet, full access, concise)
+          ├── AGENTS.md                  # Full-access OS agent for mobile
           └── SOUL.md                    # Concise, phone-optimized responses
 ./scripts/
   ├── install.sh                         # One-command installer (curl | bash)

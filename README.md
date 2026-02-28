@@ -108,7 +108,7 @@ agentctl verify-ledger --state-dir /var/lib/osmoda
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  AI Gateway (OpenClaw)          Multi-Agent Router                            │
 │  ├─ osmoda agent (Opus)         72 tools · 17 skills · full access · web      │
-│  └─ mobile agent (Sonnet)       read-only tools · 5 skills · Telegram/WA      │
+│  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA    │
 │  osmoda-bridge                  72 typed tools (shared plugin)                 │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤

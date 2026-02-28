@@ -371,7 +371,7 @@ log "Step 7: Setting up multi-agent workspaces..."
 
 # OpenClaw multi-agent layout:
 #   ~/.openclaw/workspace-osmoda/  — main agent (Opus, full access)
-#   ~/.openclaw/workspace-mobile/  — mobile agent (Sonnet, read-only)
+#   ~/.openclaw/workspace-mobile/  — mobile agent (Sonnet, full access, concise)
 #   ~/.openclaw/agents/<id>/agent/ — per-agent state + auth
 #   ~/.openclaw/agents/<id>/sessions/ — per-agent sessions
 OC_BASE="/root/.openclaw"
@@ -396,7 +396,7 @@ if [ -d "$INSTALL_DIR/skills" ]; then
   cp -r "$INSTALL_DIR/skills/"* "$WS_OSMODA/skills/" 2>/dev/null || true
 fi
 
-# --- Mobile agent: mobile-specific templates + monitoring skills only ---
+# --- Mobile agent: mobile-specific templates (concise style, full access) ---
 if [ -d "$INSTALL_DIR/templates/agents/mobile" ]; then
   cp "$INSTALL_DIR/templates/agents/mobile/AGENTS.md" "$WS_MOBILE/AGENTS.md"
   cp "$INSTALL_DIR/templates/agents/mobile/SOUL.md" "$WS_MOBILE/SOUL.md"
@@ -408,8 +408,8 @@ for tpl in TOOLS.md IDENTITY.md USER.md; do
   fi
 done
 
-# Mobile skills: read-only monitoring subset
-MOBILE_SKILLS="system-monitor service-explorer network-manager system-packages file-manager"
+# Mobile skills: all skills (same as main agent)
+MOBILE_SKILLS="self-healing morning-briefing security-hardening natural-language-config predictive-resources drift-detection generation-timeline flight-recorder nix-optimizer system-monitor system-packages system-config file-manager network-manager service-explorer app-deployer deploy-ai-agent"
 if [ -d "$INSTALL_DIR/skills" ]; then
   mkdir -p "$WS_MOBILE/skills"
   for skill in $MOBILE_SKILLS; do
@@ -528,23 +528,7 @@ if [ -n "$API_KEY" ]; then
               name: 'osModa Mobile',
               workspace: '/root/.openclaw/workspace-mobile',
               agentDir: '/root/.openclaw/agents/mobile/agent',
-              model: 'anthropic/claude-sonnet-4-6',
-              tools: {
-                deny: [
-                  'shell_exec', 'file_write',
-                  'safety_panic', 'safety_rollback',
-                  'app_deploy', 'app_remove', 'app_stop', 'app_restart',
-                  'wallet_create', 'wallet_send', 'wallet_sign', 'wallet_delete',
-                  'safe_switch_begin', 'safe_switch_commit', 'safe_switch_rollback',
-                  'watcher_add', 'routine_add',
-                  'mesh_invite_create', 'mesh_invite_accept', 'mesh_peer_disconnect',
-                  'mesh_room_create', 'mesh_room_join',
-                  'mcp_server_start', 'mcp_server_stop', 'mcp_server_restart',
-                  'teach_knowledge_create', 'teach_optimize_suggest', 'teach_optimize_apply',
-                  'incident_create', 'incident_step',
-                  'backup_create'
-                ]
-              }
+              model: 'anthropic/claude-sonnet-4-6'
             }
           ]
         },
@@ -1259,7 +1243,7 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
           node -e "
             var fs=require('fs'),t=process.argv[1]||'';
             var auth=t?{mode:'token',token:t}:{mode:'none'};
-            var config={gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6',tools:{deny:['shell_exec','file_write','safety_panic','safety_rollback','app_deploy','app_remove','app_stop','app_restart','wallet_create','wallet_send','wallet_sign','wallet_delete','safe_switch_begin','safe_switch_commit','safe_switch_rollback','watcher_add','routine_add','mesh_invite_create','mesh_invite_accept','mesh_peer_disconnect','mesh_room_create','mesh_room_join','mcp_server_start','mcp_server_stop','mcp_server_restart','teach_knowledge_create','teach_optimize_suggest','teach_optimize_apply','incident_create','incident_step','backup_create']}}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+            var config={gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
             fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
           " "$HBGWTOKEN" 2>/dev/null
         fi

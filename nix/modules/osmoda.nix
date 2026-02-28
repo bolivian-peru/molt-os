@@ -30,20 +30,6 @@ let
         workspace = "${cfg.stateDir}/workspace-mobile";
         agentDir = "/root/.openclaw/agents/mobile/agent";
         model = "anthropic/claude-sonnet-4-6";
-        tools.deny = [
-          "shell_exec" "file_write"
-          "safety_panic" "safety_rollback"
-          "app_deploy" "app_remove" "app_stop" "app_restart"
-          "wallet_create" "wallet_send" "wallet_sign" "wallet_delete"
-          "safe_switch_begin" "safe_switch_commit" "safe_switch_rollback"
-          "watcher_add" "routine_add"
-          "mesh_invite_create" "mesh_invite_accept" "mesh_peer_disconnect"
-          "mesh_room_create" "mesh_room_join"
-          "mcp_server_start" "mcp_server_stop" "mcp_server_restart"
-          "teach_knowledge_create" "teach_optimize_suggest" "teach_optimize_apply"
-          "incident_create" "incident_step"
-          "backup_create"
-        ];
       }
     ];
 
@@ -903,12 +889,12 @@ in {
         done
       fi
 
-      # --- Mobile agent: monitoring skills only ---
-      for skill_name in system-monitor service-explorer network-manager system-packages file-manager; do
-        if [ -d "${pkgs.osmoda-system-skills or ""}/skills/$skill_name" ]; then
-          ln -sf "${pkgs.osmoda-system-skills or ""}/skills/$skill_name" ${cfg.stateDir}/workspace-mobile/skills/$skill_name 2>/dev/null || true
-        fi
-      done
+      # --- Mobile agent: all skills (same as main agent) ---
+      if [ -d "${pkgs.osmoda-system-skills or ""}/skills" ]; then
+        for skill in "${pkgs.osmoda-system-skills or ""}/skills/"*/; do
+          ln -sf "$skill" ${cfg.stateDir}/workspace-mobile/skills/$(basename "$skill") 2>/dev/null || true
+        done
+      fi
 
       # Install main agent templates
       for tmpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md HEARTBEAT.md; do

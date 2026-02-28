@@ -126,7 +126,7 @@ The AI will walk you through:
 4. Paste it into the chat — the AI saves it securely and configures the gateway
 5. Find your bot on Telegram and send it a message
 
-From now on, you can check on your server from your phone. The mobile agent (Claude Sonnet) handles Telegram messages — it can check health, read logs, and view status but won't make destructive changes. Use the web chat for system modifications.
+From now on, you can manage your server from your phone. The mobile agent (Claude Sonnet) handles Telegram messages with full access — it can do everything the web chat can (deploy apps, run commands, manage services), just with concise, phone-friendly responses.
 
 ---
 

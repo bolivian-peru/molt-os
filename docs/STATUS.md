@@ -271,7 +271,7 @@ App process management via `systemd-run` transient units. No new Rust daemon —
 | osmoda-mcpd service | **Functional** | MCP server lifecycle, depends on agentd + egress |
 | osmoda-teachd service | **Functional** | System learning, depends on agentd, Restart=on-failure |
 | osmoda-egress service | **Functional** | DynamicUser, domain-filtered proxy |
-| Multi-agent routing | **Functional** | `osmoda` (Opus, full) + `mobile` (Sonnet, read-only) agents with channel bindings |
+| Multi-agent routing | **Functional** | `osmoda` (Opus, full) + `mobile` (Sonnet, full access, concise) agents with channel bindings |
 | OpenClaw gateway service | **Functional** | Depends on agentd, multi-agent config generated from NixOS options |
 | Channel config (Telegram) | **Functional** | `channels.telegram.enable`, botTokenFile, allowedUsers |
 | Channel config (WhatsApp) | **Functional** | `channels.whatsapp.enable`, credentialDir, allowedNumbers |

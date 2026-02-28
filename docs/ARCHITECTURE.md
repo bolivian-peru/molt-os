@@ -208,10 +208,10 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
               │  osmoda agent  │    │   mobile agent     │
               │  (default)     │    │                    │
               │  Opus 4.6      │    │  Sonnet 4.6        │
-              │  72 tools      │    │  Read-only tools   │
-              │  17 skills     │    │  5 monitoring      │
-              │  Full access   │    │  skills             │
-              │                │    │  No destructive ops │
+              │  72 tools      │    │  72 tools          │
+              │  17 skills     │    │  17 skills         │
+              │  Full access   │    │  Full access       │
+              │                │    │  Concise responses  │
               │  ← Web chat    │    │  ← Telegram         │
               │                │    │  ← WhatsApp         │
               └────────────────┘    └────────────────────┘
@@ -222,15 +222,15 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 | Agent | Model | Tools | Skills | Channels |
 |-------|-------|-------|--------|----------|
 | `osmoda` (default) | claude-opus-4-6 | All 72 | All 17 | Web chat (default) |
-| `mobile` | claude-sonnet-4-6 | Read-only subset | 5 monitoring | Telegram, WhatsApp |
+| `mobile` | claude-sonnet-4-6 | All 72 | All 17 | Telegram, WhatsApp |
 
 **Routing rules:** Bindings route Telegram and WhatsApp to `mobile`. Everything else (web chat) falls through to `osmoda` (marked as `default: true`).
 
 **Per-agent workspaces:**
 - `~/.openclaw/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
-- `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md, monitoring skills only
+- `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
 
-**Tool deny list (mobile agent):** `shell_exec`, `file_write`, `safety_panic`, `safety_rollback`, `app_deploy`, `app_remove`, `wallet_*` mutations, `safe_switch_*` mutations, `mesh_invite_*`, `teach_optimize_*`, `incident_*`, `backup_create`.
+**Tool access:** Both agents have full access to all 72 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
 
 ## Data Flow
 
@@ -239,7 +239,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 3. **Agent workspace loaded** — per-agent AGENTS.md, SOUL.md, skills
 4. **Prompt assembled** with agent-specific system context
 5. **Claude API call** via per-agent auth profile and model selection
-6. **Claude responds** with text + tool calls (tool deny list enforced)
+6. **Claude responds** with text + tool calls
 7. **Tool execution** → osmoda-bridge → daemon over Unix socket → structured JSON
 8. **Results sent back** to Claude for synthesis
 9. **Ledger event** created for any system mutation
