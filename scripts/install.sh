@@ -477,24 +477,24 @@ if [ -n "$API_KEY" ]; then
     mkdir -p "/root/.openclaw/agents/$AGENT_ID/agent"
     if command -v node &>/dev/null; then
       if [ "$EFFECTIVE_PROVIDER" = "openai" ]; then
-        node -e "
-          const fs = require('fs');
-          const key = process.argv[1];
-          const agentId = process.argv[2];
-          const auth = { type: 'api_key', provider: 'openai', key: key };
-          fs.writeFileSync('/root/.openclaw/agents/' + agentId + '/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
-        " "$DECODED_KEY" "$AGENT_ID"
+        node - "$DECODED_KEY" "$AGENT_ID" <<'AUTHEOF'
+const fs = require('fs');
+const key = process.argv[1];
+const agentId = process.argv[2];
+const auth = { type: 'api_key', provider: 'openai', key: key };
+fs.writeFileSync('/root/.openclaw/agents/' + agentId + '/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+AUTHEOF
       else
-        node -e "
-          const fs = require('fs');
-          const key = process.argv[1];
-          const agentId = process.argv[2];
-          const isOAuth = key.startsWith('sk-ant-oat');
-          const auth = isOAuth
-            ? { type: 'token', provider: 'anthropic', token: key }
-            : { type: 'api_key', provider: 'anthropic', key: key };
-          fs.writeFileSync('/root/.openclaw/agents/' + agentId + '/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
-        " "$DECODED_KEY" "$AGENT_ID"
+        node - "$DECODED_KEY" "$AGENT_ID" <<'AUTHEOF'
+const fs = require('fs');
+const key = process.argv[1];
+const agentId = process.argv[2];
+const isOAuth = key.startsWith('sk-ant-oat');
+const auth = isOAuth
+  ? { type: 'token', provider: 'anthropic', token: key }
+  : { type: 'api_key', provider: 'anthropic', key: key };
+fs.writeFileSync('/root/.openclaw/agents/' + agentId + '/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
+AUTHEOF
       fi
     fi
   done
@@ -507,38 +507,38 @@ if [ -n "$API_KEY" ]; then
 
   # Generate multi-agent OpenClaw config (JSON5)
   if command -v node &>/dev/null; then
-    node -e "
-      const fs = require('fs');
-      const gwToken = process.argv[1] || '';
-      const config = {
-        gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } }," "$GATEWAY_TOKEN"
-        plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
-        agents: {
-          list: [
-            {
-              id: 'osmoda',
-              default: true,
-              name: 'osModa',
-              workspace: '/root/.openclaw/workspace-osmoda',
-              agentDir: '/root/.openclaw/agents/osmoda/agent',
-              model: 'anthropic/claude-opus-4-6'
-            },
-            {
-              id: 'mobile',
-              name: 'osModa Mobile',
-              workspace: '/root/.openclaw/workspace-mobile',
-              agentDir: '/root/.openclaw/agents/mobile/agent',
-              model: 'anthropic/claude-sonnet-4-6'
-            }
-          ]
-        },
-        bindings: [
-          { agentId: 'mobile', match: { channel: 'telegram' } },
-          { agentId: 'mobile', match: { channel: 'whatsapp' } }
-        ]
-      };
-      fs.writeFileSync('/root/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
-    "
+    node - "$GATEWAY_TOKEN" <<'CONFIGEOF'
+const fs = require('fs');
+const gwToken = process.argv[1] || '';
+const config = {
+  gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } },
+  plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
+  agents: {
+    list: [
+      {
+        id: 'osmoda',
+        default: true,
+        name: 'osModa',
+        workspace: '/root/.openclaw/workspace-osmoda',
+        agentDir: '/root/.openclaw/agents/osmoda/agent',
+        model: 'anthropic/claude-opus-4-6'
+      },
+      {
+        id: 'mobile',
+        name: 'osModa Mobile',
+        workspace: '/root/.openclaw/workspace-mobile',
+        agentDir: '/root/.openclaw/agents/mobile/agent',
+        model: 'anthropic/claude-sonnet-4-6'
+      }
+    ]
+  },
+  bindings: [
+    { agentId: 'mobile', match: { channel: 'telegram' } },
+    { agentId: 'mobile', match: { channel: 'whatsapp' } }
+  ]
+};
+fs.writeFileSync('/root/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
+CONFIGEOF
     log "Multi-agent config written to /root/.openclaw/openclaw.json"
   fi
 
@@ -557,8 +557,61 @@ GWEOF
 
   log "API key configured for both agents."
 else
-  log "Step 8: No API key provided — setup wizard will run on port 18789."
-  info "After install, open http://localhost:18789 to enter your API key."
+  log "Step 8: No API key provided — generating gateway config (key can be set via dashboard)."
+
+  # Still need gateway token + openclaw.json even without API key
+  GATEWAY_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
+  printf '%s' "$GATEWAY_TOKEN" > "$STATE_DIR/config/gateway-token"
+  chmod 600 "$STATE_DIR/config/gateway-token"
+
+  if command -v node &>/dev/null; then
+    node - "$GATEWAY_TOKEN" <<'CONFIGEOF'
+const fs = require('fs');
+const gwToken = process.argv[1] || '';
+const config = {
+  gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } },
+  plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
+  agents: {
+    list: [
+      {
+        id: 'osmoda',
+        default: true,
+        name: 'osModa',
+        workspace: '/root/.openclaw/workspace-osmoda',
+        agentDir: '/root/.openclaw/agents/osmoda/agent',
+        model: 'anthropic/claude-opus-4-6'
+      },
+      {
+        id: 'mobile',
+        name: 'osModa Mobile',
+        workspace: '/root/.openclaw/workspace-mobile',
+        agentDir: '/root/.openclaw/agents/mobile/agent',
+        model: 'anthropic/claude-sonnet-4-6'
+      }
+    ]
+  },
+  bindings: [
+    { agentId: 'mobile', match: { channel: 'telegram' } },
+    { agentId: 'mobile', match: { channel: 'whatsapp' } }
+  ]
+};
+fs.writeFileSync('/root/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
+CONFIGEOF
+    log "Multi-agent config written (no API key — set via dashboard)"
+  fi
+
+  # Gateway env vars for daemon sockets
+  cat > "$STATE_DIR/config/gateway-env" <<GWEOF
+OSMODA_SOCKET=/run/osmoda/agentd.sock
+OSMODA_KEYD_SOCKET=/run/osmoda/keyd.sock
+OSMODA_WATCH_SOCKET=/run/osmoda/watch.sock
+OSMODA_ROUTINES_SOCKET=/run/osmoda/routines.sock
+OSMODA_VOICE_SOCKET=/run/osmoda/voice.sock
+OSMODA_MESH_SOCKET=/run/osmoda/mesh.sock
+OSMODA_MCPD_SOCKET=/run/osmoda/mcpd.sock
+OSMODA_TEACHD_SOCKET=/run/osmoda/teachd.sock
+GWEOF
+  chmod 600 "$STATE_DIR/config/gateway-env"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1240,12 +1293,12 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
             printf '%s' "$HBGWTOKEN" > "$STATE_DIR/config/gateway-token"
             chmod 600 "$STATE_DIR/config/gateway-token"
           fi
-          node -e "
-            var fs=require('fs'),t=process.argv[1]||'';
-            var auth=t?{mode:'token',token:t}:{mode:'none'};
-            var config={gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
-            fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
-          " "$HBGWTOKEN" 2>/dev/null
+          node - "$HBGWTOKEN" <<'HBCONFIGEOF'
+var fs=require('fs'),t=process.argv[1]||'';
+var auth=t?{mode:'token',token:t}:{mode:'none'};
+var config={gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+HBCONFIGEOF
         fi
         # Write gateway env vars for daemon sockets
         cat > "$STATE_DIR/config/gateway-env" << 'GWENVEOF'
