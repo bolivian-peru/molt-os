@@ -965,7 +965,7 @@ function connect() {
       pendingChat[reqId] = true;
       local.send(JSON.stringify({
         type: "req", id: reqId, method: "chat.send",
-        params: { message: msg.text, idempotencyKey: reqId, sessionKey: sessionKey, agentId: "osmoda" }
+        params: { message: msg.text, idempotencyKey: reqId, sessionKey: sessionKey }
       }));
       console.log("[ws-relay] sending chat.send:", msg.text.slice(0, 50));
       return;
