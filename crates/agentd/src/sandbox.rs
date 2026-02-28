@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// Trust ring levels for sandboxed execution.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -95,6 +98,46 @@ impl SandboxEngine {
         Self::new(key, egress_proxy)
     }
 
+    /// Validate that a filesystem path is safe for sandbox binding.
+    /// Rejects paths that contain traversal sequences, point to sensitive locations,
+    /// or use symlinks to escape intended directories.
+    fn validate_bind_path(path: &str) -> Result<String> {
+        // Reject empty paths
+        if path.is_empty() {
+            anyhow::bail!("empty bind path");
+        }
+
+        // Must be absolute
+        if !path.starts_with('/') {
+            anyhow::bail!("bind path must be absolute: {path}");
+        }
+
+        // Reject path traversal sequences before canonicalization
+        if path.contains("..") {
+            anyhow::bail!("bind path contains traversal sequence: {path}");
+        }
+
+        // Canonicalize to resolve any remaining symlinks
+        let canonical = std::fs::canonicalize(path)
+            .unwrap_or_else(|_| std::path::PathBuf::from(path));
+        let canonical_str = canonical.to_string_lossy().to_string();
+
+        // Block sensitive system paths
+        const BLOCKED_PREFIXES: &[&str] = &[
+            "/proc", "/sys", "/dev", "/run", "/boot",
+            "/etc/shadow", "/etc/passwd", "/etc/sudoers",
+            "/root", "/nix/store",
+        ];
+
+        for blocked in BLOCKED_PREFIXES {
+            if canonical_str == *blocked || canonical_str.starts_with(&format!("{blocked}/")) {
+                anyhow::bail!("bind path blocked (sensitive location): {canonical_str}");
+            }
+        }
+
+        Ok(canonical_str)
+    }
+
     /// Build the bwrap command arguments for a given ring and config.
     pub fn build_bwrap_args(&self, config: &SandboxConfig, command: &str) -> Vec<String> {
         let mut args = Vec::new();
@@ -131,21 +174,35 @@ impl SandboxEngine {
                 args.push("--tmpfs".to_string());
                 args.push("/tmp".to_string());
 
-                // Declared read paths
+                // Declared read paths (validated)
                 for path in &config.fs_read {
                     if !path.is_empty() {
-                        args.push("--ro-bind".to_string());
-                        args.push(path.clone());
-                        args.push(path.clone());
+                        match Self::validate_bind_path(path) {
+                            Ok(safe_path) => {
+                                args.push("--ro-bind".to_string());
+                                args.push(safe_path.clone());
+                                args.push(safe_path);
+                            }
+                            Err(e) => {
+                                tracing::warn!(path = %path, error = %e, "rejected sandbox read path");
+                            }
+                        }
                     }
                 }
 
-                // Declared write paths
+                // Declared write paths (validated)
                 for path in &config.fs_write {
                     if !path.is_empty() {
-                        args.push("--bind".to_string());
-                        args.push(path.clone());
-                        args.push(path.clone());
+                        match Self::validate_bind_path(path) {
+                            Ok(safe_path) => {
+                                args.push("--bind".to_string());
+                                args.push(safe_path.clone());
+                                args.push(safe_path);
+                            }
+                            Err(e) => {
+                                tracing::warn!(path = %path, error = %e, "rejected sandbox write path");
+                            }
+                        }
                     }
                 }
 
@@ -276,12 +333,12 @@ impl SandboxEngine {
         Ok(expected == token.signature)
     }
 
-    /// HMAC-SHA256 sign a string.
+    /// HMAC-SHA256 sign a string using proper RFC 2104 HMAC construction.
     fn hmac_sign(&self, input: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(&self.hmac_key);
-        hasher.update(input.as_bytes());
-        hex::encode(hasher.finalize())
+        let mut mac = HmacSha256::new_from_slice(&self.hmac_key)
+            .expect("HMAC accepts any key length");
+        mac.update(input.as_bytes());
+        hex::encode(mac.finalize().into_bytes())
     }
 }
 
@@ -380,6 +437,29 @@ mod tests {
         token.signature = engine.hmac_sign(&sign_input);
 
         assert!(!engine.verify_capability(&token).unwrap());
+    }
+
+    #[test]
+    fn test_path_validation_blocks_traversal() {
+        assert!(SandboxEngine::validate_bind_path("/var/lib/../etc/shadow").is_err());
+        assert!(SandboxEngine::validate_bind_path("relative/path").is_err());
+        assert!(SandboxEngine::validate_bind_path("").is_err());
+    }
+
+    #[test]
+    fn test_path_validation_blocks_sensitive_paths() {
+        assert!(SandboxEngine::validate_bind_path("/proc/self/mem").is_err());
+        assert!(SandboxEngine::validate_bind_path("/sys/kernel").is_err());
+        assert!(SandboxEngine::validate_bind_path("/dev/sda").is_err());
+        assert!(SandboxEngine::validate_bind_path("/etc/shadow").is_err());
+        assert!(SandboxEngine::validate_bind_path("/root").is_err());
+    }
+
+    #[test]
+    fn test_path_validation_allows_safe_paths() {
+        // /tmp usually exists on all systems
+        let result = SandboxEngine::validate_bind_path("/tmp");
+        assert!(result.is_ok());
     }
 
     #[test]

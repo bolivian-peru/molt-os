@@ -128,9 +128,10 @@ pub async fn request_sync(
 }
 
 /// Handle an incoming gossip message.
+/// `authenticated_peer_id` is the verified identity of the connection peer.
 pub async fn handle_gossip(
     state: &Arc<Mutex<MeshState>>,
-    peer_id: &str,
+    authenticated_peer_id: &str,
     gossip_text: &str,
 ) -> bool {
     let gossip: GossipMessage = match serde_json::from_str(gossip_text) {
@@ -143,7 +144,7 @@ pub async fn handle_gossip(
             room_id,
             messages_since,
         } => {
-            handle_sync_request(state, peer_id, &room_id, messages_since.as_deref()).await;
+            handle_sync_request(state, authenticated_peer_id, &room_id, messages_since.as_deref()).await;
             true
         }
         GossipMessage::RoomSyncReply { room_id, messages } => {
@@ -151,6 +152,15 @@ pub async fn handle_gossip(
             true
         }
         GossipMessage::RoomJoinNotify { room_id, peer_id: joining_peer } => {
+            // Only allow a peer to announce its own join — prevent impersonation
+            if joining_peer != authenticated_peer_id {
+                tracing::warn!(
+                    authenticated = %authenticated_peer_id,
+                    claimed = %joining_peer,
+                    "rejected room join from mismatched peer identity"
+                );
+                return true;
+            }
             let st = state.lock().await;
             if let Some(store) = &st.room_store {
                 let _ = store.join_room(&room_id, &joining_peer);
@@ -158,6 +168,15 @@ pub async fn handle_gossip(
             true
         }
         GossipMessage::RoomLeaveNotify { room_id, peer_id: leaving_peer } => {
+            // Only allow a peer to announce its own leave — prevent impersonation
+            if leaving_peer != authenticated_peer_id {
+                tracing::warn!(
+                    authenticated = %authenticated_peer_id,
+                    claimed = %leaving_peer,
+                    "rejected room leave from mismatched peer identity"
+                );
+                return true;
+            }
             let st = state.lock().await;
             if let Some(store) = &st.room_store {
                 let _ = store.leave_room(&room_id, &leaving_peer);
@@ -227,19 +246,44 @@ async fn handle_sync_request(
 }
 
 /// Apply synced messages from a peer.
+/// Messages are deduplicated by hash to prevent replay attacks.
 async fn handle_sync_reply(
     state: &Arc<Mutex<MeshState>>,
     room_id: &str,
     messages: Vec<SyncMessage>,
 ) {
+    // Cap the number of messages per sync reply to prevent memory exhaustion
+    const MAX_SYNC_MESSAGES: usize = 500;
+
     let st = state.lock().await;
     let store = match &st.room_store {
         Some(s) => s,
         None => return,
     };
 
+    if messages.len() > MAX_SYNC_MESSAGES {
+        tracing::warn!(
+            room_id = %room_id,
+            count = messages.len(),
+            max = MAX_SYNC_MESSAGES,
+            "sync reply exceeds max message limit, truncating"
+        );
+    }
+
     let mut new_count = 0;
-    for msg in messages {
+    for msg in messages.into_iter().take(MAX_SYNC_MESSAGES) {
+        // Verify message hash matches content to detect tampering
+        let expected_hash = compute_message_hash(&msg.sender, &msg.content, &msg.timestamp);
+        if msg.msg_hash != expected_hash {
+            tracing::warn!(
+                room_id = %room_id,
+                expected = %expected_hash,
+                got = %msg.msg_hash,
+                "rejected synced message with mismatched hash"
+            );
+            continue;
+        }
+
         match store.store_message(room_id, &msg.sender, &msg.content, &msg.timestamp) {
             Ok(true) => new_count += 1,
             Ok(false) => {} // duplicate, skip
@@ -252,6 +296,16 @@ async fn handle_sync_reply(
     if new_count > 0 {
         tracing::info!(room_id = %room_id, new_messages = new_count, "gossip sync applied");
     }
+}
+
+/// Compute SHA-256 hash of a message for dedup and integrity verification.
+/// Must match `RoomStore::message_hash` exactly.
+fn compute_message_hash(sender: &str, content: &str, timestamp: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let input = format!("{sender}|{content}|{timestamp}");
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 /// Background task that syncs rooms with connected peers on reconnect.

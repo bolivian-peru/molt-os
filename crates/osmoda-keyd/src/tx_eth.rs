@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 /// EIP-1559 transaction parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +57,20 @@ pub fn build_and_sign_eip1559(
     key_bytes: &[u8],
     params: &EthTxParams,
 ) -> Result<EthTxResult> {
-    use k256::ecdsa::{SigningKey, signature::hazmat::PrehashSigner};
+    // Copy key bytes into a zeroizable buffer so we can wipe after use
+    let mut key_buf = key_bytes.to_vec();
+    let result = build_and_sign_inner(&key_buf, params);
+    // Zeroize the local copy of key material
+    key_buf.zeroize();
+    result
+}
+
+fn build_and_sign_inner(
+    key_bytes: &[u8],
+    params: &EthTxParams,
+) -> Result<EthTxResult> {
+    use k256::ecdsa::SigningKey;
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
 
     let signing_key = SigningKey::from_slice(key_bytes)
         .map_err(|e| anyhow::anyhow!("invalid ETH key: {e}"))?;
@@ -104,10 +118,11 @@ pub fn build_and_sign_eip1559(
     let (sig, recid) = signing_key
         .sign_prehash(&msg_hash)
         .map_err(|e| anyhow::anyhow!("signing failed: {e}"))?;
-    let sig_bytes = sig.to_bytes();
+    let mut sig_bytes = sig.to_bytes().to_vec();
     let r = &sig_bytes[..32];
     let s = &sig_bytes[32..];
     let v = recid.to_byte();
+    // signing_key is dropped here (k256 SigningKey implements Zeroize on Drop)
 
     // RLP-encode the signed tx
     // 0x02 || rlp([chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to, value, data, access_list, v, r, s])
@@ -124,6 +139,9 @@ pub fn build_and_sign_eip1559(
         r,
         s,
     );
+
+    // Zeroize signature bytes now that we've encoded them
+    sig_bytes.zeroize();
 
     let mut signed_tx = vec![0x02u8];
     signed_tx.extend_from_slice(&signed_rlp);

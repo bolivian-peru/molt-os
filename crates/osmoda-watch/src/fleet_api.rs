@@ -131,12 +131,26 @@ pub async fn fleet_status_handler(
 }
 
 /// POST /fleet/vote/{id} — cast a vote on a fleet switch.
+/// Votes are accepted over the local Unix socket. In production, remote peer votes
+/// arrive via the mesh daemon which authenticates peers via Noise_XX handshake.
+/// The peer_id must match a registered participant in the fleet switch.
 pub async fn fleet_vote_handler(
     State(state): State<SharedState>,
     Path(id): Path<String>,
     Json(req): Json<FleetVoteRequest>,
 ) -> Result<Json<FleetSwitchResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate peer_id is non-empty and reasonable length
+    if req.peer_id.is_empty() || req.peer_id.len() > 256 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "invalid peer_id"})),
+        ));
+    }
+
     let mut st = state.lock().await;
+
+    // Clone socket path before taking mutable borrows
+    let sock = st.agentd_socket.clone();
 
     let coordinator = st.fleet_coordinator.as_mut().ok_or_else(|| {
         (
@@ -152,6 +166,15 @@ pub async fn fleet_vote_handler(
         )
     })?;
 
+    // Check that the fleet switch hasn't timed out
+    if fs.is_timed_out() {
+        fs.abort("timeout — voting period expired");
+        return Err((
+            StatusCode::GONE,
+            Json(serde_json::json!({"error": "fleet switch timed out"})),
+        ));
+    }
+
     if !matches!(fs.phase, FleetPhase::Propose) {
         return Err((
             StatusCode::CONFLICT,
@@ -159,12 +182,24 @@ pub async fn fleet_vote_handler(
         ));
     }
 
+    // record_vote checks: (1) not a duplicate vote, (2) peer is a participant
     if !fs.record_vote(&req.peer_id, req.approve, req.reason) {
         return Err((
             StatusCode::CONFLICT,
             Json(serde_json::json!({"error": "duplicate vote or not a participant"})),
         ));
     }
+    let vote_payload = serde_json::json!({
+        "fleet_switch_id": id,
+        "peer_id": req.peer_id,
+        "approve": req.approve,
+    })
+    .to_string();
+    tokio::spawn(async move {
+        if let Err(e) = crate::agentd_post_event(&sock, "fleet.vote", &vote_payload).await {
+            tracing::debug!(error = %e, "failed to log fleet.vote (non-fatal)");
+        }
+    });
 
     // Check for auto-advance or veto
     if fs.has_quorum() {

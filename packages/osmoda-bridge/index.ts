@@ -380,15 +380,34 @@ export default function register(api: any) {
       if (shellExecTimestamps.length > SHELL_EXEC_RATE_LIMIT) {
         return { output: JSON.stringify({ error: "Rate limit exceeded: max 30 shell_exec calls per minute" }) };
       }
-      // Block dangerous commands — defense-in-depth, not a security boundary
-      const matched = DANGEROUS_COMMANDS.find((d) => cmd.includes(d));
-      if (matched) {
-        agentdRequest("POST", "/memory/ingest", {
-          event: { category: "security", subcategory: "dangerous_command_blocked", actor: "openclaw.agent",
-            summary: "Dangerous command blocked: " + cmd.substring(0, 100),
-            metadata: { command: cmd, matched_pattern: matched } },
-        }).catch(() => {});
-        return { output: JSON.stringify({ error: `Command blocked: '${matched}' is not allowed via shell_exec. Use the appropriate agentd API (safe_switch_begin for NixOS changes, or request user approval for destructive operations).` }) };
+      // Approval gate enforcement — check with agentd before executing
+      // If the approval gate is enabled, it will block destructive commands
+      // and auto-approve safe ones. Falls back to static blocklist if gate unavailable.
+      try {
+        const approvalResp = await agentdRequest("POST", "/approval/request", {
+          command: cmd, actor: "openclaw.agent", reason: "shell_exec",
+        });
+        const approval = JSON.parse(approvalResp);
+        if (approval.status === "pending") {
+          return { output: JSON.stringify({
+            error: `Command requires approval: ${cmd.substring(0, 80)}`,
+            approval_id: approval.id,
+            status: "pending",
+            hint: "Use approval_check to poll status, or approval_approve/approval_deny to decide.",
+          })};
+        }
+        // "auto_approved" or "approved" — proceed to execution
+      } catch {
+        // Approval gate unavailable — fall back to static blocklist
+        const matched = DANGEROUS_COMMANDS.find((d) => cmd.includes(d));
+        if (matched) {
+          agentdRequest("POST", "/memory/ingest", {
+            event: { category: "security", subcategory: "dangerous_command_blocked", actor: "openclaw.agent",
+              summary: "Dangerous command blocked: " + cmd.substring(0, 100),
+              metadata: { command: cmd, matched_pattern: matched } },
+          }).catch(() => {});
+          return { output: JSON.stringify({ error: `Command blocked: '${matched}' is not allowed via shell_exec. Use the appropriate agentd API (safe_switch_begin for NixOS changes, or request user approval for destructive operations).` }) };
+        }
       }
       const result = runShell(cmd, timeout);
       agentdRequest("POST", "/memory/ingest", {
