@@ -1281,6 +1281,16 @@ GWENVEOF
         NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
       fi
       ;;
+    remove_api_key)
+      # Remove API key + stop gateway
+      rm -f "$STATE_DIR/config/api-key" "$STATE_DIR/config/env"
+      for _AGID in osmoda mobile; do
+        rm -f "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
+      done
+      systemctl stop osmoda-gateway.service 2>/dev/null || true
+      systemctl disable osmoda-gateway.service 2>/dev/null || true
+      NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      ;;
     connect_channel)
       ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
       ATOKEN=$(echo "$ACTION_JSON" | jq -r '.token' 2>/dev/null) || continue
