@@ -15,6 +15,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 tokio-util.workspace = true
 
+rusqlite = { version = "0.32", features = ["bundled"] }
 axum = { version = "0.8", features = ["json"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

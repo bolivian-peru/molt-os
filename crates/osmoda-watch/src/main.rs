@@ -1,4 +1,7 @@
 mod api;
+mod fleet;
+mod fleet_api;
+mod mesh_client;
 mod switch;
 pub mod validate;
 mod watcher;
@@ -46,6 +49,7 @@ pub struct WatchState {
     pub watchers: Vec<Watcher>,
     pub agentd_socket: String,
     pub data_dir: String,
+    pub fleet_coordinator: Option<fleet::FleetCoordinator>,
 }
 
 /// POST an event to agentd /events/log over Unix socket. Best-effort — never blocks caller.
@@ -109,6 +113,7 @@ async fn main() {
         watchers,
         agentd_socket: args.agentd_socket.clone(),
         data_dir: args.data_dir,
+        fleet_coordinator: Some(fleet::FleetCoordinator::new()),
     }));
 
     let cancel = CancellationToken::new();
@@ -138,6 +143,11 @@ async fn main() {
         .route("/watcher/add", post(api::watcher_add_handler))
         .route("/watcher/list", get(api::watcher_list_handler))
         .route("/watcher/remove/{id}", delete(api::watcher_remove_handler))
+        // Fleet SafeSwitch
+        .route("/fleet/propose", post(fleet_api::fleet_propose_handler))
+        .route("/fleet/status/{id}", get(fleet_api::fleet_status_handler))
+        .route("/fleet/vote/{id}", post(fleet_api::fleet_vote_handler))
+        .route("/fleet/rollback/{id}", post(fleet_api::fleet_rollback_handler))
         // Health
         .route("/health", get(api::health_handler))
         .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB

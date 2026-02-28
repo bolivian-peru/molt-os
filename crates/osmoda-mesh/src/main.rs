@@ -1,10 +1,12 @@
 mod api;
+mod gossip;
 mod handshake;
 pub mod identity;
 mod invite;
 mod messages;
 mod peers;
 mod receipt;
+mod room_store;
 mod transport;
 
 use std::collections::{HashMap, HashSet};
@@ -84,6 +86,8 @@ pub struct MeshState {
     pub rooms: Vec<Room>,
     /// SHA-256 hashes of accepted invite codes — enforces single-use.
     pub used_invites: HashSet<String>,
+    /// Persistent room store (SQLite-backed).
+    pub room_store: Option<room_store::RoomStore>,
 }
 
 #[tokio::main]
@@ -123,6 +127,21 @@ async fn main() {
 
     let listen_endpoint = format!("{}:{}", args.listen_addr, args.listen_port);
 
+    // Initialize persistent room store
+    let rooms_db_path = std::path::Path::new(&args.data_dir).join("rooms.db");
+    let room_store = match room_store::RoomStore::new(
+        rooms_db_path.to_str().expect("invalid rooms DB path"),
+    ) {
+        Ok(store) => {
+            tracing::info!("persistent room store initialized");
+            Some(store)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to initialize room store, using in-memory only");
+            None
+        }
+    };
+
     let state = Arc::new(Mutex::new(MeshState {
         identity,
         peers: peers_list,
@@ -132,6 +151,7 @@ async fn main() {
         receipt_logger: ReceiptLogger::new(&args.agentd_socket),
         rooms: Vec::new(),
         used_invites: HashSet::new(),
+        room_store,
     }));
 
     let cancel = CancellationToken::new();
@@ -622,8 +642,14 @@ async fn dispatch_incoming(
                 }
             });
         }
+        MeshMessage::Chat { ref from, ref text, room_id: Some(ref rid) }
+            if rid == "__gossip_channel__" && from == "__gossip__" =>
+        {
+            // Gossip protocol message — handle internally
+            gossip::handle_gossip(&state, &peer_id, text).await;
+        }
         MeshMessage::Chat { from, text, room_id: Some(rid) } => {
-            handle_room_message(rid, from, text, state, agentd_socket).await;
+            handle_room_message(rid, from, text, peer_id.clone(), state, agentd_socket).await;
         }
         MeshMessage::PqExchange { .. } => {
             tracing::warn!(peer_id = %peer_id, "unexpected PqExchange post-handshake, ignoring");
@@ -636,24 +662,48 @@ async fn handle_room_message(
     room_id: String,
     from: String,
     text: String,
+    sender_peer_id: String,
     state: Arc<Mutex<MeshState>>,
     agentd_socket: String,
 ) {
-    let mut st = state.lock().await;
-    if let Some(room) = st.rooms.iter_mut().find(|r| r.id == room_id) {
-        let seq = room.messages.len() as u64;
-        room.messages.push(RoomMessage {
-            from: from.clone(),
-            text: text.clone(),
-            ts: chrono::Utc::now().to_rfc3339(),
-            seq,
-        });
-        tracing::debug!(room_id = %room_id, from = %from, "room message appended");
-    } else {
-        tracing::warn!(room_id = %room_id, "received message for unknown room, ignoring");
-        return;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    {
+        let mut st = state.lock().await;
+
+        // Persist to room store if available
+        if let Some(ref store) = st.room_store {
+            match store.store_message(&room_id, &from, &text, &now) {
+                Ok(true) => {
+                    tracing::debug!(room_id = %room_id, from = %from, "room message persisted");
+                }
+                Ok(false) => {
+                    tracing::debug!(room_id = %room_id, "duplicate room message, skipping");
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to persist room message");
+                }
+            }
+        }
+
+        // Also update in-memory rooms for backward compat
+        if let Some(room) = st.rooms.iter_mut().find(|r| r.id == room_id) {
+            let seq = room.messages.len() as u64;
+            room.messages.push(RoomMessage {
+                from: from.clone(),
+                text: text.clone(),
+                ts: now.clone(),
+                seq,
+            });
+        } else {
+            tracing::warn!(room_id = %room_id, "received message for unknown room, ignoring");
+            return;
+        }
     }
-    drop(st);
+
+    // Forward to other room members (gossip)
+    gossip::forward_room_message(&state, &room_id, &sender_peer_id, &from, &text).await;
 
     // Log to agentd (best-effort)
     let body = serde_json::json!({

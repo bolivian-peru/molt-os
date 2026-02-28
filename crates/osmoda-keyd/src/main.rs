@@ -2,6 +2,8 @@ mod api;
 mod policy;
 mod receipt;
 mod signer;
+mod tx_eth;
+mod tx_sol;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -89,6 +91,7 @@ async fn main() {
         .route("/wallet/sign", post(api::wallet_sign_handler))
         .route("/wallet/send", post(api::wallet_send_handler))
         .route("/wallet/delete", post(api::wallet_delete_handler))
+        .route("/wallet/build_tx", post(api::wallet_build_tx_handler))
         .route("/health", get(api::health_handler))
         .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state);

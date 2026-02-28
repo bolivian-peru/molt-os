@@ -259,6 +259,11 @@ impl LocalKeyBackend {
         self.index.wallets.clone()
     }
 
+    /// Load key bytes for a wallet. Public API for tx builders.
+    pub fn load_key_bytes_pub(&mut self, wallet_id: &str) -> Result<Vec<u8>> {
+        self.load_key_bytes(wallet_id)
+    }
+
     fn load_key_bytes(&mut self, wallet_id: &str) -> Result<Vec<u8>> {
         // Evict stale entries first
         self.evict_stale_keys();

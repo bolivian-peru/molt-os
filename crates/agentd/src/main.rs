@@ -1,5 +1,7 @@
 mod api;
+mod approval;
 mod ledger;
+mod sandbox;
 mod state;
 
 use std::path::Path;
@@ -27,6 +29,22 @@ struct Args {
     /// Directory for persistent state (SQLite ledger, etc.).
     #[arg(long, default_value = "/var/lib/osmoda")]
     state_dir: String,
+
+    /// Enable the approval gate for destructive operations.
+    #[arg(long, default_value_t = false)]
+    approval_required: bool,
+
+    /// Additional command patterns that require approval (comma-separated).
+    #[arg(long, default_value = "")]
+    approval_patterns: String,
+
+    /// Enable the sandbox engine for Ring 1/Ring 2 isolation.
+    #[arg(long, default_value_t = false)]
+    sandbox_enabled: bool,
+
+    /// Egress proxy address for sandboxed network access.
+    #[arg(long, default_value = "http://127.0.0.1:8443")]
+    egress_proxy: String,
 }
 
 #[tokio::main]
@@ -69,12 +87,52 @@ async fn main() {
         tracing::error!(error = %e, "failed to log daemon start event");
     }
 
+    // Initialize approval gate if enabled
+    let approval_gate = if args.approval_required {
+        let extra_patterns: Vec<String> = args
+            .approval_patterns
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let gate = approval::ApprovalGate::new(
+            ledger_path.to_str().expect("invalid ledger path"),
+            extra_patterns,
+        )
+        .expect("failed to initialize approval gate");
+        let gate = Arc::new(gate);
+        tracing::info!("approval gate enabled");
+
+        // Spawn expiry background task
+        let gate_clone = gate.clone();
+        tokio::spawn(async move {
+            approval::expiry_loop(gate_clone).await;
+        });
+
+        Some(gate)
+    } else {
+        tracing::info!("approval gate disabled (use --approval-required to enable)");
+        None
+    };
+
+    // Initialize sandbox engine if enabled
+    let sandbox_engine = if args.sandbox_enabled {
+        let engine = sandbox::SandboxEngine::generate(&args.egress_proxy);
+        tracing::info!(egress_proxy = %args.egress_proxy, "sandbox engine enabled");
+        Some(Arc::new(engine))
+    } else {
+        tracing::info!("sandbox engine disabled (use --sandbox-enabled to enable)");
+        None
+    };
+
     // Build shared state
     let sys = sysinfo::System::new_all();
     let shared_state: SharedState = Arc::new(AppState {
         ledger: Mutex::new(ledger),
         sys: Mutex::new(sys),
         state_dir: args.state_dir.clone(),
+        approval_gate,
+        sandbox_engine,
     });
 
     // Build the axum router
@@ -95,6 +153,16 @@ async fn main() {
         .route("/incident/{id}/step", post(api::receipts::incident_step_handler))
         .route("/incident/{id}", get(api::receipts::incident_get_handler))
         .route("/incidents", get(api::receipts::incidents_list_handler))
+        // Approval Gate
+        .route("/approval/request", post(api::approval::approval_request_handler))
+        .route("/approval/pending", get(api::approval::approval_pending_handler))
+        .route("/approval/{id}/approve", post(api::approval::approval_approve_handler))
+        .route("/approval/{id}/deny", post(api::approval::approval_deny_handler))
+        .route("/approval/{id}", get(api::approval::approval_check_handler))
+        // Sandbox
+        .route("/sandbox/exec", post(api::sandbox::sandbox_exec_handler))
+        .route("/capability/mint", post(api::sandbox::capability_mint_handler))
+        .route("/capability/verify", post(api::sandbox::capability_verify_handler))
         // Discovery
         .route("/system/discover", get(api::discovery::system_discover_handler))
         // Backup

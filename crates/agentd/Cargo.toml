@@ -23,6 +23,7 @@ hex = "0.4"
 sysinfo = "0.33"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
 tokio-stream = "0.1"
 
 [dev-dependencies]

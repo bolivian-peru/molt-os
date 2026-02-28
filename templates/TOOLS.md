@@ -97,7 +97,7 @@ Memory system status: embedding model readiness, collection size, state director
 
 ## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 72 tools available to the AI agent through OpenClaw.
+These are the 83 tools available to the AI agent through OpenClaw.
 Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
@@ -288,5 +288,37 @@ For AI agent workloads that need cryptographic signing. Not required for core sy
 | `wallet_list` | List all wallets with addresses, labels, and chains |
 | `wallet_sign` | Sign raw bytes with a wallet (policy-gated, daily limits) |
 | `wallet_send` | Build + sign an intent (returns signed data for external broadcast — not a fully-encoded transaction) |
+| `wallet_build_tx` | Build + sign a real blockchain transaction (EIP-1559 for ETH, legacy transfer for SOL). Returns signed bytes ready for broadcast. Does NOT broadcast. |
 | `wallet_delete` | Permanently delete a wallet (removes key file, zeroizes cached key, updates index) |
 | `wallet_receipt` | Query wallet operation receipts from the audit ledger |
+
+### Approval Gate tools (via agentd)
+
+Enforces `approvalRequired` policy. Destructive commands (rm -rf, reboot, nix.rebuild, wallet.send, etc.) are blocked until explicitly approved. Non-destructive commands auto-approve instantly.
+
+| Tool | Description |
+|------|-------------|
+| `approval_request` | Request approval for a destructive operation. Returns approval ID. Auto-approves if command is safe. |
+| `approval_pending` | List all pending approval requests awaiting user decision |
+| `approval_approve` | Approve a pending destructive operation by ID |
+| `approval_check` | Check status of an approval request (pending, approved, denied, expired) |
+
+### Sandbox tools (via agentd)
+
+Ring 1/Ring 2 isolation using bubblewrap (bwrap). Ring 1 = approved apps with declared capabilities. Ring 2 = untrusted, maximum isolation (no network, minimal filesystem).
+
+| Tool | Description |
+|------|-------------|
+| `sandbox_exec` | Execute a command in a sandboxed environment (specify ring level + capabilities) |
+| `capability_mint` | Create a signed capability token (HMAC-SHA256) granting specific permissions to an app or tool |
+
+### Fleet SafeSwitch tools (via osmoda-watch)
+
+Coordinate deploys across multiple osModa instances via the mesh network. Quorum-based voting before execution. Auto-rollback on health check failure.
+
+| Tool | Description |
+|------|-------------|
+| `fleet_propose` | Initiate a fleet-wide SafeSwitch deployment with specified mesh peers |
+| `fleet_status` | Check fleet switch status: phase, votes, quorum progress, participant health |
+| `fleet_vote` | Cast a vote (approve/deny) on a fleet switch proposal |
+| `fleet_rollback` | Force rollback a fleet switch on all participating nodes |

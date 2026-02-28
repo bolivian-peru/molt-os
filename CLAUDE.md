@@ -28,10 +28,11 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (72 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (83 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
+   wallet_build_tx,
    safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback,
    watcher_add, watcher_list, routine_add, routine_list, routine_trigger,
    agent_card, receipt_list, incident_create, incident_step,
@@ -43,6 +44,9 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart,
    teach_status, teach_observations, teach_patterns, teach_knowledge,
    teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply,
+   approval_request, approval_pending, approval_approve, approval_check,
+   sandbox_exec, capability_mint,
+   fleet_propose, fleet_status, fleet_vote, fleet_rollback,
    app_deploy, app_list, app_logs, app_stop, app_restart, app_remove,
    safety_rollback, safety_status, safety_panic, safety_restart.
 
@@ -92,7 +96,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
    and credential management; actual connections handled by OpenClaw.
 
 13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 72 tools, all 17 skills, full system access
+   - `osmoda` (default): Claude Opus, all 83 tools, all 17 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
@@ -121,6 +125,8 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       │   ├── agent_card.rs              # GET /agent/card, POST /agent/card/generate
       │   └── receipts.rs               # GET /receipts, /incident/* endpoints
       ├── ledger.rs                      # SQLite event log + hash chain
+      ├── approval.rs                    # Approval gate for destructive ops (SQLite)
+      ├── sandbox.rs                     # Ring 1/Ring 2 bubblewrap sandbox + capability tokens
       └── state.rs                       # Shared app state
 ./crates/agentctl/                       # Rust: CLI (events, verify-ledger)
   ├── Cargo.toml
@@ -135,6 +141,8 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── signer.rs                      # SignerBackend trait + LocalKeyBackend (ETH + SOL)
       ├── policy.rs                      # JSON policy engine (daily limits, allowlists)
       ├── receipt.rs                     # Receipt logging to agentd ledger
+      ├── tx_eth.rs                      # EIP-1559 Ethereum transaction builder + RLP encoder
+      ├── tx_sol.rs                      # Solana transfer transaction builder
       └── api.rs                         # Axum handlers (/wallet/*)
 ./crates/osmoda-watch/                   # Rust: SafeSwitch + autopilot watchers
   ├── Cargo.toml
@@ -142,6 +150,9 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── main.rs                        # Entry + background loops
       ├── switch.rs                      # SafeSwitch state machine + health checks
       ├── watcher.rs                     # Autopilot watcher definitions + execution
+      ├── fleet.rs                       # Fleet-wide SafeSwitch coordinator + quorum voting
+      ├── fleet_api.rs                   # Axum handlers (/fleet/*)
+      ├── mesh_client.rs                 # HTTP-over-Unix-socket client for mesh daemon
       └── api.rs                         # Axum handlers (/switch/*, /watcher/*)
 ./crates/osmoda-routines/                # Rust: background automation engine
   ├── Cargo.toml
@@ -167,6 +178,8 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── messages.rs                    # MeshMessage enum + wire framing
       ├── invite.rs                      # Out-of-band invite codes (base64url)
       ├── peers.rs                       # Peer storage + connection state
+      ├── room_store.rs                  # SQLite room persistence (rooms, members, messages)
+      ├── gossip.rs                      # Gossip protocol for room sync + message forwarding
       ├── api.rs                         # Axum handlers (/invite/*, /peer/*, /identity, /health)
       └── receipt.rs                     # Audit logging to agentd ledger
 ./crates/osmoda-mcpd/                    # Rust: MCP server manager daemon
@@ -190,7 +203,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 72 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 83 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
@@ -307,6 +320,14 @@ GET  /incidents            ?status=open → IncidentWorkspace[]
 POST /backup/create        → BackupCreateResponse { backup_id, path, size_bytes, created_at }
 GET  /backup/list          → BackupInfo[] { backup_id, path, size_bytes, created_at }
 POST /backup/restore       { backup_id } → BackupRestoreResponse { restored_from, status }
+POST /approval/request     { command, reason } → PendingApproval { id, status, expires_at }
+GET  /approval/pending     → PendingApproval[]
+POST /approval/{id}/approve → PendingApproval (approved)
+POST /approval/{id}/deny   → PendingApproval (denied)
+GET  /approval/{id}        → PendingApproval
+POST /sandbox/exec         { command, ring: 1|2, capabilities[], timeout_secs } → { stdout, stderr, exit_code }
+POST /capability/mint      { granted_to, permissions[], ttl_secs } → CapabilityToken
+POST /capability/verify    { token } → { valid: bool, granted_to, permissions[], expires_at }
 ```
 
 ## osmoda-keyd API reference (socket: /run/osmoda/keyd.sock)
@@ -316,6 +337,7 @@ POST /wallet/create       { chain: "ethereum"|"solana", label: str } → { id, c
 GET  /wallet/list          → WalletInfo[]
 POST /wallet/sign          { wallet_id, payload: hex } → { signature: hex } (policy-gated)
 POST /wallet/send          { wallet_id, to, amount } → { signed_tx: hex } (policy-gated, no broadcast)
+POST /wallet/build_tx      { wallet_id, chain, tx_type, to, amount, chain_params } → { signed_tx, tx_hash, estimated_fee }
 POST /wallet/delete        { wallet_id } → { deleted: wallet_id }
 GET  /health               → { wallet_count, policy_loaded }
 ```
@@ -330,6 +352,10 @@ POST /switch/rollback/{id} → SwitchSession (rolled back)
 POST /watcher/add          { name, check: {type: "http_get"|"tcp_port"|"systemd_unit"|"command", ...}, interval_secs, actions[] } → Watcher
 GET  /watcher/list          → Watcher[]
 DEL  /watcher/remove/{id}  → { removed }
+POST /fleet/propose        { plan, peer_ids[], health_checks[], quorum_percent?, timeout_secs? } → FleetSwitchResponse
+GET  /fleet/status/{id}    → FleetSwitchResponse
+POST /fleet/vote/{id}      { peer_id, approve, reason? } → FleetSwitchResponse
+POST /fleet/rollback/{id}  → FleetSwitchResponse
 GET  /health               → { active_switches, watchers }
 ```
 
@@ -414,8 +440,6 @@ Future (M1+):
 POST /system/mutate       { mutation: str, args: obj, reason: str } → result + event_id
 POST /nix/rebuild         { changes: str, dry_run: bool } → result + generation
 POST /nix/search          { query: str } → packages[]
-POST /sandbox/exec        { command: str, capabilities: str[], timeout_sec: num } → output
-POST /capability/mint     { granted_to: str, permissions: str[], ttl_sec: num } → token
 ```
 
 ## Event log schema (SQLite)

@@ -353,7 +353,9 @@ in {
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${cfg.agentd.package}/bin/agentd --socket ${cfg.agentd.socketPath} --state-dir ${cfg.stateDir}";
+        ExecStart = let
+          approvalPatterns = builtins.concatStringsSep "," cfg.approvalRequired;
+        in "${cfg.agentd.package}/bin/agentd --socket ${cfg.agentd.socketPath} --state-dir ${cfg.stateDir} --approval-required --approval-patterns '${approvalPatterns}' --sandbox-enabled";
         Restart = "always";
         RestartSec = 3;
 

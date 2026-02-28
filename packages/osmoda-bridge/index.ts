@@ -4,26 +4,29 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 72 tools registered:
- *   agentd:  system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
- *   system:  shell_exec, file_read, file_write, directory_list (4)
- *   systemd: service_status, journal_logs (2)
- *   network: network_info (1)
- *   wallet:  wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt (6, via keyd)
- *   switch:  safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback (4, via watch)
- *   watcher: watcher_add, watcher_list (2, via watch)
- *   routine: routine_add, routine_list, routine_trigger (3, via routines)
+ * 83 tools registered:
+ *   agentd:   system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
+ *   system:   shell_exec, file_read, file_write, directory_list (4)
+ *   systemd:  service_status, journal_logs (2)
+ *   network:  network_info (1)
+ *   wallet:   wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt, wallet_build_tx (7, via keyd)
+ *   switch:   safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback (4, via watch)
+ *   watcher:  watcher_add, watcher_list (2, via watch)
+ *   routine:  routine_add, routine_list, routine_trigger (3, via routines)
  *   identity: agent_card (1, via agentd)
- *   receipt: receipt_list, incident_create, incident_step (3, via agentd)
- *   voice:   voice_status, voice_speak, voice_transcribe, voice_record, voice_listen (5, via osmoda-voice)
- *   backup:  backup_create, backup_list (2, via agentd)
- *   mesh:    mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health,
- *            mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history (11, via osmoda-mesh)
- *   mcp:     mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart (4, via osmoda-mcpd)
- *   teach:   teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create,
- *            teach_context, teach_optimize_suggest, teach_optimize_apply (8, via osmoda-teachd)
- *   app:     app_deploy, app_list, app_logs, app_stop, app_restart, app_remove (6, direct systemd-run)
- *   safety:  safety_rollback, safety_status, safety_panic, safety_restart (4, direct shell)
+ *   receipt:  receipt_list, incident_create, incident_step (3, via agentd)
+ *   voice:    voice_status, voice_speak, voice_transcribe, voice_record, voice_listen (5, via osmoda-voice)
+ *   backup:   backup_create, backup_list (2, via agentd)
+ *   mesh:     mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health,
+ *             mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history (11, via osmoda-mesh)
+ *   mcp:      mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart (4, via osmoda-mcpd)
+ *   teach:    teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create,
+ *             teach_context, teach_optimize_suggest, teach_optimize_apply (8, via osmoda-teachd)
+ *   approval: approval_request, approval_pending, approval_approve, approval_check (4, via agentd)
+ *   sandbox:  sandbox_exec, capability_mint (2, via agentd)
+ *   fleet:    fleet_propose, fleet_status, fleet_vote, fleet_rollback (4, via watch)
+ *   app:      app_deploy, app_list, app_logs, app_stop, app_restart, app_remove (6, direct systemd-run)
+ *   safety:   safety_rollback, safety_status, safety_panic, safety_restart (4, direct shell)
  */
 
 import * as http from "node:http";
@@ -1715,6 +1718,322 @@ export default function register(api: any) {
       }
     },
   }), { names: ["teach_optimize_apply"] });
+
+  // =========================================================================
+  // Approval Gate tools (via agentd — destructive operation approval)
+  // =========================================================================
+
+  // --- approval_request ---
+  api.registerTool(() => ({
+    name: "approval_request",
+    label: "Request Approval",
+    description: "Request approval for a destructive or sensitive operation. Returns an approval ID to poll. If the command is not classified as destructive, it is auto-approved.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "The command or operation identifier (e.g. 'rm -rf /data' or 'nix.rebuild')" },
+        reason: { type: "string", description: "Why this operation is needed" },
+      },
+      required: ["command", "reason"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("POST", "/approval/request", {
+          command: params.command, reason: params.reason,
+        }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["approval_request"] });
+
+  // --- approval_pending ---
+  api.registerTool(() => ({
+    name: "approval_pending",
+    label: "Pending Approvals",
+    description: "List all pending approval requests awaiting user decision.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("GET", "/approval/pending") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["approval_pending"] });
+
+  // --- approval_approve ---
+  api.registerTool(() => ({
+    name: "approval_approve",
+    label: "Approve Operation",
+    description: "Approve a pending destructive operation by its approval ID.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Approval request ID" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("POST", `/approval/${params.id}/approve`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["approval_approve"] });
+
+  // --- approval_check ---
+  api.registerTool(() => ({
+    name: "approval_check",
+    label: "Check Approval",
+    description: "Check the status of an approval request (pending, approved, denied, expired).",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Approval request ID" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("GET", `/approval/${params.id}`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["approval_check"] });
+
+  // =========================================================================
+  // Sandbox tools (via agentd — Ring 1/Ring 2 isolation)
+  // =========================================================================
+
+  // --- sandbox_exec ---
+  api.registerTool(() => ({
+    name: "sandbox_exec",
+    label: "Sandbox Exec",
+    description: "Execute a command in a sandboxed environment using bubblewrap (bwrap). Ring 1 = approved apps with declared capabilities. Ring 2 = untrusted, maximum isolation, no network.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Command to execute inside the sandbox" },
+        ring: { type: "number", description: "Sandbox ring level: 1 (approved app) or 2 (untrusted). Default: 2" },
+        capabilities: {
+          type: "array", items: { type: "string" },
+          description: "Capability strings (e.g. 'network', 'fs:/var/lib/myapp'). Only applies to Ring 1.",
+        },
+        timeout_secs: { type: "number", description: "Execution timeout in seconds. Default: 60" },
+      },
+      required: ["command"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("POST", "/sandbox/exec", {
+          command: params.command,
+          ring: params.ring || 2,
+          capabilities: params.capabilities || [],
+          timeout_secs: params.timeout_secs || 60,
+        }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["sandbox_exec"] });
+
+  // --- capability_mint ---
+  api.registerTool(() => ({
+    name: "capability_mint",
+    label: "Mint Capability",
+    description: "Create a signed capability token granting specific permissions to a tool or app. HMAC-SHA256 signed, time-limited.",
+    parameters: {
+      type: "object",
+      properties: {
+        granted_to: { type: "string", description: "Identity receiving the capability (app name or tool ID)" },
+        permissions: {
+          type: "array", items: { type: "string" },
+          description: "Permission strings (e.g. 'network', 'fs:read:/var/lib/data', 'fs:write:/tmp')",
+        },
+        ttl_secs: { type: "number", description: "Time-to-live in seconds. Default: 3600 (1 hour)" },
+      },
+      required: ["granted_to", "permissions"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await agentdRequest("POST", "/capability/mint", {
+          granted_to: params.granted_to,
+          permissions: params.permissions,
+          ttl_secs: params.ttl_secs || 3600,
+        }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["capability_mint"] });
+
+  // =========================================================================
+  // Fleet SafeSwitch tools (via osmoda-watch — coordinated multi-node deploys)
+  // =========================================================================
+
+  // --- fleet_propose ---
+  api.registerTool(() => ({
+    name: "fleet_propose",
+    label: "Fleet Propose",
+    description: "Initiate a fleet-wide SafeSwitch deployment. Sends a proposal to specified mesh peers for quorum-based voting before execution.",
+    parameters: {
+      type: "object",
+      properties: {
+        plan: { type: "string", description: "Description of the deployment plan (e.g. 'upgrade nginx to 1.27')" },
+        peer_ids: {
+          type: "array", items: { type: "string" },
+          description: "List of mesh peer IDs to include in the fleet switch",
+        },
+        health_checks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              check_type: { type: "string", description: "http_get, tcp_port, systemd_unit, or command" },
+              target: { type: "string", description: "URL, port, unit name, or command" },
+            },
+          },
+          description: "Health checks to run after deployment",
+        },
+        quorum_percent: { type: "number", description: "Approval quorum percentage (default: 51)" },
+        timeout_secs: { type: "number", description: "Timeout in seconds (default: 300)" },
+      },
+      required: ["plan", "peer_ids"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await watchRequest("POST", "/fleet/propose", {
+          plan: params.plan,
+          peer_ids: params.peer_ids,
+          health_checks: params.health_checks,
+          quorum_percent: params.quorum_percent,
+          timeout_secs: params.timeout_secs,
+        }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["fleet_propose"] });
+
+  // --- fleet_status ---
+  api.registerTool(() => ({
+    name: "fleet_status",
+    label: "Fleet Status",
+    description: "Check the status of a fleet-wide SafeSwitch: phase, votes, quorum progress, participant health.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Fleet switch ID" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await watchRequest("GET", `/fleet/status/${params.id}`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["fleet_status"] });
+
+  // --- fleet_vote ---
+  api.registerTool(() => ({
+    name: "fleet_vote",
+    label: "Fleet Vote",
+    description: "Cast a vote on a fleet-wide SafeSwitch proposal. Approve or deny with optional reason.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Fleet switch ID" },
+        peer_id: { type: "string", description: "Your mesh peer ID" },
+        approve: { type: "boolean", description: "true to approve, false to deny" },
+        reason: { type: "string", description: "Optional reason for the vote" },
+      },
+      required: ["id", "peer_id", "approve"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await watchRequest("POST", `/fleet/vote/${params.id}`, {
+          peer_id: params.peer_id,
+          approve: params.approve,
+          reason: params.reason,
+        }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["fleet_vote"] });
+
+  // --- fleet_rollback ---
+  api.registerTool(() => ({
+    name: "fleet_rollback",
+    label: "Fleet Rollback",
+    description: "Force rollback a fleet-wide SafeSwitch. Triggers rollback on all participating nodes.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Fleet switch ID" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await watchRequest("POST", `/fleet/rollback/${params.id}`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["fleet_rollback"] });
+
+  // =========================================================================
+  // Wallet Transaction Builder (via osmoda-keyd — real EIP-1559 + Solana tx)
+  // =========================================================================
+
+  // --- wallet_build_tx ---
+  api.registerTool(() => ({
+    name: "wallet_build_tx",
+    label: "Build Transaction",
+    description: "Build and sign a real blockchain transaction (EIP-1559 for Ethereum, legacy transfer for Solana). Returns the signed transaction bytes ready for broadcast. Does NOT broadcast — you decide when to send.",
+    parameters: {
+      type: "object",
+      properties: {
+        wallet_id: { type: "string", description: "Wallet ID to sign with" },
+        chain: { type: "string", description: "'ethereum' or 'solana'" },
+        to: { type: "string", description: "Recipient address" },
+        amount: { type: "string", description: "Amount to send (wei for ETH, lamports for SOL)" },
+        chain_params: {
+          type: "object",
+          description: "Chain-specific parameters",
+          properties: {
+            chain_id: { type: "number", description: "ETH chain ID (default: 1 mainnet)" },
+            nonce: { type: "number", description: "ETH nonce (required for ETH)" },
+            max_fee_per_gas: { type: "string", description: "ETH max fee per gas in wei" },
+            max_priority_fee: { type: "string", description: "ETH max priority fee in wei" },
+            gas_limit: { type: "number", description: "ETH gas limit (default: 21000)" },
+            recent_blockhash: { type: "string", description: "SOL recent blockhash (required for SOL)" },
+          },
+        },
+      },
+      required: ["wallet_id", "chain", "to", "amount"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await keydRequest("POST", "/wallet/build_tx", {
+          wallet_id: params.wallet_id,
+          chain: params.chain,
+          tx_type: "transfer",
+          to: params.to,
+          amount: params.amount,
+          chain_params: params.chain_params || {},
+        }) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["wallet_build_tx"] });
 
   // =========================================================================
   // App management tools (systemd transient services + JSON registry)
