@@ -703,6 +703,7 @@ cat > "$SYSTEMD_DIR/osmoda-keyd.service" <<EOF
 Description=osModa Crypto Wallet Daemon
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-keyd --socket $RUN_DIR/keyd.sock --data-dir $STATE_DIR/keyd --policy-file $STATE_DIR/keyd/policy.json --agentd-socket $RUN_DIR/agentd.sock
@@ -710,6 +711,7 @@ Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
 PrivateNetwork=true
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -720,12 +722,14 @@ cat > "$SYSTEMD_DIR/osmoda-watch.service" <<EOF
 Description=osModa SafeSwitch Daemon
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-watch --socket $RUN_DIR/watch.sock --agentd-socket $RUN_DIR/agentd.sock --data-dir $STATE_DIR/watch
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -736,12 +740,14 @@ cat > "$SYSTEMD_DIR/osmoda-routines.service" <<EOF
 Description=osModa Routines Daemon
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-routines --socket $RUN_DIR/routines.sock --agentd-socket $RUN_DIR/agentd.sock --routines-dir $STATE_DIR/routines
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -752,12 +758,14 @@ cat > "$SYSTEMD_DIR/osmoda-mesh.service" <<EOF
 Description=osModa Mesh P2P Daemon
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-mesh --socket $RUN_DIR/mesh.sock --data-dir $STATE_DIR/mesh --agentd-socket $RUN_DIR/agentd.sock --listen-addr 0.0.0.0 --listen-port 18800 --public-addr ${PUBLIC_IP}:18800
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -777,12 +785,14 @@ cat > "$SYSTEMD_DIR/osmoda-mcpd.service" <<EOF
 Description=osModa MCP Server Manager
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-mcpd --socket $RUN_DIR/mcpd.sock --state-dir $STATE_DIR/mcp --agentd-socket $RUN_DIR/agentd.sock
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -793,12 +803,14 @@ cat > "$SYSTEMD_DIR/osmoda-teachd.service" <<EOF
 Description=osModa Teaching/Learning Daemon
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-teachd --socket $RUN_DIR/teachd.sock --state-dir $STATE_DIR/teachd --agentd-socket $RUN_DIR/agentd.sock --watch-socket $RUN_DIR/watch.sock
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -809,12 +821,14 @@ cat > "$SYSTEMD_DIR/osmoda-voice.service" <<EOF
 Description=osModa Voice (STT/TTS)
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-voice --socket $RUN_DIR/voice.sock --agentd-socket $RUN_DIR/agentd.sock
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -825,12 +839,14 @@ cat > "$SYSTEMD_DIR/osmoda-egress.service" <<EOF
 Description=osModa Egress Proxy
 After=osmoda-agentd.service
 Requires=osmoda-agentd.service
+
 [Service]
 Type=simple
 ExecStart=$INSTALL_DIR/bin/osmoda-egress --port 3128 --state-dir $STATE_DIR
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
+
 [Install]
 WantedBy=multi-user.target
 EOF
