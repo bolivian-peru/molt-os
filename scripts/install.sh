@@ -1248,14 +1248,15 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
           AKEY=$(echo "$ENC_CT" | openssl enc -aes-256-gcm -d -K "$(echo -n "$HBSECRET" | openssl dgst -sha256 -binary | xxd -p -c 64)" -iv "$ENC_IV" -nopad 2>/dev/null | xxd -r -p 2>/dev/null) || true
           # openssl enc doesn't support GCM well in all versions — fall back to node
           if [ -z "$AKEY" ] || echo "$AKEY" | grep -q '^ENC:'; then
-            AKEY=$(node -e "
-              var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
-              var dk=c.createHash('sha256').update(s).digest();
-              var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
-              d.setAuthTag(Buffer.from(tag,'hex'));
-              var pt=d.update(ct,'hex','utf8')+d.final('utf8');
-              process.stdout.write(pt);
-            " "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" 2>/dev/null) || true
+            AKEY=$(node - "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" <<'DECEOF'
+var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
+var dk=c.createHash('sha256').update(s).digest();
+var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
+d.setAuthTag(Buffer.from(tag,'hex'));
+var pt=d.update(ct,'hex','utf8')+d.final('utf8');
+process.stdout.write(pt);
+DECEOF
+            ) || true
           fi
           if [ -z "$AKEY" ]; then
             echo "Failed to decrypt API key — skipping action $AID"
@@ -1339,14 +1340,15 @@ GWENVEOF
           ENC_IV=$(echo "$ATOKEN" | cut -d: -f2)
           ENC_TAG=$(echo "$ATOKEN" | cut -d: -f3)
           ENC_CT=$(echo "$ATOKEN" | cut -d: -f4)
-          ATOKEN=$(node -e "
-            var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
-            var dk=c.createHash('sha256').update(s).digest();
-            var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
-            d.setAuthTag(Buffer.from(tag,'hex'));
-            var pt=d.update(ct,'hex','utf8')+d.final('utf8');
-            process.stdout.write(pt);
-          " "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" 2>/dev/null) || true
+          ATOKEN=$(node - "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" <<'DECEOF'
+var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
+var dk=c.createHash('sha256').update(s).digest();
+var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
+d.setAuthTag(Buffer.from(tag,'hex'));
+var pt=d.update(ct,'hex','utf8')+d.final('utf8');
+process.stdout.write(pt);
+DECEOF
+          ) || true
           if [ -z "$ATOKEN" ]; then
             echo "Failed to decrypt channel token — skipping action $AID"
             continue
@@ -1358,13 +1360,13 @@ GWENVEOF
         chmod 600 "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
         # Update openclaw.json to add channel config
         if [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
-          node -e "
-            var fs=require('fs'),ch=process.argv[1],tf=process.argv[2];
-            var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
-            if(!config.channels)config.channels={};
-            config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:'open',allowFrom:['*']};
-            fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
-          " "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" 2>/dev/null
+          node - "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" <<'CHADDEOF'
+var fs=require('fs'),ch=process.argv[1],tf=process.argv[2];
+var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
+if(!config.channels)config.channels={};
+config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:'open',allowFrom:['*']};
+fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+CHADDEOF
         fi
         # Restart gateway to pick up new channel
         systemctl restart osmoda-gateway.service 2>/dev/null || true
@@ -1391,12 +1393,12 @@ GWENVEOF
         rm -f "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
         # Remove channel from openclaw.json
         if [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
-          node -e "
-            var fs=require('fs'),ch=process.argv[1];
-            var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
-            if(config.channels&&config.channels[ch])delete config.channels[ch];
-            fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
-          " "$ACHANNEL" 2>/dev/null
+          node - "$ACHANNEL" <<'CHRMEOF'
+var fs=require('fs'),ch=process.argv[1];
+var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
+if(config.channels&&config.channels[ch])delete config.channels[ch];
+fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+CHRMEOF
         fi
         # Restart gateway to apply change
         systemctl restart osmoda-gateway.service 2>/dev/null || true
