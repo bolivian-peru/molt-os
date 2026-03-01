@@ -1144,6 +1144,33 @@ if [ -f "$MESH_SERVICE_FILE" ] && ! grep -q "listen-addr 0.0.0.0" "$MESH_SERVICE
   fi
 fi
 
+# Self-heal Telegram security: close open access on existing servers (one-time migration)
+OPENCLAW_CONFIG="/root/.openclaw/openclaw.json"
+if [ -f "$OPENCLAW_CONFIG" ] && command -v node >/dev/null 2>&1; then
+  if node -e "var c=JSON.parse(require('fs').readFileSync('$OPENCLAW_CONFIG','utf8'));var ch=c.channels||{};Object.keys(ch).forEach(function(k){if(ch[k].allowFrom&&ch[k].allowFrom[0]==='*'){process.exit(1)}})" 2>/dev/null; then
+    : # no wildcard found, all good
+  else
+    node - <<'TGSECEOF'
+var fs=require('fs');
+var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
+var ch=config.channels||{};
+var fixed=false;
+Object.keys(ch).forEach(function(k){
+  if(ch[k].allowFrom&&ch[k].allowFrom[0]==='*'){
+    ch[k].allowFrom=[];
+    ch[k].dmPolicy='pairing';
+    fixed=true;
+  }
+});
+if(fixed){
+  fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+  console.log('[self-heal] Closed wildcard Telegram access — switched to pairing mode');
+}
+TGSECEOF
+    systemctl restart osmoda-gateway.service 2>/dev/null || true
+  fi
+fi
+
 # Collect health from agentd (5s timeout to prevent hangs)
 HEALTH=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/agentd.sock" http://l/health 2>/dev/null || echo "{}")
 CPU=$(echo "$HEALTH" | grep -o '"cpu":[0-9.]*' | head -1 | cut -d: -f2)
@@ -1390,6 +1417,8 @@ GWENVEOF
     connect_channel)
       ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
       ATOKEN=$(echo "$ACTION_JSON" | jq -r '.token' 2>/dev/null) || continue
+      # Extract allowed user IDs (JSON array → comma-separated)
+      ALLOWED_USERS=$(echo "$ACTION_JSON" | jq -r '(.allowed_users // []) | join(",")' 2>/dev/null) || ALLOWED_USERS=""
       # Sanitize channel name to prevent path traversal
       ACHANNEL=$(echo "$ACHANNEL" | tr -cd 'a-z')
       if [ -n "$ACHANNEL" ] && [ "$ACHANNEL" != "null" ] && [ -n "$ATOKEN" ] && [ "$ATOKEN" != "null" ]; then
@@ -1416,17 +1445,18 @@ DECEOF
         mkdir -p "$STATE_DIR/secrets"
         printf '%s' "$ATOKEN" > "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
         chmod 600 "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
-        # Update openclaw.json to add channel config (create if missing)
+        # Update openclaw.json to add channel config with user whitelist
         if command -v node >/dev/null 2>&1; then
-          node - "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" <<'CHADDEOF'
-var fs=require('fs'),ch=process.argv[2],tf=process.argv[3];
+          node - "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" "$ALLOWED_USERS" <<'CHADDEOF'
+var fs=require('fs'),ch=process.argv[2],tf=process.argv[3],au=process.argv[4]||'';
 var configPath='/root/.openclaw/openclaw.json';
 var config;
 try { config=JSON.parse(fs.readFileSync(configPath,'utf8')); } catch(e) {
   config={gateway:{mode:'local',auth:{mode:'none'}},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
 }
 if(!config.channels)config.channels={};
-config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:'open',allowFrom:['*']};
+var allowList=au?au.split(',').filter(function(u){return /^\d+$/.test(u)}):[];
+config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:allowList.length>0?'whitelist':'pairing',allowFrom:allowList.length>0?allowList:[]};
 fs.writeFileSync(configPath,JSON.stringify(config,null,2));
 CHADDEOF
         fi
