@@ -479,16 +479,16 @@ if [ -n "$API_KEY" ]; then
       if [ "$EFFECTIVE_PROVIDER" = "openai" ]; then
         node - "$DECODED_KEY" "$AGENT_ID" <<'AUTHEOF'
 const fs = require('fs');
-const key = process.argv[1];
-const agentId = process.argv[2];
+const key = process.argv[2];
+const agentId = process.argv[3];
 const auth = { type: 'api_key', provider: 'openai', key: key };
 fs.writeFileSync('/root/.openclaw/agents/' + agentId + '/agent/auth-profiles.json', JSON.stringify(auth, null, 2));
 AUTHEOF
       else
         node - "$DECODED_KEY" "$AGENT_ID" <<'AUTHEOF'
 const fs = require('fs');
-const key = process.argv[1];
-const agentId = process.argv[2];
+const key = process.argv[2];
+const agentId = process.argv[3];
 const isOAuth = key.startsWith('sk-ant-oat');
 const auth = isOAuth
   ? { type: 'token', provider: 'anthropic', token: key }
@@ -509,7 +509,7 @@ AUTHEOF
   if command -v node &>/dev/null; then
     node - "$GATEWAY_TOKEN" <<'CONFIGEOF'
 const fs = require('fs');
-const gwToken = process.argv[1] || '';
+const gwToken = process.argv[2] || '';
 const config = {
   gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } },
   plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
@@ -567,7 +567,7 @@ else
   if command -v node &>/dev/null; then
     node - "$GATEWAY_TOKEN" <<'CONFIGEOF'
 const fs = require('fs');
-const gwToken = process.argv[1] || '';
+const gwToken = process.argv[2] || '';
 const config = {
   gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } },
   plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
@@ -1081,6 +1081,13 @@ set -o pipefail
 STATE_DIR="/var/lib/osmoda"
 RUN_DIR="/run/osmoda"
 
+# Ensure only one heartbeat runs at a time (prevent race conditions)
+exec 200>/var/run/osmoda-heartbeat.lock
+flock -n 200 || exit 0
+
+# jq is required for JSON processing — check early
+if ! command -v jq &>/dev/null; then echo "jq not found — heartbeat disabled"; exit 0; fi
+
 OID=$(cat "$STATE_DIR/config/order-id" 2>/dev/null) || exit 0
 CBURL=$(cat "$STATE_DIR/config/callback-url" 2>/dev/null) || exit 0
 HBSECRET=$(cat "$STATE_DIR/config/heartbeat-secret" 2>/dev/null || echo "")
@@ -1164,11 +1171,7 @@ else
     -d "$PAYLOAD" 2>/dev/null) || exit 0
 fi
 
-# Clear completed actions after successful send
-echo "[]" > "$COMPLETED_FILE"
-
-# Process pending actions from response
-if ! command -v jq &>/dev/null; then exit 0; fi
+# Process pending actions from response (completed file is overwritten at end with new completions)
 
 NEW_COMPLETED="[]"
 for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null); do
@@ -1249,7 +1252,7 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
           # openssl enc doesn't support GCM well in all versions — fall back to node
           if [ -z "$AKEY" ] || echo "$AKEY" | grep -q '^ENC:'; then
             AKEY=$(node - "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" <<'DECEOF'
-var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
+var c=require('crypto'),s=process.argv[2],iv=process.argv[3],tag=process.argv[4],ct=process.argv[5];
 var dk=c.createHash('sha256').update(s).digest();
 var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
 d.setAuthTag(Buffer.from(tag,'hex'));
@@ -1295,7 +1298,7 @@ DECEOF
             chmod 600 "$STATE_DIR/config/gateway-token"
           fi
           node - "$HBGWTOKEN" <<'HBCONFIGEOF'
-var fs=require('fs'),t=process.argv[1]||'';
+var fs=require('fs'),t=process.argv[2]||'';
 var auth=t?{mode:'token',token:t}:{mode:'none'};
 var config={gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
 fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
@@ -1341,7 +1344,7 @@ GWENVEOF
           ENC_TAG=$(echo "$ATOKEN" | cut -d: -f3)
           ENC_CT=$(echo "$ATOKEN" | cut -d: -f4)
           ATOKEN=$(node - "$HBSECRET" "$ENC_IV" "$ENC_TAG" "$ENC_CT" <<'DECEOF'
-var c=require('crypto'),s=process.argv[1],iv=process.argv[2],tag=process.argv[3],ct=process.argv[4];
+var c=require('crypto'),s=process.argv[2],iv=process.argv[3],tag=process.argv[4],ct=process.argv[5];
 var dk=c.createHash('sha256').update(s).digest();
 var d=c.createDecipheriv('aes-256-gcm',dk,Buffer.from(iv,'hex'));
 d.setAuthTag(Buffer.from(tag,'hex'));
@@ -1358,14 +1361,18 @@ DECEOF
         mkdir -p "$STATE_DIR/secrets"
         printf '%s' "$ATOKEN" > "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
         chmod 600 "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
-        # Update openclaw.json to add channel config
-        if [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
+        # Update openclaw.json to add channel config (create if missing)
+        if command -v node >/dev/null 2>&1; then
           node - "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" <<'CHADDEOF'
-var fs=require('fs'),ch=process.argv[1],tf=process.argv[2];
-var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
+var fs=require('fs'),ch=process.argv[2],tf=process.argv[3];
+var configPath='/root/.openclaw/openclaw.json';
+var config;
+try { config=JSON.parse(fs.readFileSync(configPath,'utf8')); } catch(e) {
+  config={gateway:{mode:'local',auth:{mode:'none'}},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+}
 if(!config.channels)config.channels={};
 config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:'open',allowFrom:['*']};
-fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+fs.writeFileSync(configPath,JSON.stringify(config,null,2));
 CHADDEOF
         fi
         # Restart gateway to pick up new channel
@@ -1394,7 +1401,7 @@ CHADDEOF
         # Remove channel from openclaw.json
         if [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
           node - "$ACHANNEL" <<'CHRMEOF'
-var fs=require('fs'),ch=process.argv[1];
+var fs=require('fs'),ch=process.argv[2];
 var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
 if(config.channels&&config.channels[ch])delete config.channels[ch];
 fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
