@@ -26,6 +26,9 @@ pub type SharedState = Arc<Mutex<MeshState>>;
 #[derive(Debug, Deserialize)]
 pub struct CreateInviteRequest {
     pub ttl_secs: Option<u64>,
+    /// Override the public endpoint baked into this invite code.
+    /// Priority: this field > MeshState.public_endpoint > MeshState.listen_endpoint.
+    pub endpoint: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,8 +45,12 @@ pub async fn invite_create_handler(
     let st = state.lock().await;
     let identity = &st.identity.public_identity;
 
+    // Priority: request body endpoint > public_endpoint > listen_endpoint
+    let endpoint = body.endpoint.as_deref()
+        .unwrap_or(&st.public_endpoint);
+
     let invite = InvitePayload::new(
-        &st.listen_endpoint,
+        endpoint,
         &identity.noise_static_pubkey,
         &identity.mlkem_encap_key,
         &identity.instance_id,

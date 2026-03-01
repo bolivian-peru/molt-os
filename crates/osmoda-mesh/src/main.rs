@@ -55,6 +55,11 @@ struct Args {
     /// TCP listen port for incoming peer connections.
     #[arg(long, default_value_t = 18800)]
     listen_port: u16,
+
+    /// Public address for invite codes (e.g. "203.0.113.5:18800").
+    /// If not set, uses listen_addr:listen_port (only works for LAN).
+    #[arg(long)]
+    public_addr: Option<String>,
 }
 
 /// A message in a group room.
@@ -82,6 +87,8 @@ pub struct MeshState {
     pub connections: HashMap<String, Arc<MeshConnection>>,
     pub data_dir: String,
     pub listen_endpoint: String,
+    /// Public endpoint for invite codes (may differ from listen_endpoint on servers behind NAT).
+    pub public_endpoint: String,
     pub receipt_logger: ReceiptLogger,
     pub rooms: Vec<Room>,
     /// SHA-256 hashes of accepted invite codes — enforces single-use.
@@ -126,6 +133,8 @@ async fn main() {
     tracing::info!(count = peers_list.len(), "loaded known peers");
 
     let listen_endpoint = format!("{}:{}", args.listen_addr, args.listen_port);
+    let public_endpoint = args.public_addr.unwrap_or_else(|| listen_endpoint.clone());
+    tracing::info!(public_endpoint = %public_endpoint, "invite codes will use this endpoint");
 
     // Initialize persistent room store
     let rooms_db_path = std::path::Path::new(&args.data_dir).join("rooms.db");
@@ -148,6 +157,7 @@ async fn main() {
         connections: HashMap::new(),
         data_dir: args.data_dir.clone(),
         listen_endpoint: listen_endpoint.clone(),
+        public_endpoint,
         receipt_logger: ReceiptLogger::new(&args.agentd_socket),
         rooms: Vec::new(),
         used_invites: HashSet::new(),

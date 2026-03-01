@@ -636,6 +636,18 @@ mkdir -p "$RUN_DIR" "$STATE_DIR"
 mkdir -p "$STATE_DIR"/{keyd/keys,watch,routines,mesh,config}
 chmod 700 "$STATE_DIR/keyd" "$STATE_DIR/keyd/keys" "$STATE_DIR/mesh"
 
+# Detect public IP for mesh daemon (used in invite codes so peers can reach us)
+PUBLIC_IP=""
+if curl -sf -m 3 http://169.254.169.254/hetzner/v1/metadata/public-ipv4 >/dev/null 2>&1; then
+  PUBLIC_IP=$(curl -sf -m 3 http://169.254.169.254/hetzner/v1/metadata/public-ipv4 2>/dev/null)
+elif curl -sf -m 3 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address >/dev/null 2>&1; then
+  PUBLIC_IP=$(curl -sf -m 3 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null)
+fi
+if [ -z "$PUBLIC_IP" ]; then
+  PUBLIC_IP=$(curl -sf -m 3 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+fi
+log "Detected public IP for mesh: ${PUBLIC_IP:-unknown}"
+
 if [ "$SKIP_SYSTEMD" = false ]; then
 # agentd service
 cat > "$SYSTEMD_DIR/osmoda-agentd.service" <<EOF
@@ -742,13 +754,22 @@ After=osmoda-agentd.service
 Requires=osmoda-agentd.service
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/bin/osmoda-mesh --socket $RUN_DIR/mesh.sock --data-dir $STATE_DIR/mesh --agentd-socket $RUN_DIR/agentd.sock --listen-port 18800
+ExecStart=$INSTALL_DIR/bin/osmoda-mesh --socket $RUN_DIR/mesh.sock --data-dir $STATE_DIR/mesh --agentd-socket $RUN_DIR/agentd.sock --listen-addr 0.0.0.0 --listen-port 18800 --public-addr ${PUBLIC_IP}:18800
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Open mesh P2P port in firewall
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow 18800/tcp 2>/dev/null || true
+elif command -v nft >/dev/null 2>&1; then
+  nft add rule inet filter input tcp dport 18800 accept 2>/dev/null || true
+elif command -v iptables >/dev/null 2>&1; then
+  iptables -A INPUT -p tcp --dport 18800 -j ACCEPT 2>/dev/null || true
+fi
 
 # mcpd
 cat > "$SYSTEMD_DIR/osmoda-mcpd.service" <<EOF
@@ -1091,6 +1112,21 @@ if ! command -v jq &>/dev/null; then echo "jq not found — heartbeat disabled";
 OID=$(cat "$STATE_DIR/config/order-id" 2>/dev/null) || exit 0
 CBURL=$(cat "$STATE_DIR/config/callback-url" 2>/dev/null) || exit 0
 HBSECRET=$(cat "$STATE_DIR/config/heartbeat-secret" 2>/dev/null || echo "")
+INSTALL_DIR="/opt/osmoda"
+
+# Self-heal mesh daemon config (one-time migration for servers deployed before --public-addr)
+MESH_SERVICE_FILE="/etc/systemd/system/osmoda-mesh.service"
+if [ -f "$MESH_SERVICE_FILE" ] && ! grep -q "listen-addr 0.0.0.0" "$MESH_SERVICE_FILE"; then
+  MESH_PUBLIC_IP=$(curl -sf -m 3 http://169.254.169.254/hetzner/v1/metadata/public-ipv4 2>/dev/null || curl -sf -m 3 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+  if [ -n "$MESH_PUBLIC_IP" ]; then
+    sed -i "s|--listen-port 18800|--listen-addr 0.0.0.0 --listen-port 18800 --public-addr ${MESH_PUBLIC_IP}:18800|" "$MESH_SERVICE_FILE"
+    systemctl daemon-reload
+    systemctl restart osmoda-mesh 2>/dev/null || true
+    # Open firewall port for mesh P2P
+    if command -v ufw >/dev/null 2>&1; then ufw allow 18800/tcp 2>/dev/null || true
+    elif command -v iptables >/dev/null 2>&1; then iptables -A INPUT -p tcp --dport 18800 -j ACCEPT 2>/dev/null || true; fi
+  fi
+fi
 
 # Collect health from agentd (5s timeout to prevent hangs)
 HEALTH=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/agentd.sock" http://l/health 2>/dev/null || echo "{}")
@@ -1138,7 +1174,7 @@ done
 # Collect mesh identity + peers (5s timeout)
 MESH_IDENTITY=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/mesh.sock" http://l/identity 2>/dev/null || echo "{}")
 MESH_PEERS=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/mesh.sock" http://l/peers 2>/dev/null || echo "[]")
-MESH_PEERS_SLIM=$(echo "$MESH_PEERS" | jq '[.[] | {id: .id, label: .label, state: (.connection_state // "unknown")}]' 2>/dev/null || echo "[]")
+MESH_PEERS_SLIM=$(echo "$MESH_PEERS" | jq '[.[] | {id: .id, label: .label, state: (.connection_state.state // .connection_state // "unknown")}]' 2>/dev/null || echo "[]")
 
 # Build payload (use jq for safe JSON construction)
 PAYLOAD=$(jq -n \
@@ -1204,10 +1240,13 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       # Create a mesh invite on this server, report back the invite code
       TARGET_IP=$(echo "$ACTION_JSON" | jq -r '.target_server_ip' 2>/dev/null)
       TARGET_PORT=$(echo "$ACTION_JSON" | jq -r '.target_mesh_port' 2>/dev/null)
+      # Detect own public IP so the invite code contains a routable endpoint
+      MY_PUBLIC_IP=$(curl -sf -m 3 http://169.254.169.254/hetzner/v1/metadata/public-ipv4 2>/dev/null || curl -sf -m 3 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+      INVITE_BODY=$(jq -n --argjson ttl 3600 --arg ep "${MY_PUBLIC_IP}:18800" '{ttl_secs: $ttl, endpoint: $ep}')
       INVITE_RESULT=$(curl -sf --max-time 10 --unix-socket "$RUN_DIR/mesh.sock" \
         -X POST http://l/invite/create \
         -H "Content-Type: application/json" \
-        -d '{"ttl_secs": 3600}' 2>/dev/null)
+        -d "$INVITE_BODY" 2>/dev/null)
       INVITE_CODE=$(echo "$INVITE_RESULT" | jq -r '.invite_code' 2>/dev/null)
       if [ -n "$INVITE_CODE" ] && [ "$INVITE_CODE" != "null" ]; then
         # Report as completed with invite_code result (for relay to target server)
