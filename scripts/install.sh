@@ -761,7 +761,7 @@ Requires=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/bin/osmoda-mesh --socket $RUN_DIR/mesh.sock --data-dir $STATE_DIR/mesh --agentd-socket $RUN_DIR/agentd.sock --listen-addr 0.0.0.0 --listen-port 18800 --public-addr ${PUBLIC_IP}:18800
+ExecStart=$INSTALL_DIR/bin/osmoda-mesh --socket $RUN_DIR/mesh.sock --data-dir $STATE_DIR/mesh --agentd-socket $RUN_DIR/agentd.sock --listen-addr 0.0.0.0 --listen-port 18800$([ -n "$PUBLIC_IP" ] && echo " --public-addr ${PUBLIC_IP}:18800")
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -1134,7 +1134,8 @@ INSTALL_DIR="/opt/osmoda"
 MESH_SERVICE_FILE="/etc/systemd/system/osmoda-mesh.service"
 if [ -f "$MESH_SERVICE_FILE" ] && ! grep -q "listen-addr 0.0.0.0" "$MESH_SERVICE_FILE"; then
   MESH_PUBLIC_IP=$(curl -sf -m 3 http://169.254.169.254/hetzner/v1/metadata/public-ipv4 2>/dev/null || curl -sf -m 3 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-  if [ -n "$MESH_PUBLIC_IP" ]; then
+  # Validate IP format before using in sed
+  if [ -n "$MESH_PUBLIC_IP" ] && echo "$MESH_PUBLIC_IP" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
     sed -i "s|--listen-port 18800|--listen-addr 0.0.0.0 --listen-port 18800 --public-addr ${MESH_PUBLIC_IP}:18800|" "$MESH_SERVICE_FILE"
     systemctl daemon-reload
     systemctl restart osmoda-mesh 2>/dev/null || true
@@ -1147,8 +1148,14 @@ fi
 # Self-heal Telegram security: close open access on existing servers (one-time migration)
 OPENCLAW_CONFIG="/root/.openclaw/openclaw.json"
 if [ -f "$OPENCLAW_CONFIG" ] && command -v node >/dev/null 2>&1; then
-  if node -e "var c=JSON.parse(require('fs').readFileSync('$OPENCLAW_CONFIG','utf8'));var ch=c.channels||{};Object.keys(ch).forEach(function(k){if(ch[k].allowFrom&&ch[k].allowFrom[0]==='*'){process.exit(1)}})" 2>/dev/null; then
-    : # no wildcard found, all good
+  # Check returns exit 1 ONLY if wildcard found; exit 0 for clean or errors
+  if node - <<'TGCHKEOF'
+try{var c=JSON.parse(require('fs').readFileSync('/root/.openclaw/openclaw.json','utf8'));
+var ch=c.channels||{};var bad=false;Object.keys(ch).forEach(function(k){if(ch[k].allowFrom&&ch[k].allowFrom[0]==='*')bad=true;});
+process.exit(bad?1:0);}catch(e){process.exit(0);}
+TGCHKEOF
+  then
+    : # no wildcard found or parse error, skip fix
   else
     node - <<'TGSECEOF'
 var fs=require('fs');
@@ -1285,6 +1292,12 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       TARGET_PORT=$(echo "$ACTION_JSON" | jq -r '.target_mesh_port' 2>/dev/null)
       # Detect own public IP so the invite code contains a routable endpoint
       MY_PUBLIC_IP=$(curl -sf -m 3 http://169.254.169.254/hetzner/v1/metadata/public-ipv4 2>/dev/null || curl -sf -m 3 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+      # Validate IP format
+      if ! echo "$MY_PUBLIC_IP" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+        echo "mesh_invite_create: failed to detect valid public IP"
+        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+        continue
+      fi
       INVITE_BODY=$(jq -n --argjson ttl 3600 --arg ep "${MY_PUBLIC_IP}:18800" '{ttl_secs: $ttl, endpoint: $ep}')
       INVITE_RESULT=$(curl -sf --max-time 10 --unix-socket "$RUN_DIR/mesh.sock" \
         -X POST http://l/invite/create \
@@ -1315,6 +1328,8 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
     mesh_peer_disconnect)
       # Disconnect a mesh peer
       PEER_ID=$(echo "$ACTION_JSON" | jq -r '.peer_instance_id' 2>/dev/null)
+      # Sanitize peer ID: must be hex/alphanumeric, no slashes or special chars
+      PEER_ID=$(echo "$PEER_ID" | tr -cd 'a-zA-Z0-9_-')
       if [ -n "$PEER_ID" ] && [ "$PEER_ID" != "null" ]; then
         curl -sf --max-time 10 --unix-socket "$RUN_DIR/mesh.sock" \
           -X DELETE "http://l/peer/$PEER_ID" 2>/dev/null || true
