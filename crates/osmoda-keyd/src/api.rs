@@ -262,6 +262,7 @@ pub async fn wallet_send_handler(
 #[derive(Debug, Deserialize)]
 pub struct BuildTxRequest {
     pub wallet_id: String,
+    #[allow(dead_code)]
     pub tx_type: String, // "transfer"
     pub to: String,
     pub amount: String,

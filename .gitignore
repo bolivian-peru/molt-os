@@ -71,6 +71,9 @@ strix_runs/
 # Apps (separate repos, not part of open source OS)
 apps/
 
+# Video production (Remotion — large binaries, local only)
+videos/
+
 # Build artifacts
 *.o
 *.so

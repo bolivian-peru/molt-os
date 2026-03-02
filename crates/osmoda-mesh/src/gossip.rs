@@ -91,6 +91,7 @@ pub async fn forward_room_message(
 }
 
 /// Request sync of missed messages from a peer.
+#[allow(dead_code)]
 pub async fn request_sync(
     state: &Arc<Mutex<MeshState>>,
     peer_id: &str,
@@ -309,6 +310,7 @@ fn compute_message_hash(sender: &str, content: &str, timestamp: &str) -> String 
 }
 
 /// Background task that syncs rooms with connected peers on reconnect.
+#[allow(dead_code)]
 pub async fn sync_rooms_with_peer(state: Arc<Mutex<MeshState>>, peer_id: String) {
     let room_ids: Vec<String> = {
         let st = state.lock().await;

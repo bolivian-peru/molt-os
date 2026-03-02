@@ -620,6 +620,15 @@ OSMODA_MCPD_SOCKET=/run/osmoda/mcpd.sock
 OSMODA_TEACHD_SOCKET=/run/osmoda/teachd.sock
 GWEOF
   chmod 600 "$STATE_DIR/config/gateway-env"
+
+  # Create placeholder auth-profiles for both agents (user will set key later)
+  for AGENT_ID in osmoda mobile; do
+    mkdir -p "/root/.openclaw/agents/$AGENT_ID/agent"
+    cat > "/root/.openclaw/agents/$AGENT_ID/agent/auth-profiles.json" <<'AUTHEOF'
+{"type":"api_key","provider":"anthropic","key":""}
+AUTHEOF
+  done
+  log "Placeholder auth-profiles created (key will be set by user)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -1601,13 +1610,13 @@ for svc in osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmo
   fi
 done
 
-# Start OpenClaw if API key is configured
-if [ -f "$STATE_DIR/config/api-key" ]; then
-  systemctl enable osmoda-gateway.service
+# Always enable gateway (auto-start on reboot once key exists)
+systemctl enable osmoda-gateway.service
+if [ -f "$STATE_DIR/config/api-key" ] || [ -f "$STATE_DIR/config/env" ]; then
   systemctl start osmoda-gateway.service
   log "OpenClaw gateway starting on port 18789..."
 else
-  log "OpenClaw will start after you enter your API key."
+  log "OpenClaw gateway enabled (will auto-start after API key is set and service started)."
 fi
 
 # Enable heartbeat timer if configured
@@ -1647,10 +1656,20 @@ if [ -f "$STATE_DIR/config/api-key" ]; then
   info "  Open http://localhost:18789 in your browser"
   info "  Or SSH tunnel: ssh -L 18789:localhost:18789 root@<this-ip>"
 else
-  info "Next step — enter your Anthropic API key:"
-  info "  Option 1: Open http://localhost:18789 (setup wizard)"
-  info "  Option 2: Run: osmoda-setup"
-  info "  Option 3: echo 'sk-ant-...' > $STATE_DIR/config/api-key"
+  info "Next step — set your Anthropic API key:"
+  info ""
+  info "  1. Write the env file:"
+  info "     echo 'ANTHROPIC_API_KEY=sk-ant-api03-YOUR_KEY' > $STATE_DIR/config/env"
+  info ""
+  info "  2. Write auth profiles for both agents:"
+  info "     KEY=sk-ant-api03-YOUR_KEY"
+  info "     for agent in osmoda mobile; do"
+  info "       printf '{\"type\":\"api_key\",\"provider\":\"anthropic\",\"key\":\"%s\"}' \"\$KEY\" \\"
+  info "         > /root/.openclaw/agents/\$agent/agent/auth-profiles.json"
+  info "     done"
+  info ""
+  info "  3. Start the gateway:"
+  info "     systemctl start osmoda-gateway"
 fi
 
 echo ""
