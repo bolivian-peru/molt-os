@@ -152,6 +152,14 @@ log "Architecture: $ARCH"
 log "Pre-flight checks passed."
 
 # ---------------------------------------------------------------------------
+# Fix password expiry — Hetzner Ubuntu 24.04 sets root password to expired,
+# which makes PAM block SSH key auth ("Password change required but no TTY").
+# Clear it so key-based SSH works immediately.
+# ---------------------------------------------------------------------------
+passwd -d root 2>/dev/null || true
+chage -M 99999 root 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
 # Step 1: NixOS installation (via nixos-infect)
 # ---------------------------------------------------------------------------
 # Step 1: NixOS conversion (only when explicitly requested — NOT during spawn deploys)
@@ -1178,6 +1186,13 @@ TGSECEOF
   fi
 fi
 
+# Self-heal: fix Hetzner password expiry blocking SSH key auth
+# Hetzner may re-set password expiry after cloud-init; this ensures SSH always works
+if chage -l root 2>/dev/null | grep -q "password must be changed"; then
+  passwd -d root 2>/dev/null || true
+  chage -M 99999 root 2>/dev/null || true
+fi
+
 # Collect health from agentd (5s timeout to prevent hangs)
 HEALTH=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/agentd.sock" http://l/health 2>/dev/null || echo "{}")
 CPU=$(echo "$HEALTH" | grep -o '"cpu":[0-9.]*' | head -1 | cut -d: -f2)
@@ -1318,11 +1333,20 @@ for ACTION_B64 in $(echo "$RESPONSE" | jq -r '.actions[]? | @base64' 2>/dev/null
       if [ -n "$INVITE_CODE" ] && [ "$INVITE_CODE" != "null" ]; then
         # Use jq for safe JSON construction (no shell interpolation of invite code)
         ACCEPT_BODY=$(jq -n --arg code "$INVITE_CODE" '{invite_code: $code}')
-        curl -sf --max-time 10 --unix-socket "$RUN_DIR/mesh.sock" \
+        ACCEPT_RESULT=$(curl -sf --max-time 15 --unix-socket "$RUN_DIR/mesh.sock" \
           -X POST http://l/invite/accept \
           -H "Content-Type: application/json" \
-          -d "$ACCEPT_BODY" 2>/dev/null || true
-        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+          -d "$ACCEPT_BODY" 2>&1)
+        ACCEPT_EXIT=$?
+        if [ $ACCEPT_EXIT -eq 0 ] && [ -n "$ACCEPT_RESULT" ]; then
+          PEER_ID=$(echo "$ACCEPT_RESULT" | jq -r '.peer_id // empty' 2>/dev/null)
+          NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" --arg pid "${PEER_ID:-unknown}" \
+            '. + [{id: $id, result: {peer_id: $pid, status: "connected"}}]')
+        else
+          ACCEPT_ERR=$(echo "$ACCEPT_RESULT" | head -c 200)
+          NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" --arg err "${ACCEPT_ERR:-mesh daemon unreachable}" \
+            '. + [{id: $id, result: {status: "failed", error: $err}}]')
+        fi
       fi
       ;;
     mesh_peer_disconnect)
@@ -1376,10 +1400,17 @@ DECEOF
         # Update auth-profiles.json for all agents
         SAFE_PROVIDER="anthropic"
         if [ "$APROVIDER" = "openai" ]; then SAFE_PROVIDER="openai"; fi
+        # Detect OAuth tokens (sk-ant-oat prefix) for correct auth type
+        AUTH_TYPE="api_key"
+        AUTH_FIELD="key"
+        if [ "$SAFE_PROVIDER" = "anthropic" ] && echo "$AKEY" | grep -q '^sk-ant-oat'; then
+          AUTH_TYPE="token"
+          AUTH_FIELD="token"
+        fi
         for _AGID in osmoda mobile; do
           mkdir -p "/root/.openclaw/agents/$_AGID/agent"
-          jq -n --arg type "api_key" --arg provider "$SAFE_PROVIDER" --arg key "$AKEY" \
-            '{type: $type, provider: $provider, key: $key}' \
+          jq -n --arg type "$AUTH_TYPE" --arg provider "$SAFE_PROVIDER" --arg key "$AKEY" --arg field "$AUTH_FIELD" \
+            '{type: $type, provider: $provider, ($field): $key}' \
             > "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
         done
         # Ensure OpenClaw gateway config exists (may not if no key at install time)
@@ -1471,7 +1502,7 @@ try { config=JSON.parse(fs.readFileSync(configPath,'utf8')); } catch(e) {
 }
 if(!config.channels)config.channels={};
 var allowList=au?au.split(',').filter(function(u){return /^\d+$/.test(u)}):[];
-config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:allowList.length>0?'whitelist':'pairing',allowFrom:allowList.length>0?allowList:[]};
+config.channels[ch]={enabled:true,tokenFile:tf,dmPolicy:allowList.length>0?'allowlist':'pairing',allowFrom:allowList.length>0?allowList:[]};
 fs.writeFileSync(configPath,JSON.stringify(config,null,2));
 CHADDEOF
         fi
@@ -1593,6 +1624,10 @@ if [ -f "$SYSTEMD_DIR/osmoda-ws-relay.service" ]; then
   log "WebSocket chat relay started."
 fi
 fi # end SKIP_SYSTEMD
+
+# Final pass: ensure Hetzner password expiry is cleared (races with cloud-init)
+passwd -d root 2>/dev/null || true
+chage -M 99999 root 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Done!
