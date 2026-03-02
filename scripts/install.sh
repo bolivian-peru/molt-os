@@ -1204,10 +1204,13 @@ fi
 
 # Collect health from agentd (5s timeout to prevent hangs)
 HEALTH=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/agentd.sock" http://l/health 2>/dev/null || echo "{}")
-CPU=$(echo "$HEALTH" | grep -o '"cpu":[0-9.]*' | head -1 | cut -d: -f2)
-RAM=$(echo "$HEALTH" | grep -o '"ram":[0-9.]*' | head -1 | cut -d: -f2)
-DISK=$(echo "$HEALTH" | grep -o '"disk":[0-9.]*' | head -1 | cut -d: -f2)
-UPTIME=$(echo "$HEALTH" | grep -o '"uptime":[0-9.]*' | head -1 | cut -d: -f2)
+# Parse with jq — agentd returns cpu_usage[] (per-core), memory_total/used (bytes), disks[], uptime (secs)
+CPU=$(echo "$HEALTH" | jq '[.cpu_usage[]? // 0] | if length > 0 then [((add / length * 100) | round), 100] | min else 0 end' 2>/dev/null || echo 0)
+MEM_TOTAL=$(echo "$HEALTH" | jq '.memory_total // 0' 2>/dev/null || echo 0)
+MEM_USED=$(echo "$HEALTH" | jq '.memory_used // 0' 2>/dev/null || echo 0)
+RAM=$(echo "$MEM_TOTAL $MEM_USED" | awk '{if ($1 > 0) printf "%.1f", $2/$1*100; else print 0}')
+DISK=$(echo "$HEALTH" | jq '(.disks[0] // {}) | if .total > 0 then (.used / .total * 100) else 0 end' 2>/dev/null || echo 0)
+UPTIME=$(echo "$HEALTH" | jq '.uptime // 0' 2>/dev/null || echo 0)
 OC_READY=$(systemctl is-active osmoda-gateway.service 2>/dev/null | grep -q "^active$" && echo true || echo false)
 
 # Build completed_actions from previous heartbeat
@@ -1555,8 +1558,31 @@ CHRMEOF
   esac
 done
 
-# Store completed action IDs for next heartbeat
-echo "$NEW_COMPLETED" > "$COMPLETED_FILE"
+# If we completed any actions, send completions back immediately (don't wait 5 min)
+if [ "$NEW_COMPLETED" != "[]" ] && [ -n "$NEW_COMPLETED" ]; then
+  PAYLOAD2=$(jq -n \
+    --arg oid "$OID" \
+    --argjson completed "$NEW_COMPLETED" \
+    '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: '"$OC_READY"', completed_actions: $completed}'
+  )
+  if [ -n "$HBSECRET" ]; then
+    HB_TS2=$(date +%s000)
+    SIG2=$(printf '%s:%s' "$OID" "$HB_TS2" | openssl dgst -sha256 -hmac "$HBSECRET" 2>/dev/null | awk '{print $NF}')
+    curl -sf --max-time 15 -X POST "$CBURL" \
+      -H "Content-Type: application/json" \
+      -H "X-Heartbeat-Signature: $SIG2" \
+      -H "X-Heartbeat-Timestamp: $HB_TS2" \
+      -d "$PAYLOAD2" >/dev/null 2>&1
+  else
+    curl -sf --max-time 15 -X POST "$CBURL" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD2" >/dev/null 2>&1
+  fi
+  # Completions sent — clear the file
+  echo "[]" > "$COMPLETED_FILE"
+else
+  echo "$NEW_COMPLETED" > "$COMPLETED_FILE"
+fi
 HBEOF
 chmod +x "$INSTALL_DIR/bin/osmoda-heartbeat.sh"
 
