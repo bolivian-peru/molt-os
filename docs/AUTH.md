@@ -67,17 +67,37 @@ chmod 600 /var/lib/osmoda/config/api-key
 
 ### After install
 
-```bash
-# Write the key
-printf 'sk-ant-api03-...' > /var/lib/osmoda/config/api-key
-chmod 600 /var/lib/osmoda/config/api-key
+Three things need to match: the env file, the auth profiles, and the gateway service.
 
-# Also write env file
-printf 'ANTHROPIC_API_KEY=sk-ant-api03-...\n' > /var/lib/osmoda/config/env
+```bash
+# 1. Write env file (gateway reads this via EnvironmentFile=)
+KEY=sk-ant-api03-YOUR_KEY
+echo "ANTHROPIC_API_KEY=$KEY" > /var/lib/osmoda/config/env
 chmod 600 /var/lib/osmoda/config/env
 
-# Restart gateway
-systemctl restart osmoda-gateway  # or: pkill -f "openclaw gateway" && nohup openclaw gateway --port 18789 &
+# 2. Write auth profiles for both agents
+for agent in osmoda mobile; do
+  printf '{"type":"api_key","provider":"anthropic","key":"%s"}' "$KEY" \
+    > /root/.openclaw/agents/$agent/agent/auth-profiles.json
+done
+
+# 3. Start (or restart) the gateway
+systemctl start osmoda-gateway
+```
+
+For OAuth tokens (`sk-ant-oat01-...`), use `"type":"token"` and `"token"` instead of `"type":"api_key"` and `"key"`:
+
+```bash
+KEY=sk-ant-oat01-YOUR_TOKEN
+echo "ANTHROPIC_API_KEY=$KEY" > /var/lib/osmoda/config/env
+chmod 600 /var/lib/osmoda/config/env
+
+for agent in osmoda mobile; do
+  printf '{"type":"token","provider":"anthropic","token":"%s"}' "$KEY" \
+    > /root/.openclaw/agents/$agent/agent/auth-profiles.json
+done
+
+systemctl start osmoda-gateway
 ```
 
 ---
