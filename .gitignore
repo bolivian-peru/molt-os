@@ -61,6 +61,12 @@ docs/AGENTOS-PRODUCT-HUNT-STRATEGY.md
 # Internal test scripts (contain infrastructure references)
 scripts/security-stress-test.sh
 scripts/mesh-test-5node.sh
+scripts/test-5-instances.sh
+
+# Security audit artifacts (private)
+strix-instructions.txt
+strix-proxy.js
+strix_runs/
 
 # Apps (separate repos, not part of open source OS)
 apps/
