@@ -202,7 +202,7 @@ function validateFilePath(filePath: string): string | null {
 
 /**
  * Defense-in-depth command blocklist. NOT a security boundary.
- * Ring 0 agent has full system access by design.
+ * Tier 0 agent has full system access by design.
  * This catches obvious destructive patterns from prompt injection.
  * Real protection comes from: NixOS atomicity, approval policies, audit trail.
  */
@@ -213,6 +213,11 @@ const DANGEROUS_COMMANDS = [
   "> /dev/sd", "shutdown", "reboot", "halt", "init 0", "init 6",
   "nix-collect-garbage", "nixos-rebuild",
 ];
+
+/** Normalize a shell command for pattern matching — collapse whitespace, strip quoting tricks. */
+function normalizeCmd(cmd: string): string {
+  return cmd.toLowerCase().replace(/[\\'"]/g, "").replace(/\s+/g, " ").trim();
+}
 
 /** Rate limit shell_exec: 30 calls per 60 seconds. */
 const shellExecTimestamps: number[] = [];
@@ -399,7 +404,8 @@ export default function register(api: any) {
         // "auto_approved" or "approved" — proceed to execution
       } catch {
         // Approval gate unavailable — fall back to static blocklist
-        const matched = DANGEROUS_COMMANDS.find((d) => cmd.includes(d));
+        const norm = normalizeCmd(cmd);
+        const matched = DANGEROUS_COMMANDS.find((d) => norm.includes(d));
         if (matched) {
           agentdRequest("POST", "/memory/ingest", {
             event: { category: "security", subcategory: "dangerous_command_blocked", actor: "openclaw.agent",
@@ -1824,14 +1830,14 @@ export default function register(api: any) {
   }), { names: ["approval_check"] });
 
   // =========================================================================
-  // Sandbox tools (via agentd — Ring 1/Ring 2 isolation)
+  // Sandbox tools (via agentd — Tier 1/Tier 2 isolation)
   // =========================================================================
 
   // --- sandbox_exec ---
   api.registerTool(() => ({
     name: "sandbox_exec",
     label: "Sandbox Exec",
-    description: "Execute a command in a sandboxed environment using bubblewrap (bwrap). Ring 1 = approved apps with declared capabilities. Ring 2 = untrusted, maximum isolation, no network.",
+    description: "Execute a command in a sandboxed environment using bubblewrap (bwrap). Tier 1 = approved apps with declared capabilities. Tier 2 = untrusted, maximum isolation, no network.",
     parameters: {
       type: "object",
       properties: {
@@ -1839,7 +1845,7 @@ export default function register(api: any) {
         ring: { type: "number", description: "Sandbox ring level: 1 (approved app) or 2 (untrusted). Default: 2" },
         capabilities: {
           type: "array", items: { type: "string" },
-          description: "Capability strings (e.g. 'network', 'fs:/var/lib/myapp'). Only applies to Ring 1.",
+          description: "Capability strings (e.g. 'network', 'fs:/var/lib/myapp'). Only applies to Tier 1.",
         },
         timeout_secs: { type: "number", description: "Execution timeout in seconds. Default: 60" },
       },

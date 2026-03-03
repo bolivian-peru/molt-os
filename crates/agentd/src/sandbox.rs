@@ -5,7 +5,7 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Trust ring levels for sandboxed execution.
+/// Trust tier levels for sandboxed execution.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Ring {
@@ -145,6 +145,12 @@ impl SandboxEngine {
         // Common: unshare all namespaces
         args.push("--unshare-all".to_string());
         args.push("--die-with-parent".to_string());
+
+        // Remap UID/GID to nobody (65534) so sandboxed processes never run as root
+        args.push("--uid".to_string());
+        args.push("65534".to_string());
+        args.push("--gid".to_string());
+        args.push("65534".to_string());
 
         // /nix/store is always read-only available
         args.push("--ro-bind".to_string());

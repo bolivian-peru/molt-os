@@ -44,7 +44,7 @@ impl Ledger {
         conn.pragma_update(None, "journal_mode", "WAL")
             .context("failed to set WAL journal mode")?;
 
-        conn.pragma_update(None, "synchronous", "NORMAL")
+        conn.pragma_update(None, "synchronous", "FULL")
             .context("failed to set synchronous mode")?;
 
         conn.execute_batch(
