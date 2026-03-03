@@ -5,7 +5,7 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Trust tier levels for sandboxed execution.
+/// Trust ring levels for sandboxed execution.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Ring {

@@ -202,7 +202,7 @@ function validateFilePath(filePath: string): string | null {
 
 /**
  * Defense-in-depth command blocklist. NOT a security boundary.
- * Tier 0 agent has full system access by design.
+ * Ring 0 agent has full system access by design.
  * This catches obvious destructive patterns from prompt injection.
  * Real protection comes from: NixOS atomicity, approval policies, audit trail.
  */
@@ -1830,14 +1830,14 @@ export default function register(api: any) {
   }), { names: ["approval_check"] });
 
   // =========================================================================
-  // Sandbox tools (via agentd — Tier 1/Tier 2 isolation)
+  // Sandbox tools (via agentd — Ring 1/Ring 2 isolation)
   // =========================================================================
 
   // --- sandbox_exec ---
   api.registerTool(() => ({
     name: "sandbox_exec",
     label: "Sandbox Exec",
-    description: "Execute a command in a sandboxed environment using bubblewrap (bwrap). Tier 1 = approved apps with declared capabilities. Tier 2 = untrusted, maximum isolation, no network.",
+    description: "Execute a command in a sandboxed environment using bubblewrap (bwrap). Ring 1 = approved apps with declared capabilities. Ring 2 = untrusted, maximum isolation, no network.",
     parameters: {
       type: "object",
       properties: {
@@ -1845,7 +1845,7 @@ export default function register(api: any) {
         ring: { type: "number", description: "Sandbox ring level: 1 (approved app) or 2 (untrusted). Default: 2" },
         capabilities: {
           type: "array", items: { type: "string" },
-          description: "Capability strings (e.g. 'network', 'fs:/var/lib/myapp'). Only applies to Tier 1.",
+          description: "Capability strings (e.g. 'network', 'fs:/var/lib/myapp'). Only applies to Ring 1.",
         },
         timeout_secs: { type: "number", description: "Execution timeout in seconds. Default: 60" },
       },
