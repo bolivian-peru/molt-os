@@ -6,6 +6,8 @@ osModa is a NixOS distribution with AI-native system management. The agent has r
 
 Local inter-daemon communication happens over Unix sockets. osmoda-mesh adds TCP port 18800 for peer-to-peer connections between osModa instances.
 
+> **Runtime requirement:** osModa requires a real NixOS system (bare metal, cloud VM, or QEMU/KVM). It cannot run inside Docker, LXC, WSL, or any container runtime — the daemons need systemd, NixOS package management, and full kernel access.
+
 ## Trust Tiers
 
 ```

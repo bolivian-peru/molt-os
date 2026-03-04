@@ -12,7 +12,7 @@ A NixOS distribution with AI-native system management. 9 Rust daemons give the A
 [![Tests](https://img.shields.io/badge/Tests-136%20passing-brightgreen.svg)]()
 [![Tools](https://img.shields.io/badge/Agent%20Tools-72-blueviolet.svg)]()
 
-[Quickstart](#quickstart) · [First 5 Minutes](#what-happens-in-the-first-5-minutes) · [Architecture](#architecture) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
+[Requirements](#system-requirements) · [Quickstart](#quickstart) · [First 5 Minutes](#what-happens-in-the-first-5-minutes) · [Architecture](#architecture) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
 
 [![Telegram](https://img.shields.io/badge/Telegram-Join-blue?logo=telegram)](https://t.me/osmodasystems)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/G7bwet8B)
@@ -46,6 +46,19 @@ osModa gives the AI structured access to the entire OS through 72 typed tools ex
 5. **Try something real** — "Install nginx and set up a reverse proxy for port 3000" — the AI edits NixOS config, rebuilds via SafeSwitch with auto-rollback if anything breaks
 
 See the full [Getting Started Guide](docs/GETTING-STARTED.md) for a detailed walkthrough with expected output at each step.
+
+## System Requirements
+
+> **osModa is a full NixOS operating system, not an app.** It replaces your OS entirely — like installing Arch or Fedora, not like running `apt install`. It will NOT work inside Docker, LXC, or any container runtime. Containers lack systemd, NixOS package management, and the kernel-level access that osModa's 9 daemons require.
+
+| Requirement | Details |
+|------------|---------|
+| **Platform** | Bare metal server, cloud VM (Hetzner, DigitalOcean, AWS), or QEMU/KVM virtual machine |
+| **Architecture** | x86_64 or aarch64 |
+| **RAM** | 2 GB minimum (4 GB recommended) |
+| **Disk** | 20 GB minimum |
+| **OS** | Fresh Ubuntu 22.04+, Debian 12+, or existing NixOS (installer converts to NixOS) |
+| **NOT supported** | Docker, LXC, WSL, OpenVZ, or any container-based environment |
 
 ## Quickstart
 
@@ -436,7 +449,7 @@ skills/                     17 system skill definitions
 
 **What works now:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management with systemd-run, ETH + SOL crypto signing, all 72 bridge tools.
 
-**What's next:** Approval gate for destructive ops, web dashboard with live chat, semantic memory engine (usearch + fastembed), Tier 1/Tier 2 sandbox implementation, external security audit of mesh crypto.
+**What's next:** Approval gate for destructive ops, semantic memory engine (usearch + fastembed), Tier 1/Tier 2 sandbox implementation, external security audit of mesh crypto.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the full plan and [STATUS.md](docs/STATUS.md) for honest maturity levels per component.
 

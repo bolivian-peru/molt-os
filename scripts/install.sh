@@ -19,6 +19,9 @@
 #
 # Supports: Ubuntu 22.04+, Debian 12+, existing NixOS
 # Tested on: Hetzner Cloud, DigitalOcean, bare metal
+#
+# NOT supported: Docker, LXC, WSL, OpenVZ, or any container environment.
+# osModa is a full NixOS distribution — it needs a real VM or bare metal.
 # =============================================================================
 
 set -eo pipefail
@@ -50,6 +53,21 @@ error() { echo -e "${RED}[osmoda]${NC} $*" >&2; }
 info()  { echo -e "${BLUE}[osmoda]${NC} $*"; }
 
 die() { error "$@"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Container detection — fail fast with a helpful message
+# ---------------------------------------------------------------------------
+if [ -f /.dockerenv ] || grep -qsE '(docker|lxc|kubepods)' /proc/1/cgroup 2>/dev/null || [ "$(cat /proc/1/sched 2>/dev/null | head -1 | awk '{print $1}')" = "bash" ]; then
+  die "osModa cannot run inside Docker, LXC, or containers.
+  osModa is a full NixOS operating system — it needs a real VM or bare metal server.
+
+  Supported environments:
+    - Cloud VMs: Hetzner, DigitalOcean, AWS, GCP, Azure
+    - Bare metal servers
+    - QEMU/KVM virtual machines
+
+  Easiest option: visit https://spawn.os.moda to deploy a managed osModa server."
+fi
 
 # ---------------------------------------------------------------------------
 # Parse arguments
