@@ -467,7 +467,7 @@ if [ "$USE_SYSTEMD" = true ]; then
   # agentd
   cat > /etc/systemd/system/osmoda-agentd.service <<'EOF'
 [Unit]
-Description=osModa Kernel Bridge Daemon
+Description=osModa System Bridge Daemon
 After=network.target
 [Service]
 Type=simple

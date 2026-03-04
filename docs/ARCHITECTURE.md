@@ -2,23 +2,23 @@
 
 ## Overview
 
-osModa is a NixOS distribution where the AI agent IS the operating system interface. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), background automation (routines), P2P encrypted server-to-server communication (mesh), local voice (voice), MCP server lifecycle management (mcpd), and system learning & self-optimization (teachd).
+osModa is a NixOS distribution with AI-native system management. The agent has root access through `agentd`, a Rust daemon that provides structured, audited access to every aspect of the Linux system. Additional daemons handle crypto wallets (keyd), deploy transactions (watch), background automation (routines), P2P encrypted server-to-server communication (mesh), local voice (voice), MCP server lifecycle management (mcpd), and system learning & self-optimization (teachd).
 
 Local inter-daemon communication happens over Unix sockets. osmoda-mesh adds TCP port 18800 for peer-to-peer connections between osModa instances.
 
-## Trust Rings
+## Trust Tiers
 
 ```
-RING 0: OpenClaw + agentd + keyd + watch + routines + mesh + voice + mcpd + teachd
+TIER 0: OpenClaw + agentd + keyd + watch + routines + mesh + voice + mcpd + teachd
   Full system access. Root-equivalent. See and control everything.
   Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines, mesh, voice, mcpd, teachd
 
-RING 1: Approved Apps
+TIER 1: Approved Apps
   Sandboxed with declared capabilities. No root, no arbitrary filesystem.
   Execution: bubblewrap + systemd transient units
   Network: egress proxy with domain allowlist
 
-RING 2: Untrusted Execution
+TIER 2: Untrusted Execution
   Maximum isolation. Working directory + /tmp only. No network.
   User scripts, pip packages, npm installs, third-party binaries.
 ```
@@ -68,7 +68,7 @@ mesh also listens on TCP :18800 for peer-to-peer connections
 
 ## Daemon Details
 
-### agentd — Kernel Bridge
+### agentd — System Bridge
 
 - **Socket**: `/run/osmoda/agentd.sock`
 - **State**: `/var/lib/osmoda/`
@@ -387,6 +387,8 @@ Vector indexes (when wired) are derived and always rebuildable.
 
 spawn.os.moda is the hosted option for deploying osModa servers. Handles payment, server creation, and ongoing management via a web dashboard. Separate private repo — not part of the open source OS.
 
+**Server detail dashboard:** Single-column tabbed layout (Overview / Chat / Settings). Overview tab shows agent card, channel cards (Telegram blue / WhatsApp green), system + settings grid, and collapsible setup progress. Chat tab has a horizontal activity bar, Claude-like rounded input, markdown rendering (code blocks, lists, headers, links, blockquotes), no-bubble agent messages, and user messages as accent bubbles. Right sidebar column removed entirely.
+
 ## Safety Boundaries
 
 ### What's enforced today
@@ -408,7 +410,7 @@ spawn.os.moda is the hosted option for deploying osModa servers. Handles payment
 | Feature | Status | Why it matters |
 |---------|--------|---------------|
 | **Approval gate for destructive ops** | Planned (#1 priority) | Currently convention-based (agent prompt says "ask before destructive actions") — not enforced by code |
-| **Ring 1/Ring 2 sandbox** | Designed, not enforced | Third-party tools should run in bubblewrap isolation with egress proxy, but this isn't wired yet |
+| **Tier 1/Tier 2 sandbox** | Designed, not enforced | Third-party tools should run in bubblewrap isolation with egress proxy, but this isn't wired yet |
 | **Capability tokens** | Planned | Fine-grained, time-limited access tokens for socket auth; currently file-permissions only |
 | **External security audit** | Planned | Mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but needs independent review |
 
@@ -418,7 +420,7 @@ spawn.os.moda is the hosted option for deploying osModa servers. Handles payment
 - **keyd**: Network-isolated. Keys encrypted at rest. Policy-gated signing. Zeroizes key material on drop.
 - **watch**: Runs as root (needs `nixos-rebuild` and `systemctl` access). Auto-rollback is a safety net, not a security boundary.
 - **routines**: systemd hardening (NoNewPrivileges, ProtectKernelTunables). Runs scheduled tasks only.
-- **egress**: Domain allowlist. Only Ring 2 tools route through it.
+- **egress**: Domain allowlist. Only Tier 2 tools route through it.
 - **mesh**: Noise_XX + ML-KEM-768 hybrid PQ. All peer traffic encrypted. Invite-based pairing, no global registry. Keys zeroized on shutdown.
 - **voice**: Local-only processing. No cloud APIs, no network calls. whisper.cpp + piper-tts, both MIT-licensed.
 - **mcpd**: Lifecycle manager only — doesn't proxy MCP traffic. Injects egress proxy for domain-restricted servers. Secret files read from disk, never stored in Nix config.

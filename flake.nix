@@ -1,7 +1,7 @@
-# osModa — AI-Native Operating System
+# osModa — AI-Native System Platform
 # NixOS + OpenClaw = Agents as first-class OS citizens
 {
-  description = "osModa: AI-native operating system powered by OpenClaw on NixOS";
+  description = "osModa: AI-native system platform powered by OpenClaw on NixOS";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

@@ -105,7 +105,7 @@ Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/i
 | Tool | Description |
 |------|-------------|
 | `system_health` | System health snapshot: CPU, RAM, disk, load average, uptime |
-| `system_query` | Query system state: processes, services, network, disk, kernel params |
+| `system_query` | Query system state: processes, services, network, disk, sysctl parameters |
 | `system_discover` | Discover all running services: listening ports, systemd units, known service types (nginx, postgres, redis, node, etc.) |
 | `event_log` | Query the append-only hash-chained audit log |
 | `memory_store` | Store important information in long-term OS memory |
@@ -305,7 +305,7 @@ Enforces `approvalRequired` policy. Destructive commands (rm -rf, reboot, nix.re
 
 ### Sandbox tools (via agentd)
 
-Ring 1/Ring 2 isolation using bubblewrap (bwrap). Ring 1 = approved apps with declared capabilities. Ring 2 = untrusted, maximum isolation (no network, minimal filesystem).
+Tier 1/Tier 2 isolation using bubblewrap (bwrap). Tier 1 = approved apps with declared capabilities. Tier 2 = untrusted, maximum isolation (no network, minimal filesystem).
 
 | Tool | Description |
 |------|-------------|

@@ -11,7 +11,7 @@ This document covers what shipped and what's next, in priority order.
 
 | Feature | Where | Maturity |
 |---------|-------|----------|
-| Full system access (processes, files, services, kernel) | agentd + bridge | **Solid** |
+| Full system access (processes, files, services, sysctl) | agentd + bridge | **Solid** |
 | SafeSwitch deploys with auto-rollback | osmoda-watch | **Functional** |
 | Background automation (cron, interval, event) | osmoda-routines | **Functional** |
 | Hash-chained audit ledger | agentd ledger | **Solid** |
@@ -240,17 +240,17 @@ const config = BridgeConfigSchema.parse({
 
 ## Sprint 3 — Product Polish (Following Week)
 
-### 8. Mobile-Friendly Status Dashboard
+### 8. Server Detail Dashboard (SHIPPED)
 
-**What it does:** `GET /status` on agentd returns a self-contained HTML page — server-rendered, no JavaScript required, works in any mobile browser via SSH tunnel or Cloudflare URL.
+**What it does:** Full server management dashboard at spawn.os.moda with tabbed interface (Overview / Chat / Settings).
 
-Shows: hostname, uptime, CPU/RAM/disk gauges, service status grid (green/red), last 5 ledger events.
+**Overview tab:** Single-column layout with prominent agent card, 2-column channel cards (Telegram blue / WhatsApp green), system + settings 2-column grid, collapsible setup progress, collapsible advanced section.
 
-Auto-refresh every 30s via `<meta http-equiv="refresh">`. Loads in <10KB.
+**Chat tab:** Horizontal activity bar (replaces old sidebar), Claude-like rounded input with circular send button, no-bubble agent messages, user messages as accent bubbles, activity dropdown, markdown rendering (fenced code blocks, lists, headers, links, blockquotes).
 
-**Use case:** Open your phone, check if the server is healthy in 2 seconds. No chat session needed.
+**Header:** Bigger server name (20px), subtitle line (plan + location + price), pill-shaped status badge. Right sidebar column removed entirely — everything single-column flow.
 
-**Files:** `crates/agentd/src/api/status_page.rs` (~200 LOC)
+**Files:** `apps/spawn/public/dashboard.html`
 
 ---
 
@@ -431,7 +431,7 @@ osModa web UI (same as SSH tunnel, but browser-native)
 | 6 | x402 OS-native payments | — | Planned | AI pays for APIs autonomously within policy |
 | 7 | Semantic memory (usearch) | — | Planned | Hybrid BM25 + vector recall |
 | 8 | Zod config validation | — | Planned | Developer experience, fail-fast |
-| 9 | Web dashboard with live chat | — | **Next** | Server management from browser |
+| 9 | Web dashboard with live chat | — | **SHIPPED** | Server management from browser |
 | 10 | Daily Telegram briefing | — | Planned | Proactive awareness |
 | 11 | Multi-server management | — | Planned | Fleet view, AI queries all servers at once |
 | 12 | Spawn peer discovery | — | Planned | Auto-connect provisioned servers via mesh |

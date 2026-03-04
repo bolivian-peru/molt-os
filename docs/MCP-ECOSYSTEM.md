@@ -166,11 +166,11 @@ Each gets a NixOS module option under `services.osmoda.mcp.servers.<name>`.
 
 MCP servers run in different trust contexts depending on what they access:
 
-| Server type | Trust ring | Network | How |
+| Server type | Trust tier | Network | How |
 |-------------|-----------|---------|-----|
-| Local-only (postgres, sqlite, filesystem) | Ring 1 | None | `PrivateNetwork=true` in systemd |
-| Web-fetching (scrapling, fetch, github) | Ring 1 | Via egress | `allowedDomains` → egress allowlist |
-| Custom user servers | Ring 2 | Restricted | bubblewrap + egress |
+| Local-only (postgres, sqlite, filesystem) | Tier 1 | None | `PrivateNetwork=true` in systemd |
+| Web-fetching (scrapling, fetch, github) | Tier 1 | Via egress | `allowedDomains` → egress allowlist |
+| Custom user servers | Tier 2 | Restricted | bubblewrap + egress |
 
 Every MCP tool call is logged to the agentd ledger. The AI can explain every tool call it made, to what server, with what arguments.
 

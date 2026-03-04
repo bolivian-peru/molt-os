@@ -27,7 +27,7 @@ Last updated: 2026-02-27
 
 ## Rust Crates
 
-### agentd — Kernel Bridge Daemon
+### agentd — System Bridge Daemon
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
@@ -343,6 +343,18 @@ cargo test --workspace
 
 Separate private repo. Not part of the open source OS. Visit [spawn.os.moda](https://spawn.os.moda) to deploy a managed osModa server.
 
+### Server Detail Dashboard (dashboard.html)
+
+Redesigned single-column layout with tabbed interface (Overview / Chat / Settings).
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| Header | **Functional** | Bigger server name (20px), subtitle line (plan + location + price), pill-shaped status badge |
+| Overview tab | **Functional** | Single-column layout, prominent agent card, 2-col channel cards (Telegram blue / WhatsApp green), system + settings 2-col grid, collapsible setup progress, collapsible advanced section |
+| Chat tab | **Functional** | Horizontal activity bar (replaces old sidebar), Claude-like rounded input with circular send button, no-bubble agent messages, user messages as accent bubbles, activity dropdown, markdown rendering (code blocks, lists, headers, links, blockquotes) |
+| Markdown rendering | **Functional** | Fenced code blocks with syntax highlighting, inline code, headers, bold/italic, ordered/unordered lists, links, blockquotes |
+| Responsive layout | **Functional** | Removed right sidebar column entirely — everything single-column flow |
+
 ---
 
 ## Security Hardening (2026-02-26)
@@ -403,7 +415,7 @@ Stress test:           PASS (700/700 concurrent health checks, 50 concurrent que
 ## What's Next
 
 1. **Approval gate for destructive ops** — code-enforced confirmation before destructive operations (currently convention-based via agent prompt, not runtime-enforced). This is the #1 safety priority.
-2. **Ring 1/Ring 2 sandbox implementation** — enforce the trust ring model with bubblewrap isolation + egress proxy for third-party tools
+2. **Tier 1/Tier 2 sandbox implementation** — enforce the trust tier model with bubblewrap isolation + egress proxy for third-party tools
 3. **End-to-end VM test** — boot the dev VM, verify all daemons start and communicate
 4. **Integration tests** — bridge → daemon → ledger pipeline tests
 5. **Wire semantic memory** — connect usearch + fastembed so `memory/recall` returns hybrid BM25 + vector results
@@ -411,4 +423,4 @@ Stress test:           PASS (700/700 concurrent health checks, 50 concurrent que
 7. **Persistent mesh sessions** — save/restore transport state across daemon restarts
 8. **External security audit** — independent review of mesh crypto (Noise_XX + ML-KEM-768)
 9. **Real transaction building** — RLP encoding for ETH, Solana transaction structs (lower priority — not the core value prop)
-10. **Web dashboard with live chat** — server management from browser
+10. ~~**Web dashboard with live chat**~~ — DONE. Redesigned detail page: single-column layout, tabbed Overview/Chat/Settings, markdown rendering in chat, horizontal activity bar, collapsible sections

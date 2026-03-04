@@ -38,7 +38,7 @@ struct Args {
     #[arg(long, default_value = "")]
     approval_patterns: String,
 
-    /// Enable the sandbox engine for Ring 1/Ring 2 isolation.
+    /// Enable the sandbox engine for Tier 1/Tier 2 isolation.
     #[arg(long, default_value_t = false)]
     sandbox_enabled: bool,
 

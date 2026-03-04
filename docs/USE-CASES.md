@@ -7,7 +7,7 @@
 
 ## The Core Thesis
 
-osModa is a NixOS distribution where the AI agent IS the operating system. Root access. Self-healing. Atomic rollbacks. Cryptographic audit trail. P2P encrypted mesh. OS-native crypto wallets.
+osModa is a NixOS distribution with AI-native system management. Root access. Self-healing. Atomic rollbacks. Cryptographic audit trail. P2P encrypted mesh. OS-native crypto wallets.
 
 Every use case below shares the same six needs:
 1. **Autonomous operation** — can't babysit it 24/7
@@ -704,7 +704,7 @@ Each use case becomes:
 - "self-hosted ai server"
 - "hash-chained audit trail"
 - "p2p encrypted mesh"
-- "agent operating system"
+- "agent system platform"
 
 **Content calendar:**
 - Week 1-2: AI Agents + Self-Hosting pages (highest readiness, largest audience)
@@ -717,6 +717,6 @@ Each use case becomes:
 
 ## The Common Thread (for all marketing)
 
-> "osModa is the first operating system built for autonomous systems. Whether it's AI agents, drone swarms, warehouse robots, or your personal devices — if it needs to operate autonomously, heal itself, prove what it did, and coordinate with other nodes, it should run osModa."
+> "osModa is the first system platform built for autonomous infrastructure. Whether it's AI agents, drone swarms, warehouse robots, or your personal devices — if it needs to operate autonomously, heal itself, prove what it did, and coordinate with other nodes, it should run osModa."
 
 That's the category. That's the brand. That's the SEO footprint.

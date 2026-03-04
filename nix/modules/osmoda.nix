@@ -63,7 +63,7 @@ let
     else generatedConfigFile;
 in {
   options.services.osmoda = {
-    enable = mkEnableOption "osModa - AI-native operating system";
+    enable = mkEnableOption "osModa - AI-native system platform";
 
     # --- Gateway (OpenClaw) ---
     openclaw = {

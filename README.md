@@ -122,15 +122,15 @@ agentctl verify-ledger --state-dir /var/lib/osmoda
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Trust Model (3 rings)
+### Trust Model (3 tiers)
 
 ```
-RING 0  OpenClaw + agentd       Root. Full system. This is the agent.
-RING 1  Approved apps           Sandboxed. Declared capabilities only.
-RING 2  Untrusted tools         Max isolation. No network. Minimal filesystem.
+TIER 0  OpenClaw + agentd       Root. Full system. This is the agent.
+TIER 1  Approved apps           Sandboxed. Declared capabilities only.
+TIER 2  Untrusted tools         Max isolation. No network. Minimal filesystem.
 ```
 
-The agent is ring 0 by design. It's not a chatbot with sudo — it's a system service with structured access to everything, constrained by NixOS atomicity and its own audit ledger, not by permission denials. Lower rings cannot escalate privileges upward by design. Ring 0 remains the trusted computing base and must be governed by approval policies, spending limits, and audit review.
+The agent is tier 0 by design. It's not a chatbot with sudo — it's a system service with structured access to everything, constrained by NixOS atomicity and its own audit ledger, not by permission denials. Lower tiers cannot escalate privileges upward by design. Tier 0 remains the trusted computing base and must be governed by approval policies, spending limits, and audit review.
 
 ---
 
@@ -155,12 +155,12 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 
 **Covered:** OS configuration, package state, service definitions, firewall rules, system generations. Any bad config change can be atomically reverted.
 
-**NOT covered:** Data already sent to external APIs, signed crypto transactions, deleted user data, exposed secrets, or side effects on remote systems. Ring 0 access means the agent can do anything the OS can do — the safety model relies on structured tools, audit trails, and NixOS atomicity, not on restricting the agent's access.
+**NOT covered:** Data already sent to external APIs, signed crypto transactions, deleted user data, exposed secrets, or side effects on remote systems. Tier 0 access means the agent can do anything the system can do — the safety model relies on structured tools, audit trails, and NixOS atomicity, not on restricting the agent's access.
 
 ### What's planned but not yet implemented
 
 - **Approval gate for destructive ops** — currently convention-based (agent prompt says "ask before destructive actions") but not enforced by code. This is the #1 priority for the next release.
-- **Ring 1/Ring 2 sandbox** — the trust ring model is designed but not yet enforced. Third-party tools currently run without bubblewrap isolation.
+- **Tier 1/Tier 2 sandbox** — the trust tier model is designed but not yet enforced. Third-party tools currently run without bubblewrap isolation.
 - **Capability tokens** — fine-grained, time-limited access tokens for socket authentication. Currently file-permissions only.
 - **External security audit** — mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but hasn't had independent review.
 
@@ -182,7 +182,7 @@ Append-only. Tamper-evident. Any single modification invalidates the chain. Veri
 
 | Daemon | What it does | Key feature |
 |--------|-------------|-------------|
-| **agentd** | System bridge: processes, services, network, filesystem, NixOS config, kernel params. Hash-chained audit ledger. FTS5 memory search. | The structured interface between AI and OS |
+| **agentd** | System bridge: processes, services, network, filesystem, NixOS config, sysctl parameters. Hash-chained audit ledger. FTS5 memory search. | The structured interface between AI and system |
 | **osmoda-watch** | SafeSwitch: deploy with a timer, health checks, and automatic rollback if anything fails. Autopilot watchers with escalation (restart -> rollback -> notify). | Blue-green deploys with automatic undo |
 | **osmoda-routines** | Background cron/event/webhook automation. Runs between conversations. Health checks, log scans, service monitors. | Agent actions that persist when nobody's chatting |
 | **osmoda-teachd** | OBSERVE loop (30s) collects metrics. LEARN loop (5m) detects patterns. TEACH API injects knowledge. Optimizer suggests fixes. | The OS learns from its own behavior |
@@ -436,7 +436,7 @@ skills/                     17 system skill definitions
 
 **What works now:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management with systemd-run, ETH + SOL crypto signing, all 72 bridge tools.
 
-**What's next:** Approval gate for destructive ops, web dashboard with live chat, semantic memory engine (usearch + fastembed), Ring 1/Ring 2 sandbox implementation, external security audit of mesh crypto.
+**What's next:** Approval gate for destructive ops, web dashboard with live chat, semantic memory engine (usearch + fastembed), Tier 1/Tier 2 sandbox implementation, external security audit of mesh crypto.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the full plan and [STATUS.md](docs/STATUS.md) for honest maturity levels per component.
 

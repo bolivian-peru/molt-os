@@ -2,27 +2,27 @@
 
 ## What this is
 
-osModa: NixOS distribution where OpenClaw IS the operating system.
-Not an agent running on an OS. The agent IS the OS.
+osModa: NixOS distribution with AI-native system management.
+The agent has full root-level access to the entire system via structured daemons.
 
 OpenClaw has FULL system access. Root. All files. All processes. All APIs.
 The sandbox exists for UNTRUSTED third-party tools, not for OpenClaw itself.
 
-## Architecture (3 trust rings)
+## Architecture (3 trust tiers)
 
 ```
-RING 0: OpenClaw + agentd (full system, root-equivalent)
+TIER 0: OpenClaw + agentd (full system, root-equivalent)
   ↓ grants capabilities to ↓
-RING 1: Approved apps (sandboxed, declared capabilities)
+TIER 1: Approved apps (sandboxed, declared capabilities)
   ↓ even more restricted ↓
-RING 2: Untrusted tools (max isolation, no network, minimal fs)
+TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 ```
 
 ## Components
 
-1. **agentd** (Rust) — kernel bridge daemon. Unix socket API at `/run/osmoda/agentd.sock`.
+1. **agentd** (Rust) — system bridge daemon. Unix socket API at `/run/osmoda/agentd.sock`.
    Gives OpenClaw structured access to: processes, services, network, filesystem, NixOS config,
-   kernel params, users, firewall. Append-only hash-chained event log in SQLite.
+   sysctl parameters, users, firewall. Append-only hash-chained event log in SQLite.
    Memory system endpoints for ingest/recall/store.
    Agent Card (EIP-8004) identity + capability discovery.
    Structured receipts + incident workspaces for auditable troubleshooting.
@@ -112,7 +112,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
 ./nix/hosts/dev-vm.nix                   # QEMU dev VM (Sway desktop)
 ./nix/hosts/server.nix                   # Headless server config
 ./nix/hosts/iso.nix                      # Installer ISO config
-./crates/agentd/                         # Rust: kernel bridge daemon
+./crates/agentd/                         # Rust: system bridge daemon
   ├── Cargo.toml
   └── src/
       ├── main.rs                        # Entry + socket setup
@@ -126,7 +126,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
       │   └── receipts.rs               # GET /receipts, /incident/* endpoints
       ├── ledger.rs                      # SQLite event log + hash chain
       ├── approval.rs                    # Approval gate for destructive ops (SQLite)
-      ├── sandbox.rs                     # Ring 1/Ring 2 bubblewrap sandbox + capability tokens
+      ├── sandbox.rs                     # Tier 1/Tier 2 bubblewrap sandbox + capability tokens
       └── state.rs                       # Shared app state
 ./crates/agentctl/                       # Rust: CLI (events, verify-ledger)
   ├── Cargo.toml
@@ -231,7 +231,7 @@ RING 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── app-deployer/SKILL.md              # Deploy + manage user applications
   └── deploy-ai-agent/SKILL.md           # Deploy AI agent workloads (LangChain, CrewAI, etc.)
 ./templates/
-  ├── AGENTS.md                          # "You ARE the operating system" (main agent)
+  ├── AGENTS.md                          # "You manage the entire system" (main agent)
   ├── SOUL.md                            # Calm, competent, omniscient (main agent)
   ├── TOOLS.md                           # All agentd endpoints documented
   ├── IDENTITY.md                        # Agent identity (name, role, trust model)
