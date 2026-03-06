@@ -497,6 +497,46 @@ Path: `/var/lib/osmoda/memory/`
 - `nix flake check` must pass at all times.
 - `cargo check --workspace` must pass at all times.
 
+## spawn.os.moda — Hosted Provisioning (gitignored, deployed via push.sh)
+
+Separate from the OS codebase. Lives in `apps/spawn/` (gitignored). Deployed via `bash push.sh` to the spawn server.
+
+### Heartbeat pipeline
+
+60-second heartbeat from each server collects data via Unix sockets and sends to spawn:
+- System health (CPU, RAM, disk, uptime) from agentd
+- Agent instances from OpenClaw dirs
+- Daemon health (10 daemons: active/pid)
+- Mesh identity + peers
+- Routines + routine history from routines daemon
+- Watchers from watch daemon
+- Recent events (30) from agentd audit log
+- TeachD health + high-confidence patterns from teachd
+- MCP servers from mcpd
+
+### Dashboard orchestration cards
+
+Overview tab shows 4 new cards (conditional, only when data exists):
+- **Automation** — routines with interval/last-run, watchers with check-type/status
+- **Activity Feed** — 15 most recent agentd events
+- **Intelligence** — teachd stats + detected patterns with confidence
+- **Tool Servers** — MCP server list with status/uptime
+
+### v1 Programmatic API (x402 payment-gated)
+
+Agent-to-agent spawning. Coinbase x402 protocol (USDC on Base).
+
+```
+GET  /.well-known/agent-card.json     → A2A/ERC-8004 Agent Card (skills = plans, x402 pricing)
+GET  /api/v1/plans                    → Plan list with x402 info (free)
+POST /api/v1/spawn/:planId            → Spawn server (x402-gated), returns osk_ API token
+GET  /api/v1/status/:orderId          → Status (basic free, full with Bearer osk_)
+WS   /api/v1/chat/:orderId            → WebSocket chat (auth via ?token=osk_)
+GET  /api/v1/docs                     → OpenAPI 3.0 spec with x402 extensions
+```
+
+Dependencies: `@x402/express`, `@x402/core`, `@x402/evm`. Graceful fallback if not installed.
+
 ## Non-negotiables
 
 1. agentd runs as root (it IS the system)

@@ -470,6 +470,35 @@ See [ROADMAP.md](docs/ROADMAP.md) for the full plan and [STATUS.md](docs/STATUS.
 
 Don't want to self-host? [**spawn.os.moda**](https://spawn.os.moda) provisions a fully configured osModa server on Hetzner Cloud in ~10 minutes. Pick a plan, pay with card or USDC, and start chatting with your server from the browser or Telegram.
 
+The dashboard shows real orchestration data from your server's daemons: active routines and watchers, audit event feed, learned system patterns, and running tool servers — all from live heartbeat data, not mocks.
+
+### Programmatic API (agents spawning agents)
+
+Spawn osModa servers from code or from other AI agents via the v1 API with x402 payment:
+
+```bash
+# Discover capabilities (A2A/ERC-8004 Agent Card)
+curl https://spawn.os.moda/.well-known/agent-card.json
+
+# List plans with pricing
+curl https://spawn.os.moda/api/v1/plans
+
+# Spawn a server (x402 USDC payment required)
+curl -X POST https://spawn.os.moda/api/v1/spawn/cx22 \
+  -H "Content-Type: application/json" \
+  -d '{"server_name": "my-agent", "ssh_keys": ["ssh-ed25519 ..."]}'
+# → { order_id, api_token: "osk_...", status_url, chat_url }
+
+# Check status
+curl https://spawn.os.moda/api/v1/status/{orderId} \
+  -H "Authorization: Bearer osk_..."
+
+# Chat with the server's AI via WebSocket
+wscat -c "wss://spawn.os.moda/api/v1/chat/{orderId}?token=osk_..."
+```
+
+Payment via Coinbase x402 protocol (USDC on Base). OpenAPI docs at `/api/v1/docs`.
+
 ## Contributing
 
 Public beta. Feedback, bug reports, and PRs welcome.

@@ -389,7 +389,33 @@ Vector indexes (when wired) are derived and always rebuildable.
 
 spawn.os.moda is the hosted option for deploying osModa servers. Handles payment, server creation, and ongoing management via a web dashboard. Separate private repo — not part of the open source OS.
 
-**Server detail dashboard:** Single-column tabbed layout (Overview / Chat / Settings). Overview tab shows agent card, channel cards (Telegram blue / WhatsApp green), system + settings grid, and collapsible setup progress. Chat tab has a horizontal activity bar, Claude-like rounded input, markdown rendering (code blocks, lists, headers, links, blockquotes), no-bubble agent messages, and user messages as accent bubbles. Right sidebar column removed entirely.
+**Server detail dashboard:** Single-column tabbed layout (Overview / Chat / Settings). Overview tab shows agent card, orchestration cards (automation, activity feed, intelligence, tool servers), channel cards (Telegram blue / WhatsApp green), system + settings grid, and collapsible setup progress. Chat tab has a horizontal activity bar, Claude-like rounded input, markdown rendering (code blocks, lists, headers, links, blockquotes), no-bubble agent messages, and user messages as accent bubbles.
+
+**Orchestration dashboard cards** (real daemon data, not mocks):
+- **Automation** — Active routines with intervals and last-run times, health watchers with check types and status (from routines + watch daemons)
+- **Activity Feed** — 15 most recent agentd audit log events with timestamps, types, and actors
+- **System Intelligence** — TeachD observation/pattern/knowledge counts, detected patterns with confidence scores
+- **Tool Servers** — Running MCP servers with status, PID, and uptime
+
+**Heartbeat data pipeline:** 60-second heartbeat from each server collects daemon data via Unix sockets (routines, watchers, events, teachd health/patterns, MCP servers) and sends to spawn for dashboard rendering.
+
+### v1 Programmatic API (x402 payment-gated)
+
+Agents can spawn osModa servers programmatically — agents spawning agents.
+
+**Discovery:**
+- `GET /.well-known/agent-card.json` — A2A/ERC-8004 Agent Card with plans as skills, x402 pricing, input/output schemas
+
+**Endpoints:**
+- `GET /api/v1/plans` — Plan list with x402 pricing info, regions, network mode (free)
+- `POST /api/v1/spawn/:planId` — Spawn a server (x402-gated with USDC). Returns order ID + API token (`osk_...`)
+- `GET /api/v1/status/:orderId` — Server status (basic info free, full details require Bearer `osk_` token)
+- `WS /api/v1/chat/:orderId` — WebSocket chat with the server's AI agent (auth via `?token=osk_...`)
+- `GET /api/v1/docs` — OpenAPI 3.0 spec with x402 extensions
+
+**Payment:** Coinbase x402 protocol. USDC on Base (mainnet) or Base Sepolia (testnet). Per-plan static pricing. Uses `@x402/express` + `@x402/evm` + `@x402/core`.
+
+**Auth:** API tokens (`osk_...`) generated via HMAC-SHA256 on spawn, returned in the spawn response. Bearer token auth for status + WebSocket chat.
 
 ## Safety Boundaries
 

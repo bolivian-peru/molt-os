@@ -1271,6 +1271,40 @@ MESH_IDENTITY=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/mesh.sock" http://
 MESH_PEERS=$(curl -sf --max-time 5 --unix-socket "$RUN_DIR/mesh.sock" http://l/peers 2>/dev/null || echo "[]")
 MESH_PEERS_SLIM=$(echo "$MESH_PEERS" | jq '[.[] | {id: .id, label: .label, state: (.connection_state.state // .connection_state // "unknown")}]' 2>/dev/null || echo "[]")
 
+# Collect routines from routines daemon (3s timeout)
+ROUTINES="[]"
+ROUTINE_HISTORY="[]"
+if systemctl is-active osmoda-routines &>/dev/null; then
+  ROUTINES=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/routines.sock" http://l/routine/list 2>/dev/null || echo "[]")
+  ROUTINE_HISTORY=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/routines.sock" http://l/routine/history 2>/dev/null || echo "[]")
+fi
+
+# Collect watchers from watch daemon (3s timeout)
+WATCHERS="[]"
+if systemctl is-active osmoda-watch &>/dev/null; then
+  WATCHERS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/watch.sock" http://l/watcher/list 2>/dev/null || echo "[]")
+fi
+
+# Collect recent events from agentd (3s timeout)
+RECENT_EVENTS="[]"
+if systemctl is-active agentd &>/dev/null; then
+  RECENT_EVENTS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/agentd.sock" "http://l/events/log?limit=30" 2>/dev/null || echo "[]")
+fi
+
+# Collect teachd health + patterns (3s timeout)
+TEACHD_HEALTH="{}"
+TEACHD_PATTERNS="[]"
+if systemctl is-active osmoda-teachd &>/dev/null; then
+  TEACHD_HEALTH=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/teachd.sock" http://l/health 2>/dev/null || echo "{}")
+  TEACHD_PATTERNS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/teachd.sock" "http://l/patterns?min_confidence=0.7&limit=10" 2>/dev/null || echo "[]")
+fi
+
+# Collect MCP servers from mcpd (3s timeout)
+MCP_SERVERS="[]"
+if systemctl is-active osmoda-mcpd &>/dev/null; then
+  MCP_SERVERS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/mcpd.sock" http://l/servers 2>/dev/null || echo "[]")
+fi
+
 # Build payload (use jq for safe JSON construction)
 PAYLOAD=$(jq -n \
   --arg oid "$OID" \
@@ -1284,7 +1318,14 @@ PAYLOAD=$(jq -n \
   --argjson daemon_health "$DAEMON_JSON" \
   --argjson mesh_identity "$MESH_IDENTITY" \
   --argjson mesh_peers "$MESH_PEERS_SLIM" \
-  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers}'
+  --argjson routines "$ROUTINES" \
+  --argjson routine_history "$ROUTINE_HISTORY" \
+  --argjson watchers "$WATCHERS" \
+  --argjson recent_events "$RECENT_EVENTS" \
+  --argjson teachd_health "$TEACHD_HEALTH" \
+  --argjson teachd_patterns "$TEACHD_PATTERNS" \
+  --argjson mcp_servers "$MCP_SERVERS" \
+  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers, routines: $routines, routine_history: $routine_history, watchers: $watchers, recent_events: $recent_events, teachd_health: $teachd_health, teachd_patterns: $teachd_patterns, mcp_servers: $mcp_servers}'
 )
 
 # Send heartbeat (with HMAC signature if secret is set)

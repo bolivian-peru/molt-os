@@ -353,10 +353,45 @@ Redesigned single-column layout with tabbed interface (Overview / Chat / Setting
 | Component | Maturity | Notes |
 |-----------|----------|-------|
 | Header | **Functional** | Bigger server name (20px), subtitle line (plan + location + price), pill-shaped status badge |
-| Overview tab | **Functional** | Single-column layout, prominent agent card, 2-col channel cards (Telegram blue / WhatsApp green), system + settings 2-col grid, collapsible setup progress, collapsible advanced section |
+| Overview tab | **Functional** | Single-column layout, prominent agent card, orchestration cards, 2-col channel cards, system + settings grid, collapsible sections |
+| Automation card | **Functional** | Shows active routines (interval, last-run, status) and health watchers (check type, interval, result) from heartbeat |
+| Activity feed card | **Functional** | 15 most recent agentd audit log events with timestamp, type, and actor |
+| Intelligence card | **Functional** | TeachD stats (observations, patterns, knowledge docs) + detected patterns with confidence scores; conditional |
+| Tool servers card | **Functional** | MCP server list with status, PID, uptime; conditional |
 | Chat tab | **Functional** | Horizontal activity bar (replaces old sidebar), Claude-like rounded input with circular send button, no-bubble agent messages, user messages as accent bubbles, activity dropdown, markdown rendering (code blocks, lists, headers, links, blockquotes) |
 | Markdown rendering | **Functional** | Fenced code blocks with syntax highlighting, inline code, headers, bold/italic, ordered/unordered lists, links, blockquotes |
 | Responsive layout | **Functional** | Removed right sidebar column entirely — everything single-column flow |
+
+### v1 Programmatic API
+
+Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| Agent Card (`/.well-known/agent-card.json`) | **Functional** | A2A/ERC-8004 discovery with plans as skills, x402 pricing, input/output schemas |
+| `GET /api/v1/plans` | **Functional** | Plan list with x402 pricing, regions, network mode |
+| `POST /api/v1/spawn/:planId` | **Functional** | x402-gated server spawn, returns API token (`osk_...`), provisions Hetzner VM |
+| `GET /api/v1/status/:orderId` | **Functional** | Basic status free, full details require Bearer `osk_` token |
+| `WS /api/v1/chat/:orderId` | **Functional** | WebSocket chat with server AI, auth via `?token=osk_...` query param |
+| `GET /api/v1/docs` | **Functional** | OpenAPI 3.0 spec with x402 extensions |
+| x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/core`, USDC on Base/Base Sepolia |
+| API token auth | **Functional** | HMAC-SHA256 generated `osk_` tokens, Bearer auth for protected endpoints |
+
+### Heartbeat Pipeline
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| System health | **Functional** | CPU, RAM, disk, uptime from agentd |
+| Agent instances | **Functional** | Name + status from OpenClaw agent dirs |
+| Daemon health | **Functional** | 10 daemons: active/pid per daemon |
+| Mesh identity + peers | **Functional** | Instance ID, connected peers |
+| Routines | **Functional** | Active routines with trigger, interval, last-run from routines daemon |
+| Routine history | **Functional** | Recent execution history (status, output) |
+| Watchers | **Functional** | Health watchers with check type, interval, status from watch daemon |
+| Recent events | **Functional** | 30 most recent agentd audit log events |
+| TeachD health | **Functional** | Observation/pattern/knowledge/optimization counts, loop status |
+| TeachD patterns | **Functional** | Top 10 high-confidence patterns (>0.7) |
+| MCP servers | **Functional** | Server list with name, status, PID, uptime from mcpd |
 
 ---
 
