@@ -2,7 +2,7 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-02-27
+Last updated: 2026-03-06
 
 ## Maturity Levels
 
@@ -18,8 +18,8 @@ Last updated: 2026-02-27
 | Metric | Count |
 |--------|-------|
 | Rust crates | 10 (9 daemons + 1 CLI) |
-| Tests passing | 136 |
-| Bridge tools registered | 72 |
+| Tests passing | 198 |
+| Bridge tools registered | 83 |
 | System skills | 17 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 
@@ -50,7 +50,7 @@ Last updated: 2026-02-27
 | Subprocess timeouts | **Solid** | All subprocess calls capped with configurable timeouts |
 | `/system/discover` | **Solid** | Parses `ss -tlnp` + `systemctl list-units`, detects known service types, cross-references with sysinfo; 4 tests |
 | FTS5 search | **Solid** | Porter stemming, BM25 ranking, auto-sync trigger, backfill migration; 5 tests |
-| **Tests** | **20** | agent card, incidents (5), backup (2), hash chain (4), FTS5 (5), discovery (4) |
+| **Tests** | **48** | agent card, incidents, backup, hash chain, FTS5, discovery, memory recall, approval, sandbox, input validation |
 
 ### osmoda-keyd — Crypto Wallet Daemon
 
@@ -67,7 +67,7 @@ Last updated: 2026-02-27
 | Wallet deletion | **Solid** | Removes key file, zeroizes cache, updates index; 2 tests |
 | `/wallet/send` | **Scaffold** | Signs an intent string, NOT a real transaction; no RLP encoding |
 | Socket authentication | **Known limitation** | File permissions only (0o600); no token-based auth |
-| **Tests** | **21** | sign/verify ETH+SOL, keccak256, encryption, KDF consistency, decimal policy (8), delete, persistence, cache eviction, label limit |
+| **Tests** | **35** | sign/verify ETH+SOL, keccak256, encryption, KDF consistency, decimal policy, delete, persistence, cache eviction, label limit, tx building |
 
 ### osmoda-watch — SafeSwitch + Watchers
 
@@ -81,7 +81,7 @@ Last updated: 2026-02-27
 | Watcher persistence | **Solid** | Saved/loaded from JSON on disk; 2 tests |
 | Probation loop | **Functional** | Checks every 5s, auto-commits or rollbacks on TTL expiry |
 | Input validation | **Solid** | Command path validation, arg metachar rejection, unit name sanitization; 12 tests |
-| **Tests** | **18** | state machine (3), persistence (2), health check serialization, input validation (12) |
+| **Tests** | **27** | state machine, persistence, health checks, input validation, fleet coordination, watcher roundtrip |
 
 ### osmoda-routines — Background Automation
 
@@ -149,7 +149,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | Group rooms | **Functional** | In-memory rooms with members + message history; room_id on Chat messages; 5 REST endpoints |
 | Audit logging | **Functional** | Logs to agentd ledger: connect, disconnect, message send/receive, health reports, alerts, DMs, room messages |
 | NixOS service | **Functional** | systemd unit, TCP 18800, hardening directives, state dir 0700 |
-| **Tests** | **31** | identity (5), handshake (3), messages (7 + chat DM + room_id), invite (3), peers (3), transport (2), rooms (3) |
+| **Tests** | **44** | identity, handshake, messages, chat DM + room_id, invite, peers, transport, rooms, gossip, reconnect |
 | **Known limitation** | — | No persistent transport state across restarts — peers must re-invite after daemon restart |
 
 ### osmoda-egress — Egress Proxy
@@ -214,9 +214,9 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
 | mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
 | teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
-| Tool registrations | **Functional** | **72 tools** registered. Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **83 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (72 total)
+### Tool breakdown (83 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -224,9 +224,10 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | system | 4 | shell_exec, file_read, file_write, directory_list |
 | systemd | 2 | service_status, journal_logs |
 | network | 1 | network_info |
-| wallet (keyd) | 6 | wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt |
+| wallet (keyd) | 7 | wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt, wallet_build_tx |
 | switch (watch) | 4 | safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback |
 | watcher (watch) | 2 | watcher_add, watcher_list |
+| fleet (watch) | 4 | fleet_propose, fleet_status, fleet_vote, fleet_rollback |
 | routine (routines) | 3 | routine_add, routine_list, routine_trigger |
 | identity (agentd) | 1 | agent_card |
 | receipt (agentd) | 3 | receipt_list, incident_create, incident_step |
@@ -235,6 +236,8 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh | 11 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health, mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history |
 | mcp (mcpd) | 4 | mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart |
 | teach (teachd) | 8 | teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply |
+| approval (agentd) | 4 | approval_request, approval_pending, approval_approve, approval_check |
+| sandbox (agentd) | 2 | sandbox_exec, capability_mint |
 | app (direct) | 6 | app_deploy, app_list, app_logs, app_stop, app_restart, app_remove |
 | safety | 4 | safety_rollback, safety_status, safety_panic, safety_restart |
 

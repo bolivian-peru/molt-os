@@ -36,7 +36,7 @@ TIER 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 72 tools registered                 │
+│   osmoda-bridge plugin → 83 tools registered                 │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -210,7 +210,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
               │  osmoda agent  │    │   mobile agent     │
               │  (default)     │    │                    │
               │  Opus 4.6      │    │  Sonnet 4.6        │
-              │  72 tools      │    │  72 tools          │
+              │  83 tools      │    │  83 tools          │
               │  17 skills     │    │  17 skills         │
               │  Full access   │    │  Full access       │
               │                │    │  Concise responses  │
@@ -223,8 +223,8 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 
 | Agent | Model | Tools | Skills | Channels |
 |-------|-------|-------|--------|----------|
-| `osmoda` (default) | claude-opus-4-6 | All 72 | All 17 | Web chat (default) |
-| `mobile` | claude-sonnet-4-6 | All 72 | All 17 | Telegram, WhatsApp |
+| `osmoda` (default) | claude-opus-4-6 | All 83 | All 17 | Web chat (default) |
+| `mobile` | claude-sonnet-4-6 | All 83 | All 17 | Telegram, WhatsApp |
 
 **Routing rules:** Bindings route Telegram and WhatsApp to `mobile`. Everything else (web chat) falls through to `osmoda` (marked as `default: true`).
 
@@ -232,7 +232,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 - `~/.openclaw/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
 - `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
 
-**Tool access:** Both agents have full access to all 72 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
+**Tool access:** Both agents have full access to all 83 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
 
 ## Data Flow
 

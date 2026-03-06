@@ -2,20 +2,26 @@
 
 # osModa
 
+### The first operating system built for AI agents.
+
 **Your server has an AI brain. It monitors, fixes, deploys, and explains — without you SSH-ing in.**
 
-A NixOS distribution with AI-native system management. 9 Rust daemons give the AI structured access to your entire server — processes, services, network, config, deploys. Every action is logged to a tamper-proof audit ledger. Every system change is atomic and rollbackable.
+9 Rust daemons. 83 structured tools. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. All running on NixOS — the only Linux distro where every system state is a transaction.
+
+> **Public Beta** — This is a working system deployed on real servers, not a demo. Expect rough edges and rapid iteration. You're early.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Beta](https://img.shields.io/badge/Status-Public%20Beta-yellow.svg)]()
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
-[![Tests](https://img.shields.io/badge/Tests-136%20passing-brightgreen.svg)]()
-[![Tools](https://img.shields.io/badge/Agent%20Tools-72-blueviolet.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-198%20passing-brightgreen.svg)]()
+[![Tools](https://img.shields.io/badge/Agent%20Tools-83-blueviolet.svg)]()
 
-[Requirements](#system-requirements) · [Quickstart](#quickstart) · [First 5 Minutes](#what-happens-in-the-first-5-minutes) · [Architecture](#architecture) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
+[Quickstart](#quickstart) · [Architecture](#architecture) · [What It Does](#what-it-does) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
 
 [![Telegram](https://img.shields.io/badge/Telegram-Join-blue?logo=telegram)](https://t.me/osmodasystems)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/G7bwet8B)
+[![Deploy](https://img.shields.io/badge/Deploy-spawn.os.moda-4f46e5.svg)](https://spawn.os.moda)
 
 </div>
 
@@ -24,18 +30,17 @@ A NixOS distribution with AI-native system management. 9 Rust daemons give the A
 ## Who Is This For
 
 - **Solo developers who run their own servers** — your server monitors itself, fixes problems at 3am, and tells you about it in the morning
-- **AI agent builders who need a managed runtime** — deploy agents with GPU access, API key management, health monitoring, and crash recovery built in
-- **Small teams tired of on-call rotations** — the AI handles routine ops, escalates what it can't fix, and keeps a complete audit trail
+- **AI agent builders who need infrastructure** — deploy agents with API key management, health monitoring, crash recovery, and an encrypted mesh between machines
+- **Small teams tired of on-call rotations** — the AI handles routine ops, escalates what it can't fix, and keeps a tamper-proof audit trail of everything it does
+- **Anyone building an AI workforce** — osModa is the computer your agents live in. Not a VPS you SSH into. A machine that manages itself.
 
 ## Why This Exists
 
-Servers break at 3am. Nobody's awake. The fix is usually "SSH in, check logs, restart the service" — but by the time you do that, users have already noticed.
+Every AI agent framework assumes your infrastructure is someone else's problem. They give you an agent that can think — but nowhere for it to live. So you SSH into a VPS, install things manually, pray nothing breaks at 3am, and when it does, you're the one waking up.
 
-Current AI agent tooling makes this worse: shell out, parse text, hope the regex holds, no audit trail, no rollback, manual recovery when things go sideways.
+osModa is the other half: **the machine itself is AI-native.** 83 structured tools across 9 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
 
-osModa gives the AI structured access to the entire OS through 72 typed tools exposed via 9 Rust daemons. No shell parsing. `system_health` returns structured JSON. Every mutation is hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
-
-**Why NixOS?** Every system change is a transaction. Every state has a generation number. Rolling back is one command. The blast radius of any configuration change is bounded and reversible. This makes AI root access meaningfully safer than on a traditional Linux distribution. (NixOS rollback covers OS state — not data sent to external APIs or deleted user data. See [Safety Model](#safety-model).)
+**Why NixOS?** Every system change is a transaction. Every state has a generation number. Rolling back is one command. This makes AI root access meaningfully safer than on any traditional Linux distribution. (NixOS rollback covers OS state — not data sent to external APIs or deleted user data. See [Safety Model](#safety-model).)
 
 ## What Happens in the First 5 Minutes
 
@@ -88,7 +93,7 @@ This is the primary install path. NixOS flakes give you reproducible builds, ato
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
-Converts Ubuntu/Debian to NixOS, builds 10 Rust binaries from source, installs the AI gateway + 72 tools, starts everything. Takes ~10 minutes.
+Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs the AI gateway + 83 tools, starts everything. Takes ~10 minutes on a CX22.
 
 **Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
 
@@ -120,9 +125,9 @@ agentctl verify-ledger --state-dir /var/lib/osmoda
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  AI Gateway (OpenClaw)          Multi-Agent Router                            │
-│  ├─ osmoda agent (Opus)         72 tools · 17 skills · full access · web      │
+│  ├─ osmoda agent (Opus)         83 tools · 17 skills · full access · web      │
 │  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA    │
-│  osmoda-bridge                  72 typed tools (shared plugin)                 │
+│  osmoda-bridge                  83 typed tools (shared plugin)                 │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤
 │ agentd │ watch  │routine │ teachd   │ mesh   │ voice │ mcpd │ keyd  │egress │
@@ -161,6 +166,8 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 | **Command blocklist** | 17 dangerous command patterns blocked in `shell_exec` (rm -rf, dd, mkfs, etc.). Expanded and pentest-verified. |
 | **Rate limiting** | All public endpoints enforce rate limits (shell_exec: 30/60s, mesh TCP: 5/60s). |
 | **Socket permissions** | All Unix sockets are 0600 (owner-only). All 9 daemons enforce `umask(0o077)` at startup. |
+| **Approval gates** | Destructive operations require explicit approval via `approval_request`/`approval_approve`. Time-limited with auto-expiry. |
+| **Fleet coordination** | Multi-server changes go through quorum voting via `fleet_propose`/`fleet_vote` before applying. |
 | **Safety commands** | `safety_rollback`, `safety_panic`, `safety_status`, `safety_restart` bypass the AI entirely — the user always has an escape hatch. |
 | **Pentest verified** | Full automated pentest: injection attacks (SQL, path traversal, shell), payload bombs, error hardening, stress testing (700/700 concurrent health checks). All pass. |
 
@@ -170,12 +177,12 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 
 **NOT covered:** Data already sent to external APIs, signed crypto transactions, deleted user data, exposed secrets, or side effects on remote systems. Tier 0 access means the agent can do anything the system can do — the safety model relies on structured tools, audit trails, and NixOS atomicity, not on restricting the agent's access.
 
-### What's planned but not yet implemented
+### What's planned but not yet complete
 
-- **Approval gate for destructive ops** — currently convention-based (agent prompt says "ask before destructive actions") but not enforced by code. This is the #1 priority for the next release.
-- **Tier 1/Tier 2 sandbox** — the trust tier model is designed but not yet enforced. Third-party tools currently run without bubblewrap isolation.
-- **Capability tokens** — fine-grained, time-limited access tokens for socket authentication. Currently file-permissions only.
+- **Tier 1/Tier 2 sandbox enforcement** — the trust tier model is designed and `sandbox_exec` exists, but bubblewrap isolation isn't fully wired for all third-party tools yet.
+- **Capability token auth** — `capability_mint` can create time-limited tokens, but socket authentication is still primarily file-permissions based.
 - **External security audit** — mesh crypto uses standard primitives (Noise_XX, ML-KEM-768) but hasn't had independent review.
+- **Semantic memory** — `memory/recall` uses FTS5 BM25 keyword search. Semantic vector search (usearch + fastembed) is designed but not yet wired.
 
 ### Audit Ledger
 
@@ -222,7 +229,7 @@ Append-only. Tamper-evident. Any single modification invalidates the chain. Veri
 
 > **Note:** `wallet/send` signs an intent string, not a fully-encoded blockchain transaction. Broadcasting requires external tooling. See [STATUS.md](docs/STATUS.md) for details.
 
-### 72 Bridge Tools
+### 83 Bridge Tools
 
 The AI doesn't shell out. It calls typed tools that return structured JSON:
 
@@ -245,13 +252,16 @@ mesh_room_send         mesh_room_history      mcp_servers
 mcp_server_start       mcp_server_stop        mcp_server_restart
 teach_status           teach_observations     teach_patterns
 teach_knowledge        teach_knowledge_create teach_context
-teach_optimize_suggest teach_optimize_apply
+teach_optimize_suggest teach_optimize_apply   approval_request
+approval_pending       approval_approve       approval_check
+sandbox_exec           capability_mint        fleet_propose
+fleet_status           fleet_vote             fleet_rollback
 app_deploy             app_list               app_logs
 app_stop               app_restart            app_remove
 wallet_create          wallet_list            wallet_sign
 wallet_send            wallet_delete          wallet_receipt
-safety_rollback        safety_status          safety_panic
-safety_restart
+wallet_build_tx        safety_rollback        safety_status
+safety_panic           safety_restart
 ```
 
 ### 17 System Skills
@@ -400,9 +410,9 @@ POST /wallet/send          Build signed intent (no broadcast — see STATUS.md)
 git clone https://github.com/bolivian-peru/os-moda.git && cd os-moda
 
 cargo check --workspace        # Type check all 10 crates
-cargo test --workspace         # 136 tests
+cargo test --workspace         # 198 tests (all green)
 
-# Run agentd locally
+# Run agentd standalone
 cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
 
 # Dev VM with Sway desktop (requires Nix)
@@ -426,7 +436,7 @@ crates/osmoda-voice/        Local voice (whisper.cpp + piper)
 crates/osmoda-mcpd/         MCP server lifecycle manager
 crates/osmoda-egress/       Domain-filtered egress proxy
 crates/osmoda-keyd/         Crypto wallet daemon (ETH + SOL, AES-256-GCM)
-packages/osmoda-bridge/     AI gateway plugin (72 tools, TypeScript)
+packages/osmoda-bridge/     AI gateway plugin (83 tools, TypeScript)
 nix/modules/osmoda.nix      NixOS module (single source of truth)
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity + tools + heartbeat
@@ -441,26 +451,34 @@ skills/                     17 system skill definitions
 
 ## Status
 
-> **Early beta.** This is a working prototype, not production-grade infrastructure. Use on disposable servers or development environments. Expect rough edges.
+> **Public Beta.** osModa is deployed on real servers managing real workloads. It's not a mockup — it's a working operating system with 198 passing tests, pen-tested security, and months of development. That said, this is early. APIs may change, features are shipping fast, and you'll occasionally find rough edges. That's the price of being early to something new.
 
-10 Rust crates (9 daemons + 1 CLI), 136 tests passing, 72 bridge tools, 17 system skills.
+**The numbers:**
+- 10 Rust crates (9 daemons + 1 CLI)
+- 198 tests passing (all green)
+- 83 bridge tools registered
+- 17 system skills
+- Stress tested: 700/700 concurrent health checks, 50 concurrent queries, hash chain verified across 300+ events with zero broken links
 
-**Tested on hardware:** Full deployment tested on Hetzner Cloud (CX22/CX23). All 9 daemons start, all sockets respond, wallet creation works, mesh identity generates, audit ledger chains correctly, teachd observes and learns. Stress tested: 100 concurrent health checks per daemon (700/700 OK), 50 concurrent complex queries, 20 rapid wallet create/delete cycles, hash chain verified across 300+ events with zero broken links.
+**What works today:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto (Noise_XX + ML-KEM-768), local voice (whisper.cpp + piper), MCP server management, system learning and self-optimization, fleet coordination with quorum voting, approval gates for destructive ops, sandboxed execution, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management, ETH + SOL crypto wallets, one-command cloud deployment via [spawn.os.moda](https://spawn.os.moda).
 
-**What works now:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto, local voice, MCP server management, system learning and self-optimization, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management with systemd-run, ETH + SOL crypto signing, all 72 bridge tools.
-
-**What's next:** Approval gate for destructive ops, semantic memory engine (usearch + fastembed), Tier 1/Tier 2 sandbox implementation, external security audit of mesh crypto.
+**What's next:** Semantic memory engine (usearch + fastembed), external security audit of mesh crypto, end-to-end integration tests, WebRTC browser-to-server connections.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the full plan and [STATUS.md](docs/STATUS.md) for honest maturity levels per component.
 
+## One-Click Cloud Deploy
+
+Don't want to self-host? [**spawn.os.moda**](https://spawn.os.moda) provisions a fully configured osModa server on Hetzner Cloud in ~10 minutes. Pick a plan, pay with card or USDC, and start chatting with your server from the browser or Telegram.
+
 ## Contributing
 
-Early beta. Feedback welcome.
+Public beta. Feedback, bug reports, and PRs welcome.
 
 - **Bug reports** — open an issue, include logs
 - **New skills** — add `skills/<name>/SKILL.md`, open a PR
 - **NixOS module** — `nix/modules/osmoda.nix` is the core
 - **Bridge tools** — `packages/osmoda-bridge/index.ts`
+- **Rust daemons** — each daemon is a standalone crate in `crates/`
 
 **Community:** [Telegram](https://t.me/osmodasystems) · [Discord](https://discord.gg/G7bwet8B)
 
@@ -472,6 +490,8 @@ Apache 2.0. See [LICENSE](LICENSE).
 
 <div align="center">
 
-**osModa** — your server fixes itself at 3am.
+**osModa** — the first operating system built for AI agents.
+
+[Website](https://os.moda) · [Deploy](https://spawn.os.moda) · [Telegram](https://t.me/osmodasystems) · [Discord](https://discord.gg/G7bwet8B)
 
 </div>
