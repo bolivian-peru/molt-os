@@ -1305,6 +1305,110 @@ if systemctl is-active osmoda-mcpd &>/dev/null; then
   MCP_SERVERS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/mcpd.sock" http://l/servers 2>/dev/null || echo "[]")
 fi
 
+# Detect running apps: osmoda-app-* services + /home project dirs + listening ports
+APPS_JSON=$(python3 -c '
+import subprocess, os, json, re
+apps = []
+# 1. osmoda-app-* systemd services
+try:
+    out = subprocess.check_output(["systemctl","list-units","--type=service","--state=running","--no-legend","--plain"], text=True, timeout=5)
+    for line in out.strip().split("\n"):
+        if not line.strip(): continue
+        unit = line.split()[0]
+        if unit.startswith("osmoda-app-"):
+            app_name = unit.replace("osmoda-app-","").replace(".service","")
+            try:
+                d = subprocess.check_output(["systemctl","show",unit,"--property=ExecStart","--no-pager"], text=True, timeout=3)
+                cmd = d.strip().split("=",1)[-1][:100] if "=" in d else ""
+            except: cmd = ""
+            apps.append({"type":"app","name":app_name,"status":"running","command":cmd,"unit":unit})
+except: pass
+# 2. Project dirs in /home
+try:
+    if os.path.isdir("/home"):
+        for d in os.listdir("/home"):
+            hp = os.path.join("/home", d)
+            if not os.path.isdir(hp): continue
+            for mf, lang in [("requirements.txt","python"),("package.json","node"),("Cargo.toml","rust"),("go.mod","go"),("main.py","python"),("app.py","python"),("index.js","node"),("index.ts","node")]:
+                if os.path.isfile(os.path.join(hp, mf)):
+                    apps.append({"type":"project","name":d,"path":"/home/"+d,"language":lang,"marker":mf})
+                    break
+except: pass
+# 3. Listening ports (skip system services)
+try:
+    out = subprocess.check_output(["ss","-tlnp"], text=True, timeout=5)
+    for line in out.strip().split("\n")[1:]:
+        parts = line.split()
+        if len(parts) < 5: continue
+        local = parts[3]
+        port = local.rsplit(":",1)[-1] if ":" in local else ""
+        proc = parts[5] if len(parts) > 5 else ""
+        m = re.search(r"users:\(\(\"([^\"]+)\"", proc)
+        name = m.group(1) if m else ""
+        if name in ("sshd","systemd-resolve","osmoda-egress","node","agentd","osmoda-keyd","osmoda-watch","osmoda-routines","osmoda-mesh","osmoda-mcpd","osmoda-teachd","osmoda-voice","nginx","caddy"): continue
+        if port and port.isdigit() and int(port) > 1024:
+            apps.append({"type":"port","name":name or "unknown","port":int(port)})
+except: pass
+# 4. Docker/podman containers
+for rt in ["docker","podman"]:
+    try:
+        out = subprocess.check_output([rt,"ps","--format","{{.Names}}\\t{{.Status}}\\t{{.Ports}}\\t{{.Image}}"], text=True, timeout=5)
+        for line in out.strip().split("\n"):
+            if not line.strip(): continue
+            p = line.split("\\t")
+            apps.append({"type":"container","name":p[0],"status":p[1] if len(p)>1 else "","ports":p[2] if len(p)>2 else "","image":p[3] if len(p)>3 else "","runtime":rt})
+    except: pass
+# 5. Nginx vhosts
+try:
+    import glob as g
+    for conf in g.glob("/etc/nginx/sites-enabled/*") + g.glob("/etc/nginx/conf.d/*.conf") + ["/etc/nginx/nginx.conf"]:
+        if os.path.isfile(conf):
+            content = open(conf).read()
+            for m in re.finditer(r"server_name\s+([^;]+);", content):
+                for n in m.group(1).split():
+                    if n not in ("_","localhost","") and not re.match(r"^\d+\.\d+\.\d+\.\d+$", n):
+                        apps.append({"type":"domain","name":n,"source":"nginx","conf":os.path.basename(conf)})
+except: pass
+# 6. Caddy domains
+try:
+    import glob as g
+    for cf in g.glob("/etc/caddy/Caddyfile") + g.glob("/etc/caddy/conf.d/*"):
+        if os.path.isfile(cf):
+            for m in re.finditer(r"^([a-zA-Z0-9][\w.-]+\.\w{2,})\s*\{", open(cf).read(), re.MULTILINE):
+                apps.append({"type":"domain","name":m.group(1),"source":"caddy","conf":os.path.basename(cf)})
+except: pass
+# 7. Project dirs in /root (user apps)
+try:
+    for d in os.listdir("/root"):
+        dp = os.path.join("/root", d)
+        if not os.path.isdir(dp) or d.startswith("."): continue
+        if d in ("workspace",): continue
+        for mf, lang in [("package.json","node"),("requirements.txt","python"),("Cargo.toml","rust"),("go.mod","go"),("main.py","python"),("app.py","python"),("index.js","node"),("index.ts","node")]:
+            if os.path.isfile(os.path.join(dp, mf)):
+                apps.append({"type":"project","name":d,"path":"/root/"+d,"language":lang,"marker":mf})
+                break
+except: pass
+# 8. osModa managed apps (/var/lib/osmoda/apps)
+try:
+    app_dir = "/var/lib/osmoda/apps"
+    if os.path.isdir(app_dir):
+        for d in os.listdir(app_dir):
+            mf = os.path.join(app_dir, d, "app.json")
+            if os.path.isfile(mf):
+                m = json.loads(open(mf).read())
+                apps.append({"type":"managed","name":m.get("name",d),"domain":m.get("domain",""),"status":m.get("status","unknown"),"port":m.get("port",0)})
+except: pass
+# Deduplicate
+seen = set()
+unique = []
+for a in apps:
+    key = a["type"] + ":" + a.get("name","") + ":" + str(a.get("port",""))
+    if key not in seen:
+        seen.add(key)
+        unique.append(a)
+print(json.dumps(unique))
+' 2>/dev/null || echo "[]")
+
 # Build payload (use jq for safe JSON construction)
 PAYLOAD=$(jq -n \
   --arg oid "$OID" \
@@ -1325,7 +1429,8 @@ PAYLOAD=$(jq -n \
   --argjson teachd_health "$TEACHD_HEALTH" \
   --argjson teachd_patterns "$TEACHD_PATTERNS" \
   --argjson mcp_servers "$MCP_SERVERS" \
-  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers, routines: $routines, routine_history: $routine_history, watchers: $watchers, recent_events: $recent_events, teachd_health: $teachd_health, teachd_patterns: $teachd_patterns, mcp_servers: $mcp_servers}'
+  --argjson apps "$APPS_JSON" \
+  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers, routines: $routines, routine_history: $routine_history, watchers: $watchers, recent_events: $recent_events, teachd_health: $teachd_health, teachd_patterns: $teachd_patterns, mcp_servers: $mcp_servers, apps: $apps}'
 )
 
 # Send heartbeat (with HMAC signature if secret is set)
