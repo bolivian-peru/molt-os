@@ -1239,18 +1239,39 @@ if [ -f "$COMPLETED_FILE" ] && [ -s "$COMPLETED_FILE" ]; then
   COMPLETED_JSON=$(cat "$COMPLETED_FILE")
 fi
 
-# Collect agent instances
+# Collect agent instances (enriched from openclaw.json)
 AGENTS_JSON="[]"
 if [ -d /root/.openclaw/agents ]; then
+  GW_ACTIVE="false"
+  systemctl is-active osmoda-gateway.service >/dev/null 2>&1 && GW_ACTIVE="true"
+
+  # Parse openclaw.json for model + binding info
+  OC_CONFIG=""
+  [ -f /root/.openclaw/openclaw.json ] && OC_CONFIG=$(cat /root/.openclaw/openclaw.json 2>/dev/null)
+
   for agent_dir in /root/.openclaw/agents/*/; do
     [ -d "$agent_dir" ] || continue
     ANAME=$(basename "$agent_dir")
     ASTATUS="stopped"
-    if systemctl is-active osmoda-gateway.service >/dev/null 2>&1; then
-      ASTATUS="running"
+    [ "$GW_ACTIVE" = "true" ] && ASTATUS="running"
+
+    # Extract model + channels from openclaw.json
+    AMODEL=""
+    ACHANNELS="[]"
+    ADEFAULT="false"
+    if [ -n "$OC_CONFIG" ]; then
+      AMODEL=$(echo "$OC_CONFIG" | jq -r --arg id "$ANAME" '.agents.list[]? | select(.id == $id) | .model // ""' 2>/dev/null)
+      ADEFAULT=$(echo "$OC_CONFIG" | jq -r --arg id "$ANAME" '.agents.list[]? | select(.id == $id) | .default // false' 2>/dev/null)
+      ACHANNELS=$(echo "$OC_CONFIG" | jq -c --arg id "$ANAME" '[.bindings[]? | select(.agentId == $id) | .match.channel // empty]' 2>/dev/null || echo "[]")
     fi
-    AGENTS_JSON=$(echo "$AGENTS_JSON" | jq --arg name "$ANAME" --arg status "$ASTATUS" \
-      '. + [{name: $name, status: $status}]')
+
+    AGENTS_JSON=$(echo "$AGENTS_JSON" | jq \
+      --arg name "$ANAME" \
+      --arg status "$ASTATUS" \
+      --arg model "${AMODEL:-}" \
+      --argjson channels "${ACHANNELS:-[]}" \
+      --argjson isDefault "${ADEFAULT:-false}" \
+      '. + [{name: $name, status: $status, model: $model, channels: $channels, "default": $isDefault}]')
   done
 fi
 
