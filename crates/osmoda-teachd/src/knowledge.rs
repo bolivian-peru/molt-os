@@ -170,6 +170,44 @@ pub fn init_db(conn: &Connection) -> Result<()> {
             switch_id TEXT,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS agent_actions (
+            id TEXT PRIMARY KEY,
+            ts TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            params TEXT NOT NULL DEFAULT '{}',
+            result_summary TEXT,
+            context TEXT,
+            success INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_actions_tool ON agent_actions(tool);
+        CREATE INDEX IF NOT EXISTS idx_actions_session ON agent_actions(session_id);
+        CREATE INDEX IF NOT EXISTS idx_actions_ts ON agent_actions(ts);
+
+        CREATE TABLE IF NOT EXISTS skill_candidates (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            tools TEXT NOT NULL DEFAULT '[]',
+            session_count INTEGER NOT NULL DEFAULT 0,
+            confidence REAL NOT NULL DEFAULT 0.0,
+            source_patterns TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'pending',
+            skill_path TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS skill_executions (
+            id TEXT PRIMARY KEY,
+            skill_name TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            outcome TEXT NOT NULL DEFAULT 'success',
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_skill_exec_name ON skill_executions(skill_name);
         ",
     )
     .context("failed to initialize teachd database")?;
@@ -602,6 +640,422 @@ pub fn optimization_count(conn: &Connection) -> Result<u32> {
     let count: u32 =
         conn.query_row("SELECT COUNT(*) FROM optimizations", [], |row| row.get(0))?;
     Ok(count)
+}
+
+// ── Agent Actions ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentAction {
+    pub id: String,
+    pub ts: DateTime<Utc>,
+    pub session_id: String,
+    pub tool: String,
+    pub params: serde_json::Value,
+    pub result_summary: Option<String>,
+    pub context: Option<String>,
+    pub success: bool,
+}
+
+pub fn insert_agent_action(conn: &Connection, action: &AgentAction) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO agent_actions (id, ts, session_id, tool, params, result_summary, context, success)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            action.id,
+            action.ts.to_rfc3339(),
+            action.session_id,
+            action.tool,
+            serde_json::to_string(&action.params)?,
+            action.result_summary,
+            action.context,
+            action.success as i32,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn list_agent_actions(
+    conn: &Connection,
+    tool: Option<&str>,
+    session_id: Option<&str>,
+    since: Option<&str>,
+    limit: u32,
+) -> Result<Vec<AgentAction>> {
+    let mut sql = "SELECT id, ts, session_id, tool, params, result_summary, context, success FROM agent_actions WHERE 1=1".to_string();
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(t) = tool {
+        sql.push_str(" AND tool = ?");
+        param_values.push(Box::new(t.to_string()));
+    }
+    if let Some(s) = session_id {
+        sql.push_str(" AND session_id = ?");
+        param_values.push(Box::new(s.to_string()));
+    }
+    if let Some(since_ts) = since {
+        sql.push_str(" AND ts >= ?");
+        param_values.push(Box::new(since_ts.to_string()));
+    }
+    sql.push_str(" ORDER BY ts DESC LIMIT ?");
+    param_values.push(Box::new(limit));
+
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_ref.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, i32>(7)?,
+        ))
+    })?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let (id, ts_str, session_id, tool, params_str, result_summary, context, success) = row?;
+        let ts = DateTime::parse_from_rfc3339(&ts_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        let params: serde_json::Value = serde_json::from_str(&params_str).unwrap_or(serde_json::Value::Null);
+        result.push(AgentAction {
+            id, ts, session_id, tool, params, result_summary, context,
+            success: success != 0,
+        });
+    }
+    Ok(result)
+}
+
+pub fn agent_action_count(conn: &Connection) -> Result<u32> {
+    let count: u32 = conn.query_row("SELECT COUNT(*) FROM agent_actions", [], |row| row.get(0))?;
+    Ok(count)
+}
+
+pub fn prune_agent_actions(conn: &Connection, older_than: &str) -> Result<usize> {
+    let deleted = conn.execute(
+        "DELETE FROM agent_actions WHERE ts < ?1",
+        params![older_than],
+    )?;
+    Ok(deleted)
+}
+
+/// Get distinct session IDs that contain a given tool sequence.
+pub fn find_tool_sequences(conn: &Connection, min_sessions: u32) -> Result<Vec<ToolSequenceCandidate>> {
+    // Get all sessions with 3+ actions in the last 30 days
+    let cutoff = (Utc::now() - chrono::Duration::days(30)).to_rfc3339();
+    let mut stmt = conn.prepare(
+        "SELECT session_id, tool FROM agent_actions
+         WHERE ts >= ?1 AND success = 1
+         ORDER BY session_id, ts ASC"
+    )?;
+
+    let rows = stmt.query_map(params![cutoff], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    // Group tools by session
+    let mut sessions: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for row in rows {
+        let (session_id, tool) = row?;
+        sessions.entry(session_id).or_default().push(tool);
+    }
+
+    // Extract subsequences of 3+ tools and count across sessions
+    let mut subseq_counts: std::collections::HashMap<Vec<String>, std::collections::HashSet<String>> = std::collections::HashMap::new();
+
+    for (session_id, tools) in &sessions {
+        if tools.len() < 3 {
+            continue;
+        }
+        // Extract all contiguous subsequences of length 3..=min(6, len)
+        let max_len = tools.len().min(6);
+        for window_size in 3..=max_len {
+            for window in tools.windows(window_size) {
+                subseq_counts
+                    .entry(window.to_vec())
+                    .or_default()
+                    .insert(session_id.clone());
+            }
+        }
+    }
+
+    // Filter to sequences appearing in min_sessions+ distinct sessions
+    let mut candidates: Vec<ToolSequenceCandidate> = subseq_counts
+        .into_iter()
+        .filter(|(_, sessions)| sessions.len() >= min_sessions as usize)
+        .map(|(tools, sessions)| {
+            let session_count = sessions.len() as u32;
+            let name = tools.join("-then-");
+            ToolSequenceCandidate {
+                tools,
+                session_count,
+                sessions: sessions.into_iter().collect(),
+                name,
+            }
+        })
+        .collect();
+
+    // Sort by session count descending, then by tool count ascending (prefer shorter, more frequent)
+    candidates.sort_by(|a, b| {
+        b.session_count.cmp(&a.session_count)
+            .then(a.tools.len().cmp(&b.tools.len()))
+    });
+
+    // Deduplicate: remove subsequences that are subsets of a higher-ranked sequence
+    let mut kept: Vec<ToolSequenceCandidate> = Vec::new();
+    for candidate in candidates {
+        let dominated = kept.iter().any(|k| {
+            k.session_count >= candidate.session_count && is_subsequence(&candidate.tools, &k.tools)
+        });
+        if !dominated {
+            kept.push(candidate);
+        }
+    }
+
+    Ok(kept)
+}
+
+fn is_subsequence(small: &[String], big: &[String]) -> bool {
+    if small.len() >= big.len() {
+        return small == big;
+    }
+    big.windows(small.len()).any(|w| w == small)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSequenceCandidate {
+    pub tools: Vec<String>,
+    pub session_count: u32,
+    pub sessions: Vec<String>,
+    pub name: String,
+}
+
+// ── Skill Candidates ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillCandidate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub tools: Vec<String>,
+    pub session_count: u32,
+    pub confidence: f64,
+    pub source_patterns: Vec<String>,
+    pub status: SkillCandidateStatus,
+    pub skill_path: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillCandidateStatus {
+    Pending,
+    Generated,
+    Promoted,
+    Rejected,
+}
+
+impl std::fmt::Display for SkillCandidateStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::Generated => write!(f, "generated"),
+            Self::Promoted => write!(f, "promoted"),
+            Self::Rejected => write!(f, "rejected"),
+        }
+    }
+}
+
+impl SkillCandidateStatus {
+    pub fn from_str_loose(s: &str) -> Self {
+        match s {
+            "pending" => Self::Pending,
+            "generated" => Self::Generated,
+            "promoted" => Self::Promoted,
+            "rejected" => Self::Rejected,
+            _ => Self::Pending,
+        }
+    }
+}
+
+pub fn insert_skill_candidate(conn: &Connection, c: &SkillCandidate) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO skill_candidates (id, name, description, tools, session_count, confidence, source_patterns, status, skill_path, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            c.id, c.name, c.description,
+            serde_json::to_string(&c.tools)?,
+            c.session_count, c.confidence,
+            serde_json::to_string(&c.source_patterns)?,
+            c.status.to_string(),
+            c.skill_path,
+            c.created_at.to_rfc3339(),
+            c.updated_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_skill_candidate(conn: &Connection, id: &str) -> Result<Option<SkillCandidate>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, description, tools, session_count, confidence, source_patterns, status, skill_path, created_at, updated_at
+         FROM skill_candidates WHERE id = ?1"
+    )?;
+    let mut rows = stmt.query_map(params![id], parse_skill_candidate_row)?;
+    match rows.next() {
+        Some(Ok(c)) => Ok(Some(c)),
+        _ => Ok(None),
+    }
+}
+
+pub fn list_skill_candidates(
+    conn: &Connection,
+    status: Option<&str>,
+    limit: u32,
+) -> Result<Vec<SkillCandidate>> {
+    let mut sql = "SELECT id, name, description, tools, session_count, confidence, source_patterns, status, skill_path, created_at, updated_at FROM skill_candidates WHERE 1=1".to_string();
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(s) = status {
+        sql.push_str(" AND status = ?");
+        param_values.push(Box::new(s.to_string()));
+    }
+    sql.push_str(" ORDER BY confidence DESC, session_count DESC LIMIT ?");
+    param_values.push(Box::new(limit));
+
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_ref.as_slice(), parse_skill_candidate_row)?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    Ok(result)
+}
+
+pub fn skill_candidate_count(conn: &Connection) -> Result<u32> {
+    let count: u32 = conn.query_row("SELECT COUNT(*) FROM skill_candidates", [], |row| row.get(0))?;
+    Ok(count)
+}
+
+fn parse_skill_candidate_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SkillCandidate> {
+    let tools_str: String = row.get(3)?;
+    let sp_str: String = row.get(6)?;
+    let status_str: String = row.get(7)?;
+    let ca_str: String = row.get(9)?;
+    let ua_str: String = row.get(10)?;
+
+    let tools: Vec<String> = serde_json::from_str(&tools_str).unwrap_or_default();
+    let source_patterns: Vec<String> = serde_json::from_str(&sp_str).unwrap_or_default();
+    let created_at = DateTime::parse_from_rfc3339(&ca_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let updated_at = DateTime::parse_from_rfc3339(&ua_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(SkillCandidate {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        tools,
+        session_count: row.get(4)?,
+        confidence: row.get(5)?,
+        source_patterns,
+        status: SkillCandidateStatus::from_str_loose(&status_str),
+        skill_path: row.get(8)?,
+        created_at,
+        updated_at,
+    })
+}
+
+// ── Skill Executions ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillExecution {
+    pub id: String,
+    pub skill_name: String,
+    pub session_id: String,
+    pub ts: DateTime<Utc>,
+    pub outcome: String, // "success", "failure", "partial"
+    pub notes: Option<String>,
+}
+
+pub fn insert_skill_execution(conn: &Connection, exec: &SkillExecution) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO skill_executions (id, skill_name, session_id, ts, outcome, notes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            exec.id, exec.skill_name, exec.session_id,
+            exec.ts.to_rfc3339(), exec.outcome, exec.notes,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn list_skill_executions(
+    conn: &Connection,
+    skill_name: Option<&str>,
+    limit: u32,
+) -> Result<Vec<SkillExecution>> {
+    let mut sql = "SELECT id, skill_name, session_id, ts, outcome, notes FROM skill_executions WHERE 1=1".to_string();
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(name) = skill_name {
+        sql.push_str(" AND skill_name = ?");
+        param_values.push(Box::new(name.to_string()));
+    }
+    sql.push_str(" ORDER BY ts DESC LIMIT ?");
+    param_values.push(Box::new(limit));
+
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_ref.as_slice(), |row| {
+        let ts_str: String = row.get(3)?;
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            ts_str,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+        ))
+    })?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let (id, skill_name, session_id, ts_str, outcome, notes) = row?;
+        let ts = DateTime::parse_from_rfc3339(&ts_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        result.push(SkillExecution { id, skill_name, session_id, ts, outcome, notes });
+    }
+    Ok(result)
+}
+
+pub fn skill_execution_count(conn: &Connection) -> Result<u32> {
+    let count: u32 = conn.query_row("SELECT COUNT(*) FROM skill_executions", [], |row| row.get(0))?;
+    Ok(count)
+}
+
+/// Get success rate for a skill (returns (success_count, total_count)).
+pub fn skill_success_rate(conn: &Connection, skill_name: &str) -> Result<(u32, u32)> {
+    let total: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM skill_executions WHERE skill_name = ?1",
+        params![skill_name],
+        |row| row.get(0),
+    )?;
+    let success: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM skill_executions WHERE skill_name = ?1 AND outcome = 'success'",
+        params![skill_name],
+        |row| row.get(0),
+    )?;
+    Ok((success, total))
 }
 
 // ── Tests ──

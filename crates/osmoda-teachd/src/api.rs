@@ -7,8 +7,10 @@ use tokio::sync::Mutex;
 
 use crate::knowledge::{
     self, insert_knowledge_doc, KnowledgeDoc, Observation, Optimization, Pattern,
+    AgentAction, SkillCandidate, SkillExecution,
 };
 use crate::optimizer;
+use crate::skillgen;
 use crate::teacher;
 use crate::TeachdState;
 
@@ -23,8 +25,12 @@ pub struct HealthResponse {
     pub pattern_count: u32,
     pub knowledge_count: u32,
     pub optimization_count: u32,
+    pub action_count: u32,
+    pub skill_candidate_count: u32,
+    pub skill_execution_count: u32,
     pub observer_running: bool,
     pub learner_running: bool,
+    pub skillgen_running: bool,
 }
 
 pub async fn health_handler(State(state): State<SharedState>) -> Json<HealthResponse> {
@@ -33,6 +39,9 @@ pub async fn health_handler(State(state): State<SharedState>) -> Json<HealthResp
     let pat_count = knowledge::pattern_count(&st.db).unwrap_or(0);
     let kd_count = knowledge::knowledge_count(&st.db).unwrap_or(0);
     let opt_count = knowledge::optimization_count(&st.db).unwrap_or(0);
+    let act_count = knowledge::agent_action_count(&st.db).unwrap_or(0);
+    let sc_count = knowledge::skill_candidate_count(&st.db).unwrap_or(0);
+    let se_count = knowledge::skill_execution_count(&st.db).unwrap_or(0);
 
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -40,8 +49,12 @@ pub async fn health_handler(State(state): State<SharedState>) -> Json<HealthResp
         pattern_count: pat_count,
         knowledge_count: kd_count,
         optimization_count: opt_count,
+        action_count: act_count,
+        skill_candidate_count: sc_count,
+        skill_execution_count: se_count,
         observer_running: true,
         learner_running: true,
+        skillgen_running: true,
     })
 }
 
@@ -372,6 +385,243 @@ pub async fn optimizations_list_handler(
     Json(optimizations)
 }
 
+// ── POST /observe/action ──
+
+#[derive(Debug, Deserialize)]
+pub struct ObserveActionRequest {
+    pub tool: String,
+    pub params: Option<serde_json::Value>,
+    pub result_summary: Option<String>,
+    pub context: Option<String>,
+    pub session_id: Option<String>,
+    pub success: Option<bool>,
+}
+
+pub async fn observe_action_handler(
+    State(state): State<SharedState>,
+    Json(body): Json<ObserveActionRequest>,
+) -> Result<Json<AgentAction>, (axum::http::StatusCode, String)> {
+    let st = state.lock().await;
+    let now = chrono::Utc::now();
+    let action = AgentAction {
+        id: format!("act-{}", uuid::Uuid::new_v4()),
+        ts: now,
+        session_id: body.session_id.unwrap_or_else(|| "default".to_string()),
+        tool: body.tool,
+        params: body.params.unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+        result_summary: body.result_summary,
+        context: body.context,
+        success: body.success.unwrap_or(true),
+    };
+
+    knowledge::insert_agent_action(&st.db, &action).map_err(|e| {
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    Ok(Json(action))
+}
+
+// ── GET /actions ──
+
+#[derive(Debug, Deserialize)]
+pub struct ActionsQuery {
+    pub tool: Option<String>,
+    pub session_id: Option<String>,
+    pub since: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub async fn actions_list_handler(
+    State(state): State<SharedState>,
+    Query(query): Query<ActionsQuery>,
+) -> Json<Vec<AgentAction>> {
+    let st = state.lock().await;
+    let limit = query.limit.unwrap_or(50);
+    let actions = knowledge::list_agent_actions(
+        &st.db,
+        query.tool.as_deref(),
+        query.session_id.as_deref(),
+        query.since.as_deref(),
+        limit,
+    ).unwrap_or_default();
+    Json(actions)
+}
+
+// ── GET /skills/candidates ──
+
+#[derive(Debug, Deserialize)]
+pub struct SkillCandidatesQuery {
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub async fn skill_candidates_handler(
+    State(state): State<SharedState>,
+    Query(query): Query<SkillCandidatesQuery>,
+) -> Json<Vec<SkillCandidate>> {
+    let st = state.lock().await;
+    let limit = query.limit.unwrap_or(20);
+    let candidates = knowledge::list_skill_candidates(
+        &st.db,
+        query.status.as_deref(),
+        limit,
+    ).unwrap_or_default();
+    Json(candidates)
+}
+
+// ── POST /skills/generate/{id} ──
+
+pub async fn skill_generate_handler(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+) -> Result<Json<SkillCandidate>, (axum::http::StatusCode, String)> {
+    let st = state.lock().await;
+    let mut candidate = knowledge::get_skill_candidate(&st.db, &id)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((axum::http::StatusCode::NOT_FOUND, "candidate not found".to_string()))?;
+
+    if candidate.status != knowledge::SkillCandidateStatus::Pending {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("candidate {} is already in status {}", id, candidate.status),
+        ));
+    }
+
+    // Write SKILL.md file
+    let skill_path = skillgen::write_skill_file(&st.state_dir, &candidate)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    candidate.status = knowledge::SkillCandidateStatus::Generated;
+    candidate.skill_path = Some(skill_path);
+    candidate.updated_at = chrono::Utc::now();
+
+    knowledge::insert_skill_candidate(&st.db, &candidate)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    st.receipt_logger
+        .log_event("skill.generated", &candidate.name, &format!("path={}", candidate.skill_path.as_deref().unwrap_or("?")))
+        .await;
+
+    Ok(Json(candidate))
+}
+
+// ── POST /skills/promote/{id} ──
+
+pub async fn skill_promote_handler(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+) -> Result<Json<SkillCandidate>, (axum::http::StatusCode, String)> {
+    let st = state.lock().await;
+    let mut candidate = knowledge::get_skill_candidate(&st.db, &id)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((axum::http::StatusCode::NOT_FOUND, "candidate not found".to_string()))?;
+
+    if candidate.status != knowledge::SkillCandidateStatus::Generated {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("candidate {} must be in 'generated' status to promote (current: {})", id, candidate.status),
+        ));
+    }
+
+    // Update the SKILL.md to set activation: auto
+    if let Some(ref path) = candidate.skill_path {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let updated = content.replace("activation: manual", "activation: auto");
+            if let Err(e) = std::fs::write(path, &updated) {
+                tracing::warn!(error = %e, "failed to update SKILL.md activation mode");
+            }
+        }
+    }
+
+    candidate.status = knowledge::SkillCandidateStatus::Promoted;
+    candidate.updated_at = chrono::Utc::now();
+
+    knowledge::insert_skill_candidate(&st.db, &candidate)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    st.receipt_logger
+        .log_event("skill.promoted", &candidate.name, "activation set to auto")
+        .await;
+
+    Ok(Json(candidate))
+}
+
+// ── POST /skills/execution ──
+
+#[derive(Debug, Deserialize)]
+pub struct SkillExecutionRequest {
+    pub skill_name: String,
+    pub session_id: Option<String>,
+    pub outcome: String, // "success", "failure", "partial"
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SkillExecutionResponse {
+    pub execution: SkillExecution,
+    pub success_rate: f64,
+    pub total_executions: u32,
+}
+
+pub async fn skill_execution_handler(
+    State(state): State<SharedState>,
+    Json(body): Json<SkillExecutionRequest>,
+) -> Result<Json<SkillExecutionResponse>, (axum::http::StatusCode, String)> {
+    let st = state.lock().await;
+    let now = chrono::Utc::now();
+    let exec = SkillExecution {
+        id: format!("se-{}", uuid::Uuid::new_v4()),
+        skill_name: body.skill_name.clone(),
+        session_id: body.session_id.unwrap_or_else(|| "default".to_string()),
+        ts: now,
+        outcome: body.outcome,
+        notes: body.notes,
+    };
+
+    knowledge::insert_skill_execution(&st.db, &exec)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (success, total) = knowledge::skill_success_rate(&st.db, &body.skill_name)
+        .unwrap_or((0, 0));
+    let success_rate = if total > 0 { success as f64 / total as f64 } else { 0.0 };
+
+    st.receipt_logger
+        .log_event(
+            "skill.executed",
+            &exec.skill_name,
+            &format!("outcome={}, rate={:.0}% ({}/{})", exec.outcome, success_rate * 100.0, success, total),
+        )
+        .await;
+
+    Ok(Json(SkillExecutionResponse {
+        execution: exec,
+        success_rate,
+        total_executions: total,
+    }))
+}
+
+// ── GET /skills/executions ──
+
+#[derive(Debug, Deserialize)]
+pub struct SkillExecutionsQuery {
+    pub skill_name: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub async fn skill_executions_list_handler(
+    State(state): State<SharedState>,
+    Query(query): Query<SkillExecutionsQuery>,
+) -> Json<Vec<SkillExecution>> {
+    let st = state.lock().await;
+    let limit = query.limit.unwrap_or(20);
+    let execs = knowledge::list_skill_executions(
+        &st.db,
+        query.skill_name.as_deref(),
+        limit,
+    ).unwrap_or_default();
+    Json(execs)
+}
+
 // ── Tests ──
 
 #[cfg(test)]
@@ -386,8 +636,12 @@ mod tests {
             pattern_count: 5,
             knowledge_count: 3,
             optimization_count: 1,
+            action_count: 50,
+            skill_candidate_count: 2,
+            skill_execution_count: 10,
             observer_running: true,
             learner_running: true,
+            skillgen_running: true,
         };
 
         let json = serde_json::to_value(&health).expect("serialize");

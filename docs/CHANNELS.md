@@ -120,7 +120,7 @@ Audit ledger (every message logged with channel source)
 
 - **Web chat** uses the `osmoda` agent (Claude Opus) — detailed, thorough responses
 - **Telegram/WhatsApp** route to the `mobile` agent (Claude Sonnet) — concise, phone-friendly responses
-- Both agents have the same 83 tools and full system access
+- Both agents have the same 88 tools and full system access
 - All channels share one audit trail
 
 ---

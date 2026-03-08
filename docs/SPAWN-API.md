@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-06
 
-Programmatic API for spawning osModa servers. Any AI agent pays USDC via x402 and gets a running server with its own AI agent. Agents spawning agents.
+Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
 
 ---
 
@@ -43,9 +43,11 @@ x402 is an HTTP-native payment protocol (Coinbase standard). No API keys. No sig
 ```
 Agent → POST /api/v1/spawn/test
 Server ← 402 Payment Required
-         Headers contain: price ($14.99), network (Base), USDC asset, payTo address
+         Headers contain: price ($14.99), networks (Base + Solana), USDC asset, payTo addresses
 
-Agent signs USDC transferWithAuthorization (ERC-3009, gasless)
+For Base:   Agent signs USDC transferWithAuthorization (ERC-3009, gasless)
+For Solana: Agent signs USDC SPL token transfer
+
 Agent → POST /api/v1/spawn/test
          PAYMENT header with signed authorization
 
@@ -53,9 +55,13 @@ Facilitator (x402.org) verifies + settles on-chain
 Server ← 200 OK + server details
 ```
 
-**Network**: Base Sepolia (testnet) or Base mainnet — depends on server `NETWORK_MODE`.
+**Supported networks**:
+- **Base (EVM)** — USDC on Base mainnet (chain ID 8453) or Base Sepolia testnet
+- **Solana (SVM)** — USDC on Solana mainnet-beta or Devnet
 
-**Payment packages**: Uses `@x402/express` middleware. Any x402-compatible client (Coinbase SDK `fetch402`, Daydreams agents, custom implementations) works out of the box.
+The 402 response advertises both networks. Your x402 client picks whichever chain it has funds on.
+
+**Payment packages**: Uses `@x402/express` + `@x402/evm` + `@x402/svm` middleware. Any x402-compatible client (Coinbase SDK `fetch402`, Daydreams agents, custom implementations) works out of the box.
 
 ---
 
@@ -82,10 +88,10 @@ List available plans with pricing and x402 payment info.
       "tier": "Try it out",
       "endpoint": "https://spawn.os.moda/api/v1/spawn/test",
       "x402": {
-        "scheme": "exact",
-        "price": "$14.99",
-        "network": "eip155:84532",
-        "payTo": "0x..."
+        "accepts": [
+          { "scheme": "exact", "price": "$14.99", "network": "eip155:8453", "payTo": "0x..." },
+          { "scheme": "exact", "price": "$14.99", "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "payTo": "DFbW..." }
+        ]
       }
     }
   ],
@@ -347,10 +353,13 @@ ws.on("message", (data) => {
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ETH_WALLET` | Yes | Receiving wallet address for USDC payments |
+| `ETH_WALLET` | Yes* | Base (EVM) receiving wallet address for USDC payments |
+| `SOL_WALLET` | Yes* | Solana (SVM) receiving wallet address for USDC payments |
 | `NETWORK_MODE` | No | `testnet` (default) or `mainnet` |
 | `X402_FACILITATOR_URL` | No | Custom facilitator URL (defaults based on NETWORK_MODE) |
 | `HETZNER_TOKEN` | Yes | Hetzner Cloud API token for server provisioning |
+
+*At least one of `ETH_WALLET` or `SOL_WALLET` is required. Both can be set for dual-chain support.
 
 ---
 
@@ -390,9 +399,10 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
         "amount": "$14.99",
         "currency": "USDC",
         "protocol": "x402",
-        "network": "eip155:84532",
-        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-        "payTo": "0x..."
+        "accepts": [
+          { "network": "eip155:8453", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "payTo": "0x..." },
+          { "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "payTo": "DFbW..." }
+        ]
       },
       "inputSchema": { "..." },
       "outputSchema": { "..." }
@@ -400,9 +410,10 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
   ],
   "payment": {
     "protocol": "x402",
-    "network": "eip155:84532",
-    "asset": "0x036...",
-    "payTo": "0x..."
+    "accepts": [
+      { "network": "eip155:8453", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "payTo": "0x..." },
+      { "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "payTo": "DFbW..." }
+    ]
   },
   "endpoints": {
     "plans": "https://spawn.os.moda/api/v1/plans",
@@ -454,7 +465,9 @@ The agent card at the well-known URL enables automatic discovery by any Daydream
 
 ## Network details
 
-| Mode | Chain | Chain ID | CAIP-2 | USDC Contract | Facilitator |
-|------|-------|----------|--------|---------------|-------------|
+| Mode | Chain | Chain ID / Cluster | CAIP-2 | USDC Contract | Facilitator |
+|------|-------|-------------------|--------|---------------|-------------|
 | testnet | Base Sepolia | 84532 | eip155:84532 | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | x402.org/facilitator |
 | mainnet | Base | 8453 | eip155:8453 | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | x402.org/facilitator |
+| testnet | Solana Devnet | devnet | solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` | x402.org/facilitator |
+| mainnet | Solana | mainnet-beta | solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` | x402.org/facilitator |

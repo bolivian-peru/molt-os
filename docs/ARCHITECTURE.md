@@ -36,7 +36,7 @@ TIER 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 83 tools registered                 │
+│   osmoda-bridge plugin → 88 tools registered                 │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -152,22 +152,27 @@ Optional module for AI agent workloads that need cryptographic signing. Not requ
 
 - **Socket**: `/run/osmoda/teachd.sock`
 - **State**: `/var/lib/osmoda/teachd/`
-- **Role**: Continuously observes the system, detects patterns, generates reusable knowledge documents, and suggests/applies optimizations. When OpenClaw troubleshoots a problem, the knowledge persists as reusable system wisdom.
+- **Role**: Continuously observes the system, detects patterns, generates reusable knowledge documents, suggests/applies optimizations, and auto-generates skills from repeated agent behavior. When OpenClaw troubleshoots a problem, the knowledge persists as reusable system wisdom. When the agent repeats the same tool sequence across multiple sessions, teachd creates a reusable skill automatically.
 
-**Three-loop architecture:**
+**Four-loop architecture:**
 
 ```
-OBSERVE (30s)          LEARN (5m)            TEACH (on-demand)
-─────────────          ──────────            ─────────────────
-/proc/stat      ──┐    Recurring failures    POST /teach
-/proc/meminfo   ──┤    Resource trends       → keyword match
-systemctl       ──┼──→ Anomaly detection  ──→ → relevant docs
-journalctl      ──┘    Correlations          → token budget
-     │                      │
-     ▼                      ▼
-Observations           Patterns → Knowledge Docs → Optimizations
-(SQLite, 7d TTL)       (confidence > 0.7)          (via SafeSwitch)
+OBSERVE (30s)          LEARN (5m)            SKILLGEN (1h)         TEACH (on-demand)
+─────────────          ──────────            ─────────────         ─────────────────
+/proc/stat      ──┐    Recurring failures    Agent actions  ──┐    POST /teach
+/proc/meminfo   ──┤    Resource trends       (tool sequences)│    → keyword match
+systemctl       ──┼──→ Anomaly detection     Sequence detect ┼──→ → relevant docs
+journalctl      ──┘    Correlations          Dedup + score   │    → token budget
+     │                      │                Generate SKILL  ──┘
+     ▼                      ▼                      │
+Observations           Patterns → Knowledge    SKILL.md files
+(SQLite, 7d TTL)       (confidence > 0.7)      (auto-generated)
+                             │
+                             ▼
+                       Optimizations (via SafeSwitch)
 ```
+
+See [SKILL-LEARNING.md](SKILL-LEARNING.md) for the full skill auto-teaching pipeline.
 
 **Data flow:**
 1. **OBSERVE** loop collects CPU, memory, service states, and journal errors every 30 seconds
@@ -183,7 +188,7 @@ Observations           Patterns → Knowledge Docs → Optimizations
 **Integration points:**
 - **agentd**: Receipt logging for all teach events (pattern detection, knowledge creation, optimization)
 - **osmoda-watch**: SafeSwitch sessions for applying optimizations safely with auto-rollback
-- **osmoda-bridge**: 8 tools expose teachd capabilities to OpenClaw
+- **osmoda-bridge**: 13 tools expose teachd capabilities to OpenClaw (8 core + 5 skill learning)
 
 - **Hardening**: Graceful shutdown with CancellationToken, subprocess timeouts on systemctl/sysctl calls, 7-day observation pruning.
 
@@ -210,7 +215,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
               │  osmoda agent  │    │   mobile agent     │
               │  (default)     │    │                    │
               │  Opus 4.6      │    │  Sonnet 4.6        │
-              │  83 tools      │    │  83 tools          │
+              │  88 tools      │    │  88 tools          │
               │  17 skills     │    │  17 skills         │
               │  Full access   │    │  Full access       │
               │                │    │  Concise responses  │
@@ -223,8 +228,8 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 
 | Agent | Model | Tools | Skills | Channels |
 |-------|-------|-------|--------|----------|
-| `osmoda` (default) | claude-opus-4-6 | All 83 | All 17 | Web chat (default) |
-| `mobile` | claude-sonnet-4-6 | All 83 | All 17 | Telegram, WhatsApp |
+| `osmoda` (default) | claude-opus-4-6 | All 88 | All 17 | Web chat (default) |
+| `mobile` | claude-sonnet-4-6 | All 88 | All 17 | Telegram, WhatsApp |
 
 **Routing rules:** Bindings route Telegram and WhatsApp to `mobile`. Everything else (web chat) falls through to `osmoda` (marked as `default: true`).
 
@@ -232,7 +237,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 - `~/.openclaw/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
 - `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
 
-**Tool access:** Both agents have full access to all 83 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
+**Tool access:** Both agents have full access to all 88 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
 
 ## Data Flow
 
@@ -413,11 +418,11 @@ Agents can spawn osModa servers programmatically — agents spawning agents.
 - `WS /api/v1/chat/:orderId` — WebSocket chat with the server's AI agent (auth via `?token=osk_...`)
 - `GET /api/v1/docs` — OpenAPI 3.0 spec with x402 extensions
 
-**Payment:** Coinbase x402 protocol. USDC on Base (mainnet) or Base Sepolia (testnet). Per-plan static pricing. Uses `@x402/express` + `@x402/evm` + `@x402/core`.
+**Payment:** Coinbase x402 protocol. USDC on Base (EVM) or Solana (SVM). Per-plan static pricing. Uses `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`.
 
 **Auth:** API tokens (`osk_...`) are cryptographically random (32 bytes), returned once at spawn. Stored server-side as SHA-256 hash, compared with timing-safe equality. Bearer token auth for status + WebSocket chat.
 
-**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 83 tools, mesh networking, self-install fallback.
+**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 88 tools, mesh networking, self-install fallback.
 
 ## Safety Boundaries
 

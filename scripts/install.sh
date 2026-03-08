@@ -391,7 +391,7 @@ log "Bridge plugin installed with 83 system tools."
 # ---------------------------------------------------------------------------
 # Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)
 # ---------------------------------------------------------------------------
-report_progress "bridge" "done" "83 tools registered"
+report_progress "bridge" "done" "88 tools registered"
 report_progress "workspaces" "started" "Setting up agent workspaces + skills"
 log "Step 7: Setting up multi-agent workspaces..."
 

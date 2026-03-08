@@ -4,6 +4,7 @@ mod learner;
 mod observer;
 mod optimizer;
 mod receipt;
+mod skillgen;
 mod teacher;
 
 use std::path::Path;
@@ -108,6 +109,13 @@ async fn main() {
         learner::learner_loop(learner_state, learner_cancel).await;
     });
 
+    // Spawn SKILLGEN loop (hourly, detects repeated tool sequences → auto-generates skills)
+    let skillgen_state = state.clone();
+    let skillgen_cancel = cancel.clone();
+    tokio::spawn(async move {
+        skillgen::skillgen_loop(skillgen_state, skillgen_cancel).await;
+    });
+
     let app = Router::new()
         .route("/health", get(api::health_handler))
         .route("/observations", get(api::observations_handler))
@@ -121,6 +129,14 @@ async fn main() {
         .route("/optimize/approve/{id}", post(api::optimize_approve_handler))
         .route("/optimize/apply/{id}", post(api::optimize_apply_handler))
         .route("/optimizations", get(api::optimizations_list_handler))
+        // Skill learning endpoints
+        .route("/observe/action", post(api::observe_action_handler))
+        .route("/actions", get(api::actions_list_handler))
+        .route("/skills/candidates", get(api::skill_candidates_handler))
+        .route("/skills/generate/{id}", post(api::skill_generate_handler))
+        .route("/skills/promote/{id}", post(api::skill_promote_handler))
+        .route("/skills/execution", post(api::skill_execution_handler))
+        .route("/skills/executions", get(api::skill_executions_list_handler))
         .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state.clone());
 

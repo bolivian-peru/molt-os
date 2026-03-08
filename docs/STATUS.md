@@ -2,7 +2,7 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-03-06
+Last updated: 2026-03-08
 
 ## Maturity Levels
 
@@ -18,8 +18,8 @@ Last updated: 2026-03-06
 | Metric | Count |
 |--------|-------|
 | Rust crates | 10 (9 daemons + 1 CLI) |
-| Tests passing | 198 |
-| Bridge tools registered | 83 |
+| Tests passing | 204 |
+| Bridge tools registered | 88 |
 | System skills | 17 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 
@@ -181,16 +181,20 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 |-----------|----------|-------|
 | OBSERVE loop (30s) | **Functional** | Collects CPU (/proc/stat), memory (/proc/meminfo), service (systemctl), journal (journalctl) observations |
 | LEARN loop (5m) | **Functional** | Detects recurring failures, memory trends, anomaly spikes, CPU-service correlations |
+| SKILLGEN loop (1h) | **Functional** | Detects repeated agent tool sequences across sessions, auto-generates SKILL.md files; 6 tests |
+| Agent action logging | **Solid** | Logs every tool execution via POST /observe/action; 30-day retention with auto-pruning |
+| Skill candidate detection | **Functional** | Finds contiguous 3-6 tool sequences appearing in 3+ sessions, deduplicates by 80% overlap |
+| Skill execution tracking | **Functional** | Records success/failure per skill, computes success rate |
 | Pattern detection | **Functional** | Confidence scoring; patterns above 0.7 auto-generate knowledge docs |
 | Knowledge CRUD | **Solid** | SQLite storage, manual + auto-generated docs, tags and categories; 2 tests |
 | TEACH API | **Solid** | Keyword-based retrieval with confidence boost, ~6000 char token budget cap; 2 tests |
 | Optimizer (suggest) | **Functional** | Generates ServiceRestart and Sysctl suggestions from knowledge docs |
 | Optimizer (apply) | **Functional** | Applies via SafeSwitch (POST to osmoda-watch), auto-rollback on failure |
-| SQLite persistence | **Solid** | WAL mode, 5s busy timeout; observations, patterns, knowledge_docs, optimizations tables |
+| SQLite persistence | **Solid** | WAL mode, 5s busy timeout; observations, patterns, knowledge_docs, optimizations, agent_actions, skill_candidates, skill_executions tables |
 | Observation pruning | **Solid** | 7-day retention with automatic cleanup; tested |
 | Receipt logging | **Functional** | Logs pattern detection, knowledge CRUD, optimization lifecycle to agentd |
 | NixOS service | **Functional** | systemd unit, depends on agentd, Restart=on-failure |
-| **Tests** | **15** | Health/teach serde (2), learner (4: trend, recurring, anomaly), optimizer (2: suggest, approve), teacher (2: match, no-match), knowledge CRUD (5: observations, patterns, knowledge, optimizations, pruning) |
+| **Tests** | **21** | Health/teach serde (2), learner (4: trend, recurring, anomaly), optimizer (2: suggest, approve), teacher (2: match, no-match), knowledge CRUD (5: observations, patterns, knowledge, optimizations, pruning), skillgen (6: slug, name, overlap, confidence, skill_md) |
 
 ### agentctl — CLI Tool
 
@@ -214,9 +218,9 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
 | mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
 | teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
-| Tool registrations | **Functional** | **83 tools** registered. Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **88 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (83 total)
+### Tool breakdown (88 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -235,7 +239,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | backup (agentd) | 2 | backup_create, backup_list |
 | mesh | 11 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health, mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history |
 | mcp (mcpd) | 4 | mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart |
-| teach (teachd) | 8 | teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply |
+| teach (teachd) | 13 | teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply, teach_skill_candidates, teach_skill_generate, teach_skill_promote, teach_observe_action, teach_skill_execution |
 | approval (agentd) | 4 | approval_request, approval_pending, approval_approve, approval_check |
 | sandbox (agentd) | 2 | sandbox_exec, capability_mint |
 | app (direct) | 6 | app_deploy, app_list, app_logs, app_stop, app_restart, app_remove |
@@ -328,17 +332,17 @@ cargo test --workspace
 
 | Crate | Tests | What's tested |
 |-------|-------|---------------|
-| agentd | 22 | Agent card, incidents (5), backup pruning (2), hash chain (4), FTS5 search (5), service discovery (4), memory recall (2) |
-| osmoda-keyd | 21 | ETH+SOL sign/verify, keccak256 vector, encryption roundtrip, Argon2 KDF, decimal policy (8 tests), wallet delete, persistence, cache eviction, label limit |
-| osmoda-watch | 18 | Switch state machine (3), watcher persistence (2), health check serde, input validation (12) |
+| agentd | 48 | Agent card, incidents (5), backup pruning (2), hash chain (4), FTS5 search (5), service discovery (4), memory recall (2), approval (4), sandbox (4), input validation (18) |
+| osmoda-keyd | 35 | ETH+SOL sign/verify, keccak256 vector, encryption roundtrip, Argon2 KDF, decimal policy (8), wallet delete (2), persistence, cache eviction, label limit, tx building (10) |
+| osmoda-watch | 27 | Switch state machine (3), watcher persistence (2), health check serde, input validation (12), fleet coordination (9) |
 | osmoda-routines | 17 | Cron parser (6), persistence (2), validation (7), command timeout, defaults |
 | osmoda-voice | 4 | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
-| osmoda-mesh | 31 | Identity gen/load/verify/tamper (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite roundtrip/expiry/invalid (3), peers persistence (3), reconnect backoff (2), room create/join/history (3) |
+| osmoda-mesh | 44 | Identity (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite (3), peers (3), reconnect (2), rooms (3), gossip (3), transport (5), health (3), wire framing (5) |
 | osmoda-mcpd | 8 | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
-| osmoda-teachd | 15 | Health/teach serde (2), learner (4), optimizer (2), teacher (2), knowledge CRUD (5) |
+| osmoda-teachd | 21 | Health/teach serde (2), learner (4), optimizer (2), teacher (2), knowledge CRUD (5), skillgen (6) |
 | agentctl | 0 | — |
 | osmoda-egress | 0 | — |
-| **Total** | **136** | **All pass** |
+| **Total** | **204** | **All pass** |
 
 ---
 
@@ -374,9 +378,9 @@ Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
 | `GET /api/v1/status/:orderId` | **Functional** | Basic status free, full details require Bearer `osk_` token |
 | `WS /api/v1/chat/:orderId` | **Functional** | WebSocket chat with server AI, auth via `?token=osk_...` query param |
 | `GET /api/v1/docs` | **Functional** | OpenAPI 3.0 spec with x402 extensions |
-| x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/core`, USDC on Base/Base Sepolia |
+| x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`, USDC on Base (EVM) + Solana (SVM) |
 | API token auth | **Functional** | Cryptographically random `osk_` tokens, SHA-256 hashed storage, timing-safe comparison |
-| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 83 tools |
+| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 88 tools |
 
 ### Heartbeat Pipeline
 

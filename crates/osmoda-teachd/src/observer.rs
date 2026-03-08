@@ -4,7 +4,7 @@ use chrono::{Duration, Utc};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::knowledge::{insert_observation, prune_observations, Observation};
+use crate::knowledge::{insert_observation, prune_agent_actions, prune_observations, Observation};
 use crate::TeachdState;
 
 /// Background loop: collects system observations every 30 seconds.
@@ -228,13 +228,19 @@ async fn collect_journal_observation(state: &Arc<Mutex<TeachdState>>) {
     }
 }
 
-/// Prune observations older than 7 days.
+/// Prune observations older than 7 days and agent actions older than 30 days.
 async fn prune_old_observations(state: &Arc<Mutex<TeachdState>>) {
-    let cutoff = (Utc::now() - Duration::days(7)).to_rfc3339();
+    let obs_cutoff = (Utc::now() - Duration::days(7)).to_rfc3339();
+    let actions_cutoff = (Utc::now() - Duration::days(30)).to_rfc3339();
     let st = state.lock().await;
-    match prune_observations(&st.db, &cutoff) {
+    match prune_observations(&st.db, &obs_cutoff) {
         Ok(n) if n > 0 => tracing::debug!(pruned = n, "pruned old observations"),
         Ok(_) => {}
         Err(e) => tracing::warn!(error = %e, "failed to prune observations"),
+    }
+    match prune_agent_actions(&st.db, &actions_cutoff) {
+        Ok(n) if n > 0 => tracing::debug!(pruned = n, "pruned old agent actions"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "failed to prune agent actions"),
     }
 }

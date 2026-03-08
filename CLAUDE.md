@@ -28,7 +28,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (83 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (88 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
@@ -44,6 +44,8 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart,
    teach_status, teach_observations, teach_patterns, teach_knowledge,
    teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply,
+   teach_skill_candidates, teach_skill_generate, teach_skill_promote,
+   teach_observe_action, teach_skill_execution,
    approval_request, approval_pending, approval_approve, approval_check,
    sandbox_exec, capability_mint,
    fleet_propose, fleet_status, fleet_vote, fleet_rollback,
@@ -81,6 +83,8 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 10. **osmoda-teachd** (Rust) — System learning & self-optimization daemon. Unix socket at `/run/osmoda/teachd.sock`.
     OBSERVE loop (30s): collects CPU, memory, service, journal observations into SQLite.
     LEARN loop (5m): detects patterns (recurring failures, resource trends, anomalies, correlations) → generates knowledge docs.
+    SKILLGEN loop (1h): detects repeated agent tool sequences across sessions → auto-generates SKILL.md files.
+    Agent action logger: records tool executions for skill learning.
     TEACH API: context-aware knowledge injection for the agent.
     Optimizer: suggests and applies system optimizations via SafeSwitch.
 
@@ -96,7 +100,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    and credential management; actual connections handled by OpenClaw.
 
 13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 83 tools, all 17 skills, full system access
+   - `osmoda` (default): Claude Opus, all 88 tools, all 17 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
@@ -197,13 +201,14 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── learner.rs                     # LEARN loop: pattern detection → knowledge docs
       ├── teacher.rs                     # TEACH: context injection API
       ├── optimizer.rs                   # Self-optimization suggestions + apply
-      ├── knowledge.rs                   # Knowledge document CRUD + storage
-      ├── api.rs                         # Axum handlers (12 endpoints)
+      ├── skillgen.rs                    # SKILLGEN: detect repeated tool sequences → auto-generate SKILL.md
+      ├── knowledge.rs                   # Knowledge document + agent action + skill candidate CRUD
+      ├── api.rs                         # Axum handlers (19 endpoints)
       └── receipt.rs                     # Audit logging to agentd ledger
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 83 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 88 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
@@ -417,11 +422,13 @@ POST /reload               → { status: "reloaded", removed, started, total }
 
 ## osmoda-teachd API reference (socket: /run/osmoda/teachd.sock)
 
-System learning & self-optimization daemon. OBSERVE loop (30s) collects metrics,
-LEARN loop (5m) detects patterns, TEACH API injects knowledge, Optimizer applies fixes via SafeSwitch.
+System learning, skill auto-creation & self-optimization daemon.
+OBSERVE loop (30s) collects metrics, LEARN loop (5m) detects patterns,
+SKILLGEN loop (1h) detects repeated tool sequences → auto-generates SKILL.md files,
+TEACH API injects knowledge, Optimizer applies fixes via SafeSwitch.
 
 ```
-GET  /health                          → { observation_count, pattern_count, knowledge_count, optimization_count, observer_running, learner_running }
+GET  /health                          → { observation_count, pattern_count, knowledge_count, optimization_count, action_count, skill_candidate_count, skill_execution_count, observer_running, learner_running, skillgen_running }
 GET  /observations                    ?source=...&since=...&limit=50 → Observation[]
 GET  /patterns                        ?type=...&min_confidence=0.5 → Pattern[]
 GET  /knowledge                       ?category=...&tag=...&limit=20 → KnowledgeDoc[]
@@ -433,6 +440,13 @@ POST /optimize/suggest                → Optimization[] (new suggestions)
 POST /optimize/approve/{id}           → Optimization (status → Approved)
 POST /optimize/apply/{id}             → Optimization (applies via SafeSwitch)
 GET  /optimizations                   ?status=...&limit=20 → Optimization[]
+POST /observe/action                  { tool, params?, result_summary?, context?, session_id?, success? } → AgentAction
+GET  /actions                         ?tool=...&session_id=...&since=...&limit=50 → AgentAction[]
+GET  /skills/candidates               ?status=...&limit=20 → SkillCandidate[]
+POST /skills/generate/{id}            → SkillCandidate (writes SKILL.md, status → generated)
+POST /skills/promote/{id}             → SkillCandidate (activation → auto, status → promoted)
+POST /skills/execution                { skill_name, outcome, session_id?, notes? } → { execution, success_rate, total_executions }
+GET  /skills/executions               ?skill_name=...&limit=20 → SkillExecution[]
 ```
 
 Future (M1+):
@@ -524,7 +538,7 @@ Overview tab shows 4 new cards (conditional, only when data exists):
 
 ### v1 Programmatic API (x402 payment-gated)
 
-Agent-to-agent spawning. Coinbase x402 protocol (USDC on Base).
+Agent-to-agent spawning. Coinbase x402 protocol (USDC on Base or Solana).
 
 ```
 GET  /.well-known/agent-card.json     → A2A/ERC-8004 Agent Card (skills = plans, x402 pricing)

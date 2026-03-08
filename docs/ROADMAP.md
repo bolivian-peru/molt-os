@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-06
 
-Current state: 198 tests passing, 10 Rust crates (9 daemons + 1 CLI), 83 bridge tools, 17 skills.
+Current state: 204 tests passing, 10 Rust crates (9 daemons + 1 CLI), 88 bridge tools, 17 skills.
 This document covers what shipped and what's next, in priority order.
 
 ---
@@ -19,7 +19,8 @@ This document covers what shipped and what's next, in priority order.
 | Web chat UI | osmoda-ui | **Functional** |
 | P2P encrypted agent-to-agent mesh | osmoda-mesh | **Functional** (44 tests) |
 | MCP server lifecycle management | osmoda-mcpd | **Functional** (8 tests) |
-| System learning & self-optimization | osmoda-teachd | **Functional** (15 tests) |
+| System learning, self-optimization & skill auto-teaching | osmoda-teachd | **Functional** (21 tests) |
+| Skill auto-teaching (SKILLGEN loop) | osmoda-teachd | **Functional** (6 tests) |
 | One-command installer + Hetzner deploy | scripts/ | **Functional** |
 | App process management (deploy, manage, resource-limit) | osmoda-bridge + systemd-run | **Functional** |
 | Voice — 100% local STT + TTS, no cloud | osmoda-voice | **Functional** |
@@ -428,6 +429,7 @@ osModa web UI (same as SSH tunnel, but browser-native)
 | 4 | Discord channel | S1 | **SHIPPED** | Developer audience |
 | 5 | osmoda-mcpd MCP manager | S4 | **SHIPPED** | Any MCP server becomes an OS capability |
 | — | osmoda-teachd learning daemon | S5 | **SHIPPED** | OS learns from behavior, self-optimizes |
+| — | Skill auto-teaching (SKILLGEN) | S7 | **SHIPPED** | Agent detects repeated tool sequences, auto-generates SKILL.md |
 | — | deploy scripts (install.sh, deploy-hetzner.sh) | S5 | **SHIPPED** | One-command server provisioning |
 | — | App process management (deploy, manage, limit) | S6 | **SHIPPED** | User apps as managed systemd services |
 | 6 | x402 OS-native payments | — | **Partially shipped** | Inbound x402 live on spawn.os.moda. Outbound (egress auto-pay) planned |

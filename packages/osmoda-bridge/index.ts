@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 83 tools registered:
+ * 88 tools registered:
  *   agentd:   system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:   shell_exec, file_read, file_write, directory_list (4)
  *   systemd:  service_status, journal_logs (2)
@@ -21,7 +21,9 @@
  *             mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history (11, via osmoda-mesh)
  *   mcp:      mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart (4, via osmoda-mcpd)
  *   teach:    teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create,
- *             teach_context, teach_optimize_suggest, teach_optimize_apply (8, via osmoda-teachd)
+ *             teach_context, teach_optimize_suggest, teach_optimize_apply,
+ *             teach_skill_candidates, teach_skill_generate, teach_skill_promote,
+ *             teach_observe_action, teach_skill_execution (13, via osmoda-teachd)
  *   approval: approval_request, approval_pending, approval_approve, approval_check (4, via agentd)
  *   sandbox:  sandbox_exec, capability_mint (2, via agentd)
  *   fleet:    fleet_propose, fleet_status, fleet_vote, fleet_rollback (4, via watch)
@@ -1743,6 +1745,123 @@ export default function register(api: any) {
       }
     },
   }), { names: ["teach_optimize_apply"] });
+
+  // --- teach_skill_candidates ---
+  api.registerTool(() => ({
+    name: "teach_skill_candidates",
+    label: "Skill Candidates",
+    description: "List auto-detected skill candidates from repeated agent tool sequences. Skills are auto-generated when the agent performs the same tool sequence across 3+ sessions.",
+    parameters: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Filter by status: pending, generated, promoted, rejected" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        const qs = new URLSearchParams();
+        if (params.status) qs.set("status", String(params.status));
+        if (params.limit) qs.set("limit", String(params.limit));
+        const qpath = `/skills/candidates${qs.toString() ? "?" + qs.toString() : ""}`;
+        return { output: await teachdRequest("GET", qpath) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_skill_candidates"] });
+
+  // --- teach_skill_generate ---
+  api.registerTool(() => ({
+    name: "teach_skill_generate",
+    label: "Generate Skill",
+    description: "Generate a SKILL.md file from a pending skill candidate. The skill starts with activation: manual and must be promoted to auto after validation.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Skill candidate ID to generate" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", `/skills/generate/${params.id}`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_skill_generate"] });
+
+  // --- teach_skill_promote ---
+  api.registerTool(() => ({
+    name: "teach_skill_promote",
+    label: "Promote Skill",
+    description: "Promote a generated skill to auto-activation. The SKILL.md activation field changes from manual to auto, allowing the agent to invoke it automatically.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Skill candidate ID to promote" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", `/skills/promote/${params.id}`) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_skill_promote"] });
+
+  // --- teach_observe_action ---
+  api.registerTool(() => ({
+    name: "teach_observe_action",
+    label: "Log Agent Action",
+    description: "Log an agent tool execution to teachd for skill learning. The skill generator analyzes these logs to detect repeated tool sequences that can become auto-generated skills.",
+    parameters: {
+      type: "object",
+      properties: {
+        tool: { type: "string", description: "Tool name that was executed" },
+        params: { type: "object", description: "Tool parameters (optional)" },
+        result_summary: { type: "string", description: "Brief summary of the result" },
+        context: { type: "string", description: "Context about why this tool was called" },
+        session_id: { type: "string", description: "Session identifier" },
+        success: { type: "boolean", description: "Whether the tool succeeded (default true)" },
+      },
+      required: ["tool"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", "/observe/action", params) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_observe_action"] });
+
+  // --- teach_skill_execution ---
+  api.registerTool(() => ({
+    name: "teach_skill_execution",
+    label: "Record Skill Execution",
+    description: "Record the outcome of a skill execution for success tracking. Skills with low success rates get flagged for review.",
+    parameters: {
+      type: "object",
+      properties: {
+        skill_name: { type: "string", description: "Name of the skill that was executed" },
+        session_id: { type: "string", description: "Session identifier" },
+        outcome: { type: "string", description: "Execution outcome: success, failure, or partial" },
+        notes: { type: "string", description: "Additional notes about the execution" },
+      },
+      required: ["skill_name", "outcome"],
+    },
+    async execute(_id: string, params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", "/skills/execution", params) };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_skill_execution"] });
 
   // =========================================================================
   // Approval Gate tools (via agentd — destructive operation approval)
