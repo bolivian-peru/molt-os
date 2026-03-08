@@ -14,7 +14,7 @@
 [![Beta](https://img.shields.io/badge/Status-Public%20Beta-yellow.svg)]()
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
-[![Tests](https://img.shields.io/badge/Tests-204%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-205%20passing-brightgreen.svg)]()
 [![Tools](https://img.shields.io/badge/Agent%20Tools-88-blueviolet.svg)]()
 
 [Quickstart](#quickstart) · [Architecture](#architecture) · [What It Does](#what-it-does) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
@@ -421,7 +421,7 @@ POST /wallet/send          Build signed intent (no broadcast — see STATUS.md)
 git clone https://github.com/bolivian-peru/os-moda.git && cd os-moda
 
 cargo check --workspace        # Type check all 10 crates
-cargo test --workspace         # 204 tests (all green)
+cargo test --workspace         # 205 tests (all green)
 
 # Run agentd standalone
 cargo run -p agentd -- --socket /tmp/agentd.sock --state-dir /tmp/osmoda
@@ -462,11 +462,11 @@ skills/                     17 system skill definitions
 
 ## Status
 
-> **Public Beta.** osModa is deployed on real servers managing real workloads. It's not a mockup — it's a working operating system with 204 passing tests, pen-tested security, and months of development. That said, this is early. APIs may change, features are shipping fast, and you'll occasionally find rough edges. That's the price of being early to something new.
+> **Public Beta.** osModa is deployed on real servers managing real workloads. It's not a mockup — it's a working operating system with 205 passing tests, pen-tested security, and months of development. That said, this is early. APIs may change, features are shipping fast, and you'll occasionally find rough edges. That's the price of being early to something new.
 
 **The numbers:**
 - 10 Rust crates (9 daemons + 1 CLI)
-- 204 tests passing (all green)
+- 205 tests passing (all green)
 - 88 bridge tools registered
 - 17 system skills
 - Stress tested: 700/700 concurrent health checks, 50 concurrent queries, hash chain verified across 300+ events with zero broken links

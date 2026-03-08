@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-06
 
-Current state: 204 tests passing, 10 Rust crates (9 daemons + 1 CLI), 88 bridge tools, 17 skills.
+Current state: 205 tests passing, 10 Rust crates (9 daemons + 1 CLI), 88 bridge tools, 17 skills.
 This document covers what shipped and what's next, in priority order.
 
 ---
@@ -19,8 +19,8 @@ This document covers what shipped and what's next, in priority order.
 | Web chat UI | osmoda-ui | **Functional** |
 | P2P encrypted agent-to-agent mesh | osmoda-mesh | **Functional** (44 tests) |
 | MCP server lifecycle management | osmoda-mcpd | **Functional** (8 tests) |
-| System learning, self-optimization & skill auto-teaching | osmoda-teachd | **Functional** (21 tests) |
-| Skill auto-teaching (SKILLGEN loop) | osmoda-teachd | **Functional** (6 tests) |
+| System learning, self-optimization & skill auto-teaching | osmoda-teachd | **Functional** (22 tests) |
+| Skill auto-teaching (SKILLGEN loop) | osmoda-teachd | **Functional** (7 tests) |
 | One-command installer + Hetzner deploy | scripts/ | **Functional** |
 | App process management (deploy, manage, resource-limit) | osmoda-bridge + systemd-run | **Functional** |
 | Voice — 100% local STT + TTS, no cloud | osmoda-voice | **Functional** |

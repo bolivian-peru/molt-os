@@ -18,7 +18,7 @@ Last updated: 2026-03-08
 | Metric | Count |
 |--------|-------|
 | Rust crates | 10 (9 daemons + 1 CLI) |
-| Tests passing | 204 |
+| Tests passing | 205 |
 | Bridge tools registered | 88 |
 | System skills | 17 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
@@ -194,7 +194,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | Observation pruning | **Solid** | 7-day retention with automatic cleanup; tested |
 | Receipt logging | **Functional** | Logs pattern detection, knowledge CRUD, optimization lifecycle to agentd |
 | NixOS service | **Functional** | systemd unit, depends on agentd, Restart=on-failure |
-| **Tests** | **21** | Health/teach serde (2), learner (4: trend, recurring, anomaly), optimizer (2: suggest, approve), teacher (2: match, no-match), knowledge CRUD (5: observations, patterns, knowledge, optimizations, pruning), skillgen (6: slug, name, overlap, confidence, skill_md) |
+| **Tests** | **22** | Health/teach serde (2), learner (4: trend, recurring, anomaly), optimizer (2: suggest, approve), teacher (2: match, no-match), knowledge CRUD (5: observations, patterns, knowledge, optimizations, pruning), skillgen (7: slug, name, overlap, confidence, skill_md, path_traversal) |
 
 ### agentctl — CLI Tool
 
@@ -339,10 +339,10 @@ cargo test --workspace
 | osmoda-voice | 4 | STT missing binary, TTS missing binary, VAD record_clip, VAD record_segment |
 | osmoda-mesh | 44 | Identity (5), Noise_XX handshake+transport+HKDF (3), message serde (7), chat DM+room_id (2), invite (3), peers (3), reconnect (2), rooms (3), gossip (3), transport (5), health (3), wire framing (5) |
 | osmoda-mcpd | 8 | Config serde, OpenClaw config generation (3), status transitions, health response, server list entry, default transport |
-| osmoda-teachd | 21 | Health/teach serde (2), learner (4), optimizer (2), teacher (2), knowledge CRUD (5), skillgen (6) |
+| osmoda-teachd | 22 | Health/teach serde (2), learner (4), optimizer (2), teacher (2), knowledge CRUD (5), skillgen (7: slug, name, overlap, confidence, skill_md, path_traversal) |
 | agentctl | 0 | — |
 | osmoda-egress | 0 | — |
-| **Total** | **204** | **All pass** |
+| **Total** | **205** | **All pass** |
 
 ---
 
