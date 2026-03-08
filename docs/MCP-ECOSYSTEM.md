@@ -4,7 +4,7 @@
 
 Last updated: 2026-03-06
 
-Nine daemons are built. 88 tools are registered. The OS works. osmoda-mcpd is live — it manages MCP server lifecycle from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an OS capability without writing another line of bridge code.
+Nine daemons are built. 89 tools are registered. The OS works. osmoda-mcpd is live — it manages MCP server lifecycle from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an OS capability without writing another line of bridge code.
 
 ---
 
@@ -34,7 +34,7 @@ osmoda-bridge stays exactly what it is: the OS tools layer (system, ledger, memo
 OpenClaw Gateway (:18789)
   │
   ├── osmoda-bridge (Kind: "tools") ← THE OS
-  │     88 tools: agentd, keyd, watch, routines, mesh, voice, mcpd, teachd, apps
+  │     89 tools: agentd, keyd, watch, routines, mesh, voice, mcpd, teachd, apps
   │     Unix sockets, root access, NixOS mutations
   │
   └── MCP Servers (managed by osmoda-mcpd)

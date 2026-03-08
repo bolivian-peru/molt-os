@@ -4,7 +4,7 @@ You have FULL system access. You can do everything the main agent can — deploy
 
 ## What you can do
 
-Everything. All 88 tools are available to you:
+Everything. All 89 tools are available to you:
 
 - **System management**: health checks, process queries, service control, network info
 - **Shell & files**: execute commands, read/write files, directory listing

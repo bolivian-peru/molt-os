@@ -15,7 +15,7 @@
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
 [![Tests](https://img.shields.io/badge/Tests-205%20passing-brightgreen.svg)]()
-[![Tools](https://img.shields.io/badge/Agent%20Tools-88-blueviolet.svg)]()
+[![Tools](https://img.shields.io/badge/Agent%20Tools-89-blueviolet.svg)]()
 
 [Quickstart](#quickstart) · [Architecture](#architecture) · [What It Does](#what-it-does) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
 
@@ -93,7 +93,7 @@ This is the primary install path. NixOS flakes give you reproducible builds, ato
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
-Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs the AI gateway + 88 tools, starts everything. Takes ~10 minutes on a CX22.
+Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs the AI gateway + 89 tools, starts everything. Takes ~10 minutes on a CX22.
 
 **Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
 
@@ -125,7 +125,7 @@ agentctl verify-ledger --state-dir /var/lib/osmoda
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  AI Gateway (OpenClaw)          Multi-Agent Router                            │
-│  ├─ osmoda agent (Opus)         88 tools · 17 skills · full access · web      │
+│  ├─ osmoda agent (Opus)         89 tools · 17 skills · full access · web      │
 │  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA    │
 │  osmoda-bridge                  88 typed tools (shared plugin)                 │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
@@ -447,7 +447,7 @@ crates/osmoda-voice/        Local voice (whisper.cpp + piper)
 crates/osmoda-mcpd/         MCP server lifecycle manager
 crates/osmoda-egress/       Domain-filtered egress proxy
 crates/osmoda-keyd/         Crypto wallet daemon (ETH + SOL, AES-256-GCM)
-packages/osmoda-bridge/     AI gateway plugin (88 tools, TypeScript)
+packages/osmoda-bridge/     AI gateway plugin (89 tools, TypeScript)
 nix/modules/osmoda.nix      NixOS module (single source of truth)
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity + tools + heartbeat
@@ -467,7 +467,7 @@ skills/                     17 system skill definitions
 **The numbers:**
 - 10 Rust crates (9 daemons + 1 CLI)
 - 205 tests passing (all green)
-- 88 bridge tools registered
+- 89 bridge tools registered
 - 17 system skills
 - Stress tested: 700/700 concurrent health checks, 50 concurrent queries, hash chain verified across 300+ events with zero broken links
 

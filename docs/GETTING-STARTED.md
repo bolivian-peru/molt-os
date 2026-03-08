@@ -106,7 +106,7 @@ Then open:
 http://localhost:18789?token=YOUR_GATEWAY_TOKEN
 ```
 
-You're now talking to your server. The AI has full system access — 88 tools, 9 daemons, root-level control.
+You're now talking to your server. The AI has full system access — 89 tools, 9 daemons, root-level control.
 
 ---
 

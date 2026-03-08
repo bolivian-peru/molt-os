@@ -447,6 +447,34 @@ pub async fn actions_list_handler(
     Json(actions)
 }
 
+// ── POST /skills/detect ──
+
+#[derive(Debug, Serialize)]
+pub struct DetectResponse {
+    pub sequences_found: usize,
+    pub new_candidates: usize,
+    pub candidates: Vec<SkillCandidate>,
+}
+
+pub async fn skill_detect_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<DetectResponse>, (axum::http::StatusCode, String)> {
+    skillgen::run_skillgen_cycle(&state).await.map_err(|e| {
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    // Return the current candidates
+    let st = state.lock().await;
+    let candidates = knowledge::list_skill_candidates(&st.db, None, 20).unwrap_or_default();
+    let action_count = knowledge::agent_action_count(&st.db).unwrap_or(0);
+
+    Ok(Json(DetectResponse {
+        sequences_found: action_count as usize,
+        new_candidates: candidates.iter().filter(|c| c.status == knowledge::SkillCandidateStatus::Pending).count(),
+        candidates,
+    }))
+}
+
 // ── GET /skills/candidates ──
 
 #[derive(Debug, Deserialize)]

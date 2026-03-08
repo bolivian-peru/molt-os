@@ -28,7 +28,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (88 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (89 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
@@ -45,7 +45,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    teach_status, teach_observations, teach_patterns, teach_knowledge,
    teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply,
    teach_skill_candidates, teach_skill_generate, teach_skill_promote,
-   teach_observe_action, teach_skill_execution,
+   teach_observe_action, teach_skill_execution, teach_skill_detect,
    approval_request, approval_pending, approval_approve, approval_check,
    sandbox_exec, capability_mint,
    fleet_propose, fleet_status, fleet_vote, fleet_rollback,
@@ -100,7 +100,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    and credential management; actual connections handled by OpenClaw.
 
 13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 88 tools, all 17 skills, full system access
+   - `osmoda` (default): Claude Opus, all 89 tools, all 17 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
@@ -208,7 +208,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 88 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 89 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
@@ -443,6 +443,7 @@ GET  /optimizations                   ?status=...&limit=20 → Optimization[]
 POST /observe/action                  { tool, params?, result_summary?, context?, session_id?, success? } → AgentAction
 GET  /actions                         ?tool=...&session_id=...&since=...&limit=50 → AgentAction[]
 GET  /skills/candidates               ?status=...&limit=20 → SkillCandidate[]
+POST /skills/detect                   → { sequences_found, new_candidates, candidates[] } (manual trigger)
 POST /skills/generate/{id}            → SkillCandidate (writes SKILL.md, status → generated)
 POST /skills/promote/{id}             → SkillCandidate (activation → auto, status → promoted)
 POST /skills/execution                { skill_name, outcome, session_id?, notes? } → { execution, success_rate, total_executions }

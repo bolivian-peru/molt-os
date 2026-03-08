@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 88 tools registered:
+ * 89 tools registered:
  *   agentd:   system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:   shell_exec, file_read, file_write, directory_list (4)
  *   systemd:  service_status, journal_logs (2)
@@ -23,7 +23,7 @@
  *   teach:    teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create,
  *             teach_context, teach_optimize_suggest, teach_optimize_apply,
  *             teach_skill_candidates, teach_skill_generate, teach_skill_promote,
- *             teach_observe_action, teach_skill_execution (13, via osmoda-teachd)
+ *             teach_observe_action, teach_skill_execution, teach_skill_detect (14, via osmoda-teachd)
  *   approval: approval_request, approval_pending, approval_approve, approval_check (4, via agentd)
  *   sandbox:  sandbox_exec, capability_mint (2, via agentd)
  *   fleet:    fleet_propose, fleet_status, fleet_vote, fleet_rollback (4, via watch)
@@ -232,8 +232,8 @@ const SHELL_EXEC_WINDOW_MS = 60000;
 
 // Tools that should NOT be logged (prevents feedback loops with teachd)
 const TEACHD_SKIP_TOOLS = new Set([
-  "teach_observe_action", "teach_skill_execution", "teach_status",
-  "teach_observations", "teach_patterns", "teach_knowledge",
+  "teach_observe_action", "teach_skill_execution", "teach_skill_detect",
+  "teach_status", "teach_observations", "teach_patterns", "teach_knowledge",
   "teach_knowledge_create", "teach_context", "teach_optimize_suggest",
   "teach_optimize_apply", "teach_skill_candidates", "teach_skill_generate",
   "teach_skill_promote",
@@ -1906,6 +1906,21 @@ export default function register(api: any) {
       }
     },
   }), { names: ["teach_skill_execution"] });
+
+  // --- teach_skill_detect ---
+  api.registerTool(() => ({
+    name: "teach_skill_detect",
+    label: "Detect Skill Candidates",
+    description: "Manually trigger the skill detection cycle. Scans recent agent tool executions for repeated patterns across sessions and creates skill candidates. Use this instead of waiting for the hourly automatic scan.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", "/skills/detect") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_skill_detect"] });
 
   // =========================================================================
   // Approval Gate tools (via agentd — destructive operation approval)

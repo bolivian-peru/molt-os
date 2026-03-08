@@ -132,6 +132,7 @@ async fn main() {
         // Skill learning endpoints
         .route("/observe/action", post(api::observe_action_handler))
         .route("/actions", get(api::actions_list_handler))
+        .route("/skills/detect", post(api::skill_detect_handler))
         .route("/skills/candidates", get(api::skill_candidates_handler))
         .route("/skills/generate/{id}", post(api::skill_generate_handler))
         .route("/skills/promote/{id}", post(api::skill_promote_handler))

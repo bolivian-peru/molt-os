@@ -218,9 +218,9 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
 | mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
 | teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
-| Tool registrations | **Functional** | **88 tools** registered. Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **89 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (88 total)
+### Tool breakdown (89 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -239,7 +239,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | backup (agentd) | 2 | backup_create, backup_list |
 | mesh | 11 | mesh_identity, mesh_invite_create, mesh_invite_accept, mesh_peers, mesh_peer_send, mesh_peer_disconnect, mesh_health, mesh_room_create, mesh_room_join, mesh_room_send, mesh_room_history |
 | mcp (mcpd) | 4 | mcp_servers, mcp_server_start, mcp_server_stop, mcp_server_restart |
-| teach (teachd) | 13 | teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply, teach_skill_candidates, teach_skill_generate, teach_skill_promote, teach_observe_action, teach_skill_execution |
+| teach (teachd) | 14 | teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create, teach_context, teach_optimize_suggest, teach_optimize_apply, teach_skill_candidates, teach_skill_generate, teach_skill_promote, teach_observe_action, teach_skill_execution, teach_skill_detect |
 | approval (agentd) | 4 | approval_request, approval_pending, approval_approve, approval_check |
 | sandbox (agentd) | 2 | sandbox_exec, capability_mint |
 | app (direct) | 6 | app_deploy, app_list, app_logs, app_stop, app_restart, app_remove |
@@ -380,7 +380,7 @@ Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
 | `GET /api/v1/docs` | **Functional** | OpenAPI 3.0 spec with x402 extensions |
 | x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`, USDC on Base (EVM) + Solana (SVM) |
 | API token auth | **Functional** | Cryptographically random `osk_` tokens, SHA-256 hashed storage, timing-safe comparison |
-| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 88 tools |
+| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 89 tools |
 
 ### Heartbeat Pipeline
 

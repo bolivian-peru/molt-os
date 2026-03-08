@@ -36,7 +36,8 @@ pub async fn skillgen_loop(state: Arc<Mutex<TeachdState>>, cancel: CancellationT
     }
 }
 
-async fn run_skillgen_cycle(state: &Arc<Mutex<TeachdState>>) -> anyhow::Result<()> {
+/// Run one skillgen detection cycle (called by the hourly loop and POST /skills/detect).
+pub async fn run_skillgen_cycle(state: &Arc<Mutex<TeachdState>>) -> anyhow::Result<()> {
     let st = state.lock().await;
 
     // Find tool sequences appearing in 3+ distinct sessions

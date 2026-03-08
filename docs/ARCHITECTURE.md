@@ -36,7 +36,7 @@ TIER 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 88 tools registered                 │
+│   osmoda-bridge plugin → 89 tools registered                 │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -215,7 +215,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
               │  osmoda agent  │    │   mobile agent     │
               │  (default)     │    │                    │
               │  Opus 4.6      │    │  Sonnet 4.6        │
-              │  88 tools      │    │  88 tools          │
+              │  89 tools      │    │  89 tools          │
               │  17 skills     │    │  17 skills         │
               │  Full access   │    │  Full access       │
               │                │    │  Concise responses  │
@@ -228,8 +228,8 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 
 | Agent | Model | Tools | Skills | Channels |
 |-------|-------|-------|--------|----------|
-| `osmoda` (default) | claude-opus-4-6 | All 88 | All 17 | Web chat (default) |
-| `mobile` | claude-sonnet-4-6 | All 88 | All 17 | Telegram, WhatsApp |
+| `osmoda` (default) | claude-opus-4-6 | All 89 | All 17 | Web chat (default) |
+| `mobile` | claude-sonnet-4-6 | All 89 | All 17 | Telegram, WhatsApp |
 
 **Routing rules:** Bindings route Telegram and WhatsApp to `mobile`. Everything else (web chat) falls through to `osmoda` (marked as `default: true`).
 
@@ -237,7 +237,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 - `~/.openclaw/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
 - `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
 
-**Tool access:** Both agents have full access to all 88 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
+**Tool access:** Both agents have full access to all 89 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
 
 ## Data Flow
 
@@ -422,7 +422,7 @@ Agents can spawn osModa servers programmatically — agents spawning agents.
 
 **Auth:** API tokens (`osk_...`) are cryptographically random (32 bytes), returned once at spawn. Stored server-side as SHA-256 hash, compared with timing-safe equality. Bearer token auth for status + WebSocket chat.
 
-**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 88 tools, mesh networking, self-install fallback.
+**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 89 tools, mesh networking, self-install fallback.
 
 ## Safety Boundaries
 

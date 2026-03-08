@@ -12,7 +12,7 @@
 #   1. Converts your server to NixOS (via nixos-infect) — optional
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the osmoda-bridge plugin (88 system tools)
+#   4. Sets up the osmoda-bridge plugin (89 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #   7. Opens the setup wizard at localhost:18789
@@ -386,12 +386,12 @@ rm -rf "$PLUGIN_DST"
 cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
 chown -R root:root "$PLUGIN_DST"
 
-log "Bridge plugin installed with 88 system tools."
+log "Bridge plugin installed with 89 system tools."
 
 # ---------------------------------------------------------------------------
 # Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)
 # ---------------------------------------------------------------------------
-report_progress "bridge" "done" "88 tools registered"
+report_progress "bridge" "done" "89 tools registered"
 report_progress "workspaces" "started" "Setting up agent workspaces + skills"
 log "Step 7: Setting up multi-agent workspaces..."
 
