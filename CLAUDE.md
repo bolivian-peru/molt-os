@@ -83,7 +83,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 10. **osmoda-teachd** (Rust) — System learning & self-optimization daemon. Unix socket at `/run/osmoda/teachd.sock`.
     OBSERVE loop (30s): collects CPU, memory, service, journal observations into SQLite.
     LEARN loop (5m): detects patterns (recurring failures, resource trends, anomalies, correlations) → generates knowledge docs.
-    SKILLGEN loop (1h): detects repeated agent tool sequences across sessions → auto-generates SKILL.md files.
+    SKILLGEN loop (6h): detects repeated agent tool sequences across sessions → auto-generates SKILL.md files.
     Agent action logger: records tool executions for skill learning.
     TEACH API: context-aware knowledge injection for the agent.
     Optimizer: suggests and applies system optimizations via SafeSwitch.
@@ -424,7 +424,7 @@ POST /reload               → { status: "reloaded", removed, started, total }
 
 System learning, skill auto-creation & self-optimization daemon.
 OBSERVE loop (30s) collects metrics, LEARN loop (5m) detects patterns,
-SKILLGEN loop (1h) detects repeated tool sequences → auto-generates SKILL.md files,
+SKILLGEN loop (6h) detects repeated tool sequences → auto-generates SKILL.md files,
 TEACH API injects knowledge, Optimizer applies fixes via SafeSwitch.
 
 ```

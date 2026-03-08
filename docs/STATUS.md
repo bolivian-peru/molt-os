@@ -181,7 +181,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 |-----------|----------|-------|
 | OBSERVE loop (30s) | **Functional** | Collects CPU (/proc/stat), memory (/proc/meminfo), service (systemctl), journal (journalctl) observations |
 | LEARN loop (5m) | **Functional** | Detects recurring failures, memory trends, anomaly spikes, CPU-service correlations |
-| SKILLGEN loop (1h) | **Functional** | Detects repeated agent tool sequences across sessions, auto-generates SKILL.md files; 6 tests |
+| SKILLGEN loop (6h) | **Functional** | Detects repeated agent tool sequences across sessions, auto-generates SKILL.md files; 6 tests |
 | Agent action logging | **Solid** | Logs every tool execution via POST /observe/action; 30-day retention with auto-pruning |
 | Skill candidate detection | **Functional** | Finds contiguous 3-6 tool sequences appearing in 3+ sessions, deduplicates by 80% overlap |
 | Skill execution tracking | **Functional** | Records success/failure per skill, computes success rate |

@@ -205,7 +205,7 @@ Append-only. Tamper-evident. Any single modification invalidates the chain. Veri
 | **agentd** | System bridge: processes, services, network, filesystem, NixOS config, sysctl parameters. Hash-chained audit ledger. FTS5 memory search. | The structured interface between AI and system |
 | **osmoda-watch** | SafeSwitch: deploy with a timer, health checks, and automatic rollback if anything fails. Autopilot watchers with escalation (restart -> rollback -> notify). | Blue-green deploys with automatic undo |
 | **osmoda-routines** | Background cron/event/webhook automation. Runs between conversations. Health checks, log scans, service monitors. | Agent actions that persist when nobody's chatting |
-| **osmoda-teachd** | OBSERVE loop (30s) collects metrics. LEARN loop (5m) detects patterns. SKILLGEN loop (1h) detects repeated agent tool sequences and auto-generates SKILL.md files. TEACH API injects knowledge. Optimizer suggests fixes. | The OS learns from its own behavior and teaches itself new skills |
+| **osmoda-teachd** | OBSERVE loop (30s) collects metrics. LEARN loop (5m) detects patterns. SKILLGEN loop (6h) detects repeated agent tool sequences and auto-generates SKILL.md files. TEACH API injects knowledge. Optimizer suggests fixes. | The OS learns from its own behavior and teaches itself new skills |
 
 ### Communication
 

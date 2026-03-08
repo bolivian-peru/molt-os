@@ -109,7 +109,7 @@ async fn main() {
         learner::learner_loop(learner_state, learner_cancel).await;
     });
 
-    // Spawn SKILLGEN loop (hourly, detects repeated tool sequences → auto-generates skills)
+    // Spawn SKILLGEN loop (every 6h, detects repeated tool sequences → auto-generates skills)
     let skillgen_state = state.clone();
     let skillgen_cancel = cancel.clone();
     tokio::spawn(async move {

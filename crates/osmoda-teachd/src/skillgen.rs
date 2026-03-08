@@ -11,15 +11,15 @@ use crate::knowledge::{
 };
 use crate::TeachdState;
 
-/// Background loop: scans agent actions for repeated tool sequences every hour.
+/// Background loop: scans agent actions for repeated tool sequences every 6 hours.
 pub async fn skillgen_loop(state: Arc<Mutex<TeachdState>>, cancel: CancellationToken) {
-    // Initial delay: wait 5 minutes before first scan to let data accumulate
+    // Initial delay: wait 10 minutes before first scan to let data accumulate
     tokio::select! {
         _ = cancel.cancelled() => return,
-        _ = tokio::time::sleep(tokio::time::Duration::from_secs(300)) => {}
+        _ = tokio::time::sleep(tokio::time::Duration::from_secs(600)) => {}
     }
 
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(6 * 3600));
 
     loop {
         tokio::select! {
@@ -36,7 +36,7 @@ pub async fn skillgen_loop(state: Arc<Mutex<TeachdState>>, cancel: CancellationT
     }
 }
 
-/// Run one skillgen detection cycle (called by the hourly loop and POST /skills/detect).
+/// Run one skillgen detection cycle (called by the 6-hour loop and POST /skills/detect).
 pub async fn run_skillgen_cycle(state: &Arc<Mutex<TeachdState>>) -> anyhow::Result<()> {
     let st = state.lock().await;
 

@@ -21,7 +21,7 @@ teachd detects: "This 3-tool sequence appeared in 3+ sessions"
 
 ```
 1. OBSERVE  — Agent uses tools → logged to agent_actions table
-2. DETECT   — SKILLGEN loop (hourly) finds repeated tool sequences
+2. DETECT   — SKILLGEN loop (every 6h) finds repeated tool sequences
 3. REVIEW   — Skill candidates listed for agent/user review
 4. GENERATE — SKILL.md file written with step-by-step procedure
 5. PROMOTE  — After validation, activation set to auto
@@ -46,7 +46,7 @@ Actions are stored in SQLite with a 30-day retention window.
 
 ### Step 2: Sequence Detection
 
-The SKILLGEN background loop runs every hour. It:
+The SKILLGEN background loop runs every 6 hours. It:
 
 1. Groups actions by session, ordered by timestamp
 2. Extracts contiguous subsequences of 3-6 tools
