@@ -162,12 +162,18 @@ confidence: {:.2}
 
 /// Write a SKILL.md file to disk.
 pub fn write_skill_file(state_dir: &str, candidate: &SkillCandidate) -> anyhow::Result<String> {
+    // Reject path traversal: no slashes, backslashes, or ".." in candidate names
+    if candidate.name.contains('/') || candidate.name.contains('\\') || candidate.name.contains("..") || candidate.name.is_empty() {
+        anyhow::bail!("invalid skill candidate name: {}", candidate.name);
+    }
+    let safe_name = &candidate.name;
+
     let skill_dir = PathBuf::from(state_dir)
         .parent()
         .unwrap_or(&PathBuf::from("/var/lib/osmoda"))
         .join("skills")
         .join("auto")
-        .join(&candidate.name);
+        .join(&safe_name);
 
     std::fs::create_dir_all(&skill_dir)?;
 
@@ -296,6 +302,26 @@ mod tests {
         };
         let conf = compute_confidence(&seq);
         assert!(conf > 0.0 && conf <= 1.0);
+    }
+
+    #[test]
+    fn test_write_skill_file_rejects_path_traversal() {
+        let now = Utc::now();
+        let candidate = SkillCandidate {
+            id: "sc-evil".to_string(),
+            name: "../../../etc/cron.d/evil".to_string(),
+            description: "Malicious".to_string(),
+            tools: vec!["shell_exec".to_string()],
+            session_count: 3,
+            confidence: 0.5,
+            source_patterns: vec![],
+            status: SkillCandidateStatus::Pending,
+            skill_path: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let result = write_skill_file("/tmp/test-teachd", &candidate);
+        assert!(result.is_err(), "should reject path traversal in candidate name");
     }
 
     #[test]

@@ -227,10 +227,54 @@ const SHELL_EXEC_RATE_LIMIT = 30;
 const SHELL_EXEC_WINDOW_MS = 60000;
 
 // ---------------------------------------------------------------------------
+// Automatic tool execution logging for skill auto-teaching
+// ---------------------------------------------------------------------------
+
+// Tools that should NOT be logged (prevents feedback loops with teachd)
+const TEACHD_SKIP_TOOLS = new Set([
+  "teach_observe_action", "teach_skill_execution", "teach_status",
+  "teach_observations", "teach_patterns", "teach_knowledge",
+  "teach_knowledge_create", "teach_context", "teach_optimize_suggest",
+  "teach_optimize_apply", "teach_skill_candidates", "teach_skill_generate",
+  "teach_skill_promote",
+]);
+
+const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+function logToolExecution(toolName: string, params: Record<string, unknown>, output: string, success: boolean) {
+  if (TEACHD_SKIP_TOOLS.has(toolName)) return;
+  // Fire-and-forget: never block or fail the actual tool
+  teachdRequest("POST", "/observe/action", {
+    tool: toolName,
+    params: Object.keys(params).length > 0 ? params : {},
+    result_summary: output.substring(0, 200),
+    session_id: sessionId,
+    success,
+  }).catch(() => {}); // best-effort — teachd being down never breaks tools
+}
+
+// ---------------------------------------------------------------------------
 // Plugin registration
 // ---------------------------------------------------------------------------
 
 export default function register(api: any) {
+
+  // Wrap registerTool to auto-log every tool execution to teachd for skill learning
+  const originalRegisterTool = api.registerTool.bind(api);
+  api.registerTool = (factory: () => any, opts: any) => {
+    const wrappedFactory = () => {
+      const tool = factory();
+      const originalExecute = tool.execute;
+      tool.execute = async (id: string, params: Record<string, unknown>) => {
+        const result = await originalExecute(id, params);
+        const hasError = result.output && result.output.includes('"error"');
+        logToolExecution(tool.name, params, result.output || "", !hasError);
+        return result;
+      };
+      return tool;
+    };
+    return originalRegisterTool(wrappedFactory, opts);
+  };
 
   // --- system_health ---
   api.registerTool(() => ({
