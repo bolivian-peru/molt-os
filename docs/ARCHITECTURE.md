@@ -415,7 +415,9 @@ Agents can spawn osModa servers programmatically — agents spawning agents.
 
 **Payment:** Coinbase x402 protocol. USDC on Base (mainnet) or Base Sepolia (testnet). Per-plan static pricing. Uses `@x402/express` + `@x402/evm` + `@x402/core`.
 
-**Auth:** API tokens (`osk_...`) generated via HMAC-SHA256 on spawn, returned in the spawn response. Bearer token auth for status + WebSocket chat.
+**Auth:** API tokens (`osk_...`) are cryptographically random (32 bytes), returned once at spawn. Stored server-side as SHA-256 hash, compared with timing-safe equality. Bearer token auth for status + WebSocket chat.
+
+**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 83 tools, mesh networking, self-install fallback.
 
 ## Safety Boundaries
 

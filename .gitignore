@@ -44,7 +44,7 @@ server-audit.md
 *.log
 *.bak
 
-# Internal docs (not published)
+# Internal docs (not published — may contain server IPs, infra details)
 docs/planning/
 docs/SPRINT-*
 docs/DEPLOY-*
@@ -57,6 +57,9 @@ docs/PENTEST-PROCESS.md
 docs/6NODE-TEST-FINDINGS.md
 docs/GO-TO-MARKET.md
 docs/AGENTOS-PRODUCT-HUNT-STRATEGY.md
+docs/FRESH-INSTALL-TEST.md
+docs/X402-TESTING.md
+COMMENTS.md
 
 # Internal test scripts (contain infrastructure references)
 scripts/security-stress-test.sh

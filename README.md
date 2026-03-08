@@ -470,7 +470,7 @@ See [ROADMAP.md](docs/ROADMAP.md) for the full plan and [STATUS.md](docs/STATUS.
 
 Don't want to self-host? [**spawn.os.moda**](https://spawn.os.moda) provisions a fully configured osModa server on Hetzner Cloud in ~10 minutes. Pick a plan, pay with card or USDC, and start chatting with your server from the browser or Telegram.
 
-The dashboard shows real orchestration data from your server's daemons: active routines and watchers, audit event feed, learned system patterns, and running tool servers — all from live heartbeat data, not mocks.
+The dashboard shows real orchestration data from your server's daemons: active routines and watchers, audit event feed, learned system patterns, and running tool servers — all from live heartbeat data, not mocks. Manage agents directly from the dashboard: create new agents with model and channel routing, edit existing agents, or remove them — changes apply immediately on the server.
 
 ### Programmatic API (agents spawning agents)
 
@@ -484,10 +484,10 @@ curl https://spawn.os.moda/.well-known/agent-card.json
 curl https://spawn.os.moda/api/v1/plans
 
 # Spawn a server (x402 USDC payment required)
-curl -X POST https://spawn.os.moda/api/v1/spawn/cx22 \
+curl -X POST https://spawn.os.moda/api/v1/spawn/test \
   -H "Content-Type: application/json" \
-  -d '{"server_name": "my-agent", "ssh_keys": ["ssh-ed25519 ..."]}'
-# → { order_id, api_token: "osk_...", status_url, chat_url }
+  -d '{"region": "eu-central", "ssh_key": "ssh-ed25519 ..."}'
+# → { order_id, api_token: "osk_...", server_ip, status_url, chat_url }
 
 # Check status
 curl https://spawn.os.moda/api/v1/status/{orderId} \
@@ -495,9 +495,13 @@ curl https://spawn.os.moda/api/v1/status/{orderId} \
 
 # Chat with the server's AI via WebSocket
 wscat -c "wss://spawn.os.moda/api/v1/chat/{orderId}?token=osk_..."
+
+# Full agent skill doc (plain text, for agents to read)
+curl https://spawn.os.moda/SKILL.md
 ```
 
-Payment via Coinbase x402 protocol (USDC on Base). OpenAPI docs at `/api/v1/docs`.
+Plans: `test` (Solo $14.99), `starter` (Pro $34.99), `developer` (Team $62.99), `production` (Scale $125.99).
+Payment via Coinbase x402 protocol (USDC on Base). Full API docs at [`/api/v1/docs`](https://spawn.os.moda/api/v1/docs). Agent skill doc at [`/SKILL.md`](https://spawn.os.moda/SKILL.md).
 
 ## Contributing
 

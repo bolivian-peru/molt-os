@@ -375,7 +375,8 @@ Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
 | `WS /api/v1/chat/:orderId` | **Functional** | WebSocket chat with server AI, auth via `?token=osk_...` query param |
 | `GET /api/v1/docs` | **Functional** | OpenAPI 3.0 spec with x402 extensions |
 | x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/core`, USDC on Base/Base Sepolia |
-| API token auth | **Functional** | HMAC-SHA256 generated `osk_` tokens, Bearer auth for protected endpoints |
+| API token auth | **Functional** | Cryptographically random `osk_` tokens, SHA-256 hashed storage, timing-safe comparison |
+| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 83 tools |
 
 ### Heartbeat Pipeline
 

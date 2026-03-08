@@ -25,6 +25,8 @@ This document covers what shipped and what's next, in priority order.
 | Voice — 100% local STT + TTS, no cloud | osmoda-voice | **Functional** |
 | Crypto wallets — ETH + SOL, AES-256-GCM, policy-gated | osmoda-keyd (optional) | **Solid** (35 tests) |
 | One-command server provisioning with USDC payments | spawn.os.moda (private) | **Functional** |
+| Public spawn API with x402 payment gating | spawn.os.moda v1 API | **Functional** |
+| A2A agent discovery (ERC-8004 Agent Card) | spawn.os.moda /.well-known/ | **Functional** |
 
 Maturity levels: **Solid** = has tests, handles edge cases. **Functional** = works but has known limitations. See [STATUS.md](STATUS.md) for full details.
 
@@ -428,7 +430,7 @@ osModa web UI (same as SSH tunnel, but browser-native)
 | — | osmoda-teachd learning daemon | S5 | **SHIPPED** | OS learns from behavior, self-optimizes |
 | — | deploy scripts (install.sh, deploy-hetzner.sh) | S5 | **SHIPPED** | One-command server provisioning |
 | — | App process management (deploy, manage, limit) | S6 | **SHIPPED** | User apps as managed systemd services |
-| 6 | x402 OS-native payments | — | Planned | AI pays for APIs autonomously within policy |
+| 6 | x402 OS-native payments | — | **Partially shipped** | Inbound x402 live on spawn.os.moda. Outbound (egress auto-pay) planned |
 | 7 | Semantic memory (usearch) | — | Planned | Hybrid BM25 + vector recall |
 | 8 | Zod config validation | — | Planned | Developer experience, fail-fast |
 | 9 | Web dashboard with live chat | — | **SHIPPED** | Server management from browser |
