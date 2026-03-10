@@ -161,20 +161,15 @@ confidence: {:.2}
     )
 }
 
-/// Write a SKILL.md file to disk.
-pub fn write_skill_file(state_dir: &str, candidate: &SkillCandidate) -> anyhow::Result<String> {
+/// Write a SKILL.md file to the OpenClaw workspace skills directory.
+pub fn write_skill_file(skills_dir: &str, candidate: &SkillCandidate) -> anyhow::Result<String> {
     // Reject path traversal: no slashes, backslashes, or ".." in candidate names
     if candidate.name.contains('/') || candidate.name.contains('\\') || candidate.name.contains("..") || candidate.name.is_empty() {
         anyhow::bail!("invalid skill candidate name: {}", candidate.name);
     }
-    let safe_name = &candidate.name;
 
-    let skill_dir = PathBuf::from(state_dir)
-        .parent()
-        .unwrap_or(&PathBuf::from("/var/lib/osmoda"))
-        .join("skills")
-        .join("auto")
-        .join(&safe_name);
+    let skill_dir = PathBuf::from(skills_dir)
+        .join(format!("auto-{}", &candidate.name));
 
     std::fs::create_dir_all(&skill_dir)?;
 
@@ -195,9 +190,9 @@ pub fn write_skill_file(state_dir: &str, candidate: &SkillCandidate) -> anyhow::
 
 fn slug_from_tools(tools: &[String]) -> String {
     let joined = tools.join("-");
-    // Truncate to keep IDs reasonable
+    // Truncate to keep IDs reasonable (char-safe to avoid UTF-8 panic)
     if joined.len() > 60 {
-        joined[..60].to_string()
+        joined.chars().take(60).collect()
     } else {
         joined
     }

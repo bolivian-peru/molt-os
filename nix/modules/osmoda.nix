@@ -637,6 +637,7 @@ in {
           "--state-dir ${cfg.stateDir}/teachd"
           "--agentd-socket ${cfg.agentd.socketPath}"
           "--watch-socket ${cfg.watch.socketPath}"
+          "--skills-dir ${cfg.stateDir}/workspace-osmoda/skills"
         ];
         Restart = "on-failure";
         RestartSec = 5;
@@ -649,7 +650,7 @@ in {
         RestrictSUIDSGID = true;
         ProtectKernelTunables = true;
         LockPersonality = true;
-        ReadWritePaths = [ "${cfg.stateDir}/teachd" "/run/osmoda" ];
+        ReadWritePaths = [ "${cfg.stateDir}/teachd" "${cfg.stateDir}/workspace-osmoda/skills" "/run/osmoda" ];
       };
     };
 

@@ -30,7 +30,7 @@ teachd detects: "This 3-tool sequence appeared in 3+ sessions"
 
 ### Step 1: Action Logging
 
-Every tool the agent executes is logged via `POST /observe/action`:
+Every tool the agent executes is automatically logged by the bridge via `POST /observe/action`. Sessions are detected by inactivity (30 minutes of no tool calls = new session):
 
 ```json
 {
@@ -200,7 +200,7 @@ CREATE TABLE skill_executions (
 - **Agent actions**: 30-day retention, auto-pruned by the observer loop
 - **Skill candidates**: Permanent (small volume)
 - **Skill executions**: Permanent (small volume)
-- **Generated SKILL.md files**: Written to `/var/lib/osmoda/skills/auto/<name>/SKILL.md`
+- **Generated SKILL.md files**: Written to the OpenClaw workspace skills directory (e.g., `/root/.openclaw/workspace-osmoda/skills/auto-<name>/SKILL.md` or `/var/lib/osmoda/workspace-osmoda/skills/auto-<name>/SKILL.md` on NixOS)
 
 ## Integration Points
 

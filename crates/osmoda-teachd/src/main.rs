@@ -42,11 +42,16 @@ struct Args {
     /// Path to the watch daemon Unix socket (for SafeSwitch).
     #[arg(long, default_value = "/run/osmoda/watch.sock")]
     watch_socket: String,
+
+    /// Directory where auto-generated skills are written (must be in OpenClaw workspace).
+    #[arg(long, default_value = "/root/.openclaw/workspace-osmoda/skills")]
+    skills_dir: String,
 }
 
 pub struct TeachdState {
     pub db: Connection,
     pub state_dir: String,
+    pub skills_dir: String,
     pub agentd_socket: String,
     pub watch_socket: String,
     pub receipt_logger: ReceiptLogger,
@@ -85,9 +90,15 @@ async fn main() {
 
     let receipt_logger = ReceiptLogger::new(&args.agentd_socket);
 
+    // Ensure skills output directory exists
+    if let Err(e) = std::fs::create_dir_all(&args.skills_dir) {
+        tracing::warn!(error = %e, dir = %args.skills_dir, "failed to create skills directory");
+    }
+
     let state = Arc::new(Mutex::new(TeachdState {
         db,
         state_dir: args.state_dir,
+        skills_dir: args.skills_dir,
         agentd_socket: args.agentd_socket,
         watch_socket: args.watch_socket,
         receipt_logger,

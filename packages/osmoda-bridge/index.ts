@@ -239,7 +239,19 @@ const TEACHD_SKIP_TOOLS = new Set([
   "teach_skill_promote",
 ]);
 
-const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+// Session detection: new session after 30 minutes of inactivity
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+let currentSessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+let lastToolTime = Date.now();
+
+function getSessionId(): string {
+  const now = Date.now();
+  if (now - lastToolTime > SESSION_TIMEOUT_MS) {
+    currentSessionId = `session-${now}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+  lastToolTime = now;
+  return currentSessionId;
+}
 
 function logToolExecution(toolName: string, params: Record<string, unknown>, output: string, success: boolean) {
   if (TEACHD_SKIP_TOOLS.has(toolName)) return;
@@ -248,7 +260,7 @@ function logToolExecution(toolName: string, params: Record<string, unknown>, out
     tool: toolName,
     params: Object.keys(params).length > 0 ? params : {},
     result_summary: output.substring(0, 200),
-    session_id: sessionId,
+    session_id: getSessionId(),
     success,
   }).catch(() => {}); // best-effort — teachd being down never breaks tools
 }
@@ -266,10 +278,22 @@ export default function register(api: any) {
       const tool = factory();
       const originalExecute = tool.execute;
       tool.execute = async (id: string, params: Record<string, unknown>) => {
-        const result = await originalExecute(id, params);
-        const hasError = result.output && result.output.includes('"error"');
-        logToolExecution(tool.name, params, result.output || "", !hasError);
-        return result;
+        let success = true;
+        try {
+          const result = await originalExecute(id, params);
+          // Detect errors: check if output is a JSON object with an "error" key
+          if (result.output) {
+            try {
+              const parsed = JSON.parse(result.output);
+              if (parsed && typeof parsed === "object" && "error" in parsed) success = false;
+            } catch { /* not JSON, assume success */ }
+          }
+          logToolExecution(tool.name, params, result.output || "", success);
+          return result;
+        } catch (e: any) {
+          logToolExecution(tool.name, params, e.message || "exception", false);
+          throw e;
+        }
       };
       return tool;
     };

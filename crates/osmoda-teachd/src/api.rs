@@ -401,6 +401,9 @@ pub async fn observe_action_handler(
     State(state): State<SharedState>,
     Json(body): Json<ObserveActionRequest>,
 ) -> Result<Json<AgentAction>, (axum::http::StatusCode, String)> {
+    if body.tool.trim().is_empty() {
+        return Err((axum::http::StatusCode::BAD_REQUEST, "tool name is required".to_string()));
+    }
     let st = state.lock().await;
     let now = chrono::Utc::now();
     let action = AgentAction {
@@ -516,7 +519,7 @@ pub async fn skill_generate_handler(
     }
 
     // Write SKILL.md file
-    let skill_path = skillgen::write_skill_file(&st.state_dir, &candidate)
+    let skill_path = skillgen::write_skill_file(&st.skills_dir, &candidate)
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     candidate.status = knowledge::SkillCandidateStatus::Generated;
