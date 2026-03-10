@@ -531,15 +531,33 @@ AUTHEOF
   chmod 600 "$STATE_DIR/config/gateway-token"
   log "Generated gateway token for relay auth"
 
-  # Generate multi-agent OpenClaw config (JSON5)
+  # Generate multi-agent OpenClaw config with env block + compaction
   if command -v node &>/dev/null; then
-    node - "$GATEWAY_TOKEN" <<'CONFIGEOF'
+    node - "$GATEWAY_TOKEN" "$DECODED_KEY" "$EFFECTIVE_PROVIDER" <<'CONFIGEOF'
 const fs = require('fs');
 const gwToken = process.argv[2] || '';
+const apiKey = process.argv[3] || '';
+const provider = process.argv[4] || 'anthropic';
+
+// Build env block: OAuth tokens go in BOTH CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY
+const env = {};
+if (apiKey && provider === 'anthropic') {
+  env.ANTHROPIC_API_KEY = apiKey;
+  if (apiKey.startsWith('sk-ant-oat')) {
+    env.CLAUDE_CODE_OAUTH_TOKEN = apiKey;
+  }
+} else if (apiKey && provider === 'openai') {
+  env.OPENAI_API_KEY = apiKey;
+}
+
 const config = {
+  env: env,
   gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } },
   plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
   agents: {
+    defaults: {
+      compaction: { mode: 'safeguard' }
+    },
     list: [
       {
         id: 'osmoda',
@@ -595,9 +613,13 @@ else
 const fs = require('fs');
 const gwToken = process.argv[2] || '';
 const config = {
+  env: {},
   gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } },
   plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
   agents: {
+    defaults: {
+      compaction: { mode: 'safeguard' }
+    },
     list: [
       {
         id: 'osmoda',
@@ -1611,23 +1633,50 @@ DECEOF
             '{type: $type, provider: $provider, ($field): $key}' \
             > "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
         done
-        # Ensure OpenClaw gateway config exists (may not if no key at install time)
-        if [ ! -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
-          # Ensure gateway token exists for relay auth
-          HBGWTOKEN=""
-          if [ -f "$STATE_DIR/config/gateway-token" ]; then
-            HBGWTOKEN=$(cat "$STATE_DIR/config/gateway-token")
-          fi
-          if [ -z "$HBGWTOKEN" ]; then
-            HBGWTOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
-            printf '%s' "$HBGWTOKEN" > "$STATE_DIR/config/gateway-token"
-            chmod 600 "$STATE_DIR/config/gateway-token"
-          fi
-          node - "$HBGWTOKEN" <<'HBCONFIGEOF'
-var fs=require('fs'),t=process.argv[2]||'';
-var auth=t?{mode:'token',token:t}:{mode:'none'};
-var config={gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
-fs.writeFileSync('/root/.openclaw/openclaw.json',JSON.stringify(config,null,2));
+        # Ensure gateway token exists for relay auth
+        HBGWTOKEN=""
+        if [ -f "$STATE_DIR/config/gateway-token" ]; then
+          HBGWTOKEN=$(cat "$STATE_DIR/config/gateway-token")
+        fi
+        if [ -z "$HBGWTOKEN" ]; then
+          HBGWTOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
+          printf '%s' "$HBGWTOKEN" > "$STATE_DIR/config/gateway-token"
+          chmod 600 "$STATE_DIR/config/gateway-token"
+        fi
+        # Create or update openclaw.json — ALWAYS patch env block with API key
+        if command -v node >/dev/null 2>&1; then
+          node - "$HBGWTOKEN" "$AKEY" "$SAFE_PROVIDER" <<'HBCONFIGEOF'
+var fs = require('fs'), t = process.argv[2] || '', apiKey = process.argv[3], provider = process.argv[4];
+var configPath = '/root/.openclaw/openclaw.json';
+var config;
+try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch(e) { config = null; }
+// Create fresh config if missing
+if (!config) {
+  var auth = t ? {mode:'token',token:t} : {mode:'none'};
+  config = {gateway:{mode:'local',auth:auth},plugins:{allow:['osmoda-bridge','device-pair','memory-core','phone-control','talk-voice']},agents:{defaults:{compaction:{mode:'safeguard'}},list:[{id:'osmoda',default:true,name:'osModa',workspace:'/root/.openclaw/workspace-osmoda',agentDir:'/root/.openclaw/agents/osmoda/agent',model:'anthropic/claude-opus-4-6'},{id:'mobile',name:'osModa Mobile',workspace:'/root/.openclaw/workspace-mobile',agentDir:'/root/.openclaw/agents/mobile/agent',model:'anthropic/claude-sonnet-4-6'}]},bindings:[{agentId:'mobile',match:{channel:'telegram'}},{agentId:'mobile',match:{channel:'whatsapp'}}]};
+}
+// Always set compaction safeguard
+if (!config.agents) config.agents = {};
+if (!config.agents.defaults) config.agents.defaults = {};
+config.agents.defaults.compaction = {mode:'safeguard'};
+// Always patch env block with the API key — this is the key trick
+if (!config.env) config.env = {};
+if (provider === 'anthropic') {
+  // OAuth tokens (sk-ant-oat) go in BOTH fields; regular API keys go in ANTHROPIC_API_KEY only
+  var isOAuth = apiKey.startsWith('sk-ant-oat');
+  config.env.ANTHROPIC_API_KEY = apiKey;
+  if (isOAuth) {
+    config.env.CLAUDE_CODE_OAUTH_TOKEN = apiKey;
+  } else {
+    delete config.env.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+  delete config.env.OPENAI_API_KEY;
+} else if (provider === 'openai') {
+  config.env.OPENAI_API_KEY = apiKey;
+  delete config.env.ANTHROPIC_API_KEY;
+  delete config.env.CLAUDE_CODE_OAUTH_TOKEN;
+}
+fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 HBCONFIGEOF
         fi
         # Write gateway env vars for daemon sockets
