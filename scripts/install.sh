@@ -96,7 +96,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --skip-nixos          Skip NixOS conversion (already on NixOS or Phase 2 post-reboot)"
-      echo "  --api-key KEY         Set API key (base64-encoded, skips setup wizard)"
+      echo "  --api-key KEY         Set API key (base64-encoded or raw)"
       echo "  --branch NAME         Git branch to install (default: main)"
       echo "  --order-id UUID       Spawn order ID (set by spawn.os.moda)"
       echo "  --callback-url URL    Heartbeat callback URL (set by spawn.os.moda)"
@@ -446,7 +446,7 @@ log "OpenClaw installed."
 # Step 6: Set up osmoda-bridge plugin
 # ---------------------------------------------------------------------------
 report_progress "openclaw" "done" "OpenClaw installed"
-report_progress "bridge" "started" "Installing 83-tool bridge plugin"
+report_progress "bridge" "started" "Installing 90-tool bridge plugin"
 log "Step 6: Setting up osmoda-bridge plugin..."
 
 PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
