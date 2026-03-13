@@ -136,6 +136,7 @@ async fn main() {
     let app = Router::new()
         // SafeSwitch
         .route("/switch/begin", post(api::switch_begin_handler))
+        .route("/switch/list", get(api::switch_list_handler))
         .route("/switch/status/{id}", get(api::switch_status_handler))
         .route("/switch/commit/{id}", post(api::switch_commit_handler))
         .route("/switch/rollback/{id}", post(api::switch_rollback_handler))

@@ -69,6 +69,16 @@ pub async fn switch_begin_handler(
     }))
 }
 
+/// GET /switch/list — list all switch sessions (recent first).
+pub async fn switch_list_handler(
+    State(state): State<SharedState>,
+) -> Json<Vec<SwitchSession>> {
+    let st = state.lock().await;
+    let mut sessions: Vec<SwitchSession> = st.switches.values().cloned().collect();
+    sessions.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    Json(sessions)
+}
+
 /// GET /switch/status/{id} — check the status of a switch session.
 pub async fn switch_status_handler(
     State(state): State<SharedState>,
