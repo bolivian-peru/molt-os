@@ -10,6 +10,15 @@
     openclaw.enable = true;
     sandbox.enable = true;
     memory.enable = true;
+
+    # MCP servers — extend the agent with external tools
+    mcp.enable = true;
+    mcp.servers.pageindex = {
+      enable = true;
+      command = "npx";
+      args = [ "-y" "@pageindex/mcp" ];
+      allowedDomains = [ "api.pageindex.ai" "chat.pageindex.ai" ];
+    };
   };
 
   # Headless — no desktop

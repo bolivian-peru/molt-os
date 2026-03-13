@@ -91,7 +91,8 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 11. **System Skills** (SKILL.md) — self-healing, morning-briefing, security-hardening,
    natural-language-config, predictive-resources, drift-detection, generation-timeline,
    flight-recorder, nix-optimizer, system-monitor, system-packages, system-config,
-   file-manager, network-manager, service-explorer, app-deployer, deploy-ai-agent.
+   file-manager, network-manager, service-explorer, app-deployer, deploy-ai-agent,
+   swarm-predict.
 
 12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
    Generates multi-agent OpenClaw config from NixOS options (agents, bindings, channels, plugins).
@@ -100,7 +101,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    and credential management; actual connections handled by OpenClaw.
 
 13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 89 tools, all 17 skills, full system access
+   - `osmoda` (default): Claude Opus, all 89 tools, all 18 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
@@ -234,7 +235,8 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── network-manager/SKILL.md
   ├── service-explorer/SKILL.md
   ├── app-deployer/SKILL.md              # Deploy + manage user applications
-  └── deploy-ai-agent/SKILL.md           # Deploy AI agent workloads (LangChain, CrewAI, etc.)
+  ├── deploy-ai-agent/SKILL.md           # Deploy AI agent workloads (LangChain, CrewAI, etc.)
+  └── swarm-predict/SKILL.md             # Multi-perspective risk analysis via persona debate
 ./templates/
   ├── AGENTS.md                          # "You manage the entire system" (main agent)
   ├── SOUL.md                            # Calm, competent, omniscient (main agent)
