@@ -507,7 +507,7 @@ for tpl in TOOLS.md IDENTITY.md USER.md; do
 done
 
 # Mobile skills: all skills (same as main agent)
-MOBILE_SKILLS="self-healing morning-briefing security-hardening natural-language-config predictive-resources drift-detection generation-timeline flight-recorder nix-optimizer system-monitor system-packages system-config file-manager network-manager service-explorer app-deployer deploy-ai-agent"
+MOBILE_SKILLS="self-healing morning-briefing security-hardening natural-language-config predictive-resources drift-detection generation-timeline flight-recorder nix-optimizer system-monitor system-packages system-config file-manager network-manager service-explorer app-deployer deploy-ai-agent swarm-predict scaled-swarm-predict"
 if [ -d "$INSTALL_DIR/skills" ]; then
   mkdir -p "$WS_MOBILE/skills"
   for skill in $MOBILE_SKILLS; do
@@ -518,7 +518,7 @@ if [ -d "$INSTALL_DIR/skills" ]; then
 fi
 
 # Create state directories with secure permissions
-mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd,apps}
+mkdir -p "$STATE_DIR"/{memory,ledger,config,keyd/keys,watch,routines,mesh,mcp,teachd,apps,swarm}
 mkdir -p "$RUN_DIR"
 mkdir -p /var/backups/osmoda
 chmod 700 "$STATE_DIR/config"
@@ -544,7 +544,7 @@ if [ -n "$ORDER_ID" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 8: Set up API key (if provided) or prep setup wizard
+# Step 8: Set up API key (if provided) or generate placeholder config
 # ---------------------------------------------------------------------------
 report_progress "workspaces" "done" "osmoda + mobile agents configured"
 if [ -n "$API_KEY" ]; then
