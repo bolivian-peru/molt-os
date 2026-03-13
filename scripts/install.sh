@@ -9,13 +9,13 @@
 #   curl -fsSL ... | bash -s -- --skip-nixos --api-key sk-ant-...
 #
 # What this does:
-#   1. Converts your server to NixOS (via nixos-infect) — optional
+#   1. Converts your server to NixOS (via nixos-infect) — auto on Ubuntu/Debian
+#      Server reboots into NixOS, then Phase 2 installs daemons automatically.
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
 #   4. Sets up the osmoda-bridge plugin (89 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
-#   7. Opens the setup wizard at localhost:18789
 #
 # Supports: Ubuntu 22.04+, Debian 12+, existing NixOS
 # Tested on: Hetzner Cloud, DigitalOcean, bare metal
@@ -95,7 +95,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: curl -fsSL <url> | bash -s -- [options]"
       echo ""
       echo "Options:"
-      echo "  --skip-nixos          Don't install NixOS (use on existing NixOS systems)"
+      echo "  --skip-nixos          Skip NixOS conversion (already on NixOS or Phase 2 post-reboot)"
       echo "  --api-key KEY         Set API key (base64-encoded, skips setup wizard)"
       echo "  --branch NAME         Git branch to install (default: main)"
       echo "  --order-id UUID       Spawn order ID (set by spawn.os.moda)"
@@ -178,24 +178,18 @@ passwd -d root 2>/dev/null || true
 chage -M 99999 root 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# Step 1: NixOS installation (via nixos-infect)
+# Step 1: NixOS conversion (via nixos-infect)
 # ---------------------------------------------------------------------------
-# Step 1: NixOS conversion (only when explicitly requested — NOT during spawn deploys)
-# Spawn cloud-init always passes --skip-nixos. This block only runs for manual installs
-# that want to convert Ubuntu/Debian to NixOS (interactive use case).
+# On Ubuntu/Debian: converts to NixOS, injects Phase 2 service into NixOS config,
+# reboots into NixOS, Phase 2 downloads and runs install.sh --skip-nixos.
+# On NixOS (or --skip-nixos): skips straight to daemon installation.
 if [ "$SKIP_NIXOS" = false ]; then
-  echo ""
-  warn "Step 1: NixOS Installation"
-  warn "This will REPLACE your current OS with NixOS."
-  warn "Your server will reboot. SSH back in after ~3 minutes."
-  echo ""
-
   if [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
-    log "Installing NixOS via nixos-infect..."
-    log "This takes 5-10 minutes. The server will reboot automatically."
-    echo ""
+    report_progress "nixos" "started" "Converting to NixOS via nixos-infect"
+    log "Step 1: Converting to NixOS..."
+    log "This takes 8-15 minutes. Server reboots into NixOS, then daemons install automatically."
 
-    # Auto-detect cloud provider from metadata endpoints
+    # Auto-detect cloud provider
     PROVIDER="generic"
     if curl -sf -m 2 http://169.254.169.254/hetzner/v1/metadata >/dev/null 2>&1; then
       PROVIDER="hetznercloud"
@@ -206,21 +200,99 @@ if [ "$SKIP_NIXOS" = false ]; then
     fi
     log "Detected cloud provider: $PROVIDER"
 
-    if curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect \
-      | NIX_CHANNEL=nixos-unstable PROVIDER="$PROVIDER" bash -x; then
-      # If we get here, infect didn't reboot (shouldn't happen)
-      warn "nixos-infect complete. Please reboot and re-run this script with --skip-nixos"
-      exit 0
+    # Build Phase 2 args (these get baked into the NixOS config)
+    PHASE2_ARGS="--skip-nixos"
+    [ -n "$API_KEY" ] && PHASE2_ARGS="$PHASE2_ARGS --api-key $API_KEY"
+    [ -n "$BRANCH" ] && PHASE2_ARGS="$PHASE2_ARGS --branch $BRANCH"
+    [ -n "$ORDER_ID" ] && PHASE2_ARGS="$PHASE2_ARGS --order-id $ORDER_ID"
+    [ -n "$CALLBACK_URL" ] && PHASE2_ARGS="$PHASE2_ARGS --callback-url $CALLBACK_URL"
+    [ -n "$HEARTBEAT_SECRET" ] && PHASE2_ARGS="$PHASE2_ARGS --heartbeat-secret $HEARTBEAT_SECRET"
+    [ -n "$PROVIDER_TYPE" ] && PHASE2_ARGS="$PHASE2_ARGS --provider $PROVIDER_TYPE"
+    INSTALL_URL="https://raw.githubusercontent.com/bolivian-peru/os-moda/${BRANCH:-main}/scripts/install.sh"
+
+    # Download nixos-infect and patch out its reboot so we can inject Phase 2 config
+    log "Downloading nixos-infect..."
+    curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect > /tmp/nixos-infect.sh
+    # Remove all reboot calls — we reboot manually after injecting Phase 2
+    sed -i 's/reboot -f/echo "[osmoda] reboot deferred for Phase 2 injection"/g' /tmp/nixos-infect.sh
+    sed -i 's/shutdown -r now/echo "[osmoda] shutdown deferred for Phase 2 injection"/g' /tmp/nixos-infect.sh
+
+    log "Running nixos-infect (without reboot)..."
+    report_progress "nixos" "started" "Running nixos-infect (5-10 min)"
+    if NIX_CHANNEL=nixos-unstable PROVIDER="$PROVIDER" bash /tmp/nixos-infect.sh; then
+      log "nixos-infect complete. Injecting Phase 2 service into NixOS config..."
+      report_progress "nixos" "started" "Injecting Phase 2 auto-install service"
+
+      # Ensure configuration.nix declares pkgs in its function args
+      if grep -q '{ \.\.\. }:' /etc/nixos/configuration.nix; then
+        sed -i 's/{ \.\.\. }:/{ pkgs, ... }:/' /etc/nixos/configuration.nix
+      elif ! grep -q 'pkgs' /etc/nixos/configuration.nix; then
+        sed -i 's/{ config,/{ config, pkgs,/' /etc/nixos/configuration.nix 2>/dev/null || true
+      fi
+
+      # Write Phase 2 NixOS config block to a temp file, then inject before closing brace
+      cat > /tmp/osmoda-phase2.nix.fragment <<NIXEOF
+
+  # osModa Phase 2: auto-install daemons after NixOS conversion
+  environment.systemPackages = with pkgs; [ curl bash git cacert ];
+
+  systemd.services.osmoda-phase2 = {
+    description = "osModa Phase 2 Install (post-NixOS conversion)";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "/bin/sh -c 'export PATH=/run/current-system/sw/bin:\\\$PATH HOME=/root; curl -fsSL $INSTALL_URL | bash -s -- $PHASE2_ARGS; nixos-rebuild switch 2>/dev/null; systemctl disable osmoda-phase2.service 2>/dev/null'";
+      TimeoutStartSec = 1800;
+      Environment = [ "HOME=/root" "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ];
+    };
+  };
+NIXEOF
+      # Insert fragment before the final closing brace of configuration.nix
+      CONF="/etc/nixos/configuration.nix"
+      FRAG=$(cat /tmp/osmoda-phase2.nix.fragment)
+      # Replace final } with fragment + }
+      awk -v frag="$FRAG" 'BEGIN{last=0} {lines[NR]=$0; last=NR} END{for(i=1;i<last;i++) print lines[i]; print frag; print lines[last]}' "$CONF" > "$CONF.tmp"
+      mv "$CONF.tmp" "$CONF"
+      rm -f /tmp/osmoda-phase2.nix.fragment
+      log "Phase 2 service injected into /etc/nixos/configuration.nix"
+
+      # Re-run nixos-install so the closure includes our Phase 2 service
+      log "Rebuilding NixOS closure with Phase 2 service..."
+      report_progress "nixos" "started" "Rebuilding NixOS closure (2-3 min)"
+      # Source nix profile so nixos-install is in PATH
+      . /root/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
+      if nixos-install --no-root-passwd 2>&1 | tail -5; then
+        log "NixOS closure rebuilt with Phase 2. Rebooting into NixOS..."
+        report_progress "nixos" "done" "NixOS ready, rebooting — daemons install in 5-10 min"
+        reboot -f
+        exit 0
+      else
+        error "nixos-install rebuild failed. Rebooting anyway (Phase 2 may not run)."
+        report_progress "nixos" "error" "nixos-install rebuild failed, rebooting anyway"
+        reboot -f
+        exit 0
+      fi
     else
-      error "nixos-infect failed (exit code $?). Falling through to install on current OS."
+      error "nixos-infect failed. Falling through to install on current OS."
       warn "osModa will install on $OS_TYPE instead. NixOS conversion can be retried later."
-      # Don't exit — continue installing daemons on the existing OS
+      report_progress "nixos" "error" "nixos-infect failed, installing on $OS_TYPE"
     fi
   else
-    warn "NixOS installation not supported for $OS_TYPE."
-    warn "Continuing install on $OS_TYPE..."
-    # Don't exit — install daemons on whatever OS is present
+    warn "NixOS conversion not supported for $OS_TYPE. Installing on current OS."
   fi
+fi
+
+# If running as Phase 2 on NixOS, remove the Phase 2 service from configuration.nix
+if [ "$OS_TYPE" = "nixos" ] && grep -q 'osmoda-phase2' /etc/nixos/configuration.nix 2>/dev/null; then
+  log "Phase 2: Cleaning up auto-install service from NixOS config."
+  CONF="/etc/nixos/configuration.nix"
+  # Remove everything between "# osModa Phase 2" marker and its closing "};  };" block
+  awk '/# osModa Phase 2/{skip=1} skip && /^  };$/{count++; if(count==2){skip=0; count=0; next}} !skip' "$CONF" > "$CONF.tmp"
+  mv "$CONF.tmp" "$CONF"
+  report_progress "nixos" "done" "NixOS conversion complete, installing daemons"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1323,10 +1395,18 @@ if systemctl is-active osmoda-routines &>/dev/null; then
   ROUTINE_HISTORY=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/routines.sock" http://l/routine/history 2>/dev/null || echo "[]")
 fi
 
-# Collect watchers from watch daemon (3s timeout)
+# Collect watchers + SafeSwitch sessions from watch daemon (3s timeout)
 WATCHERS="[]"
+SWITCH_SESSIONS="[]"
 if systemctl is-active osmoda-watch &>/dev/null; then
   WATCHERS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/watch.sock" http://l/watcher/list 2>/dev/null || echo "[]")
+  SWITCH_SESSIONS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/watch.sock" http://l/switch/list 2>/dev/null || echo "[]")
+fi
+
+# Collect NixOS generation info
+NIXOS_GENERATION=""
+if [ -L /nix/var/nix/profiles/system ]; then
+  NIXOS_GENERATION=$(readlink /nix/var/nix/profiles/system 2>/dev/null || echo "")
 fi
 
 # Collect recent events from agentd (3s timeout)
@@ -1469,12 +1549,14 @@ PAYLOAD=$(jq -n \
   --argjson routines "$ROUTINES" \
   --argjson routine_history "$ROUTINE_HISTORY" \
   --argjson watchers "$WATCHERS" \
+  --argjson switch_sessions "$SWITCH_SESSIONS" \
+  --arg nixos_generation "$NIXOS_GENERATION" \
   --argjson recent_events "$RECENT_EVENTS" \
   --argjson teachd_health "$TEACHD_HEALTH" \
   --argjson teachd_patterns "$TEACHD_PATTERNS" \
   --argjson mcp_servers "$MCP_SERVERS" \
   --argjson apps "$APPS_JSON" \
-  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers, routines: $routines, routine_history: $routine_history, watchers: $watchers, recent_events: $recent_events, teachd_health: $teachd_health, teachd_patterns: $teachd_patterns, mcp_servers: $mcp_servers, apps: $apps}'
+  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers, routines: $routines, routine_history: $routine_history, watchers: $watchers, switch_sessions: $switch_sessions, nixos_generation: $nixos_generation, recent_events: $recent_events, teachd_health: $teachd_health, teachd_patterns: $teachd_patterns, mcp_servers: $mcp_servers, apps: $apps}'
 )
 
 # Send heartbeat (with HMAC signature if secret is set)
