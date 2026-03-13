@@ -6,7 +6,7 @@
 
 **Your server has an AI brain. It monitors, fixes, deploys, and explains — without you SSH-ing in.**
 
-9 Rust daemons. 88 structured tools. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
+9 Rust daemons. 90 structured tools. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
 
 > **Public Beta** — This is a working system deployed on real servers, not a demo. Expect rough edges and rapid iteration. You're early.
 
@@ -15,7 +15,7 @@
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
 [![Tests](https://img.shields.io/badge/Tests-205%20passing-brightgreen.svg)]()
-[![Tools](https://img.shields.io/badge/Agent%20Tools-89-blueviolet.svg)]()
+[![Tools](https://img.shields.io/badge/Agent%20Tools-90-blueviolet.svg)]()
 
 [Quickstart](#quickstart) · [Architecture](#architecture) · [What It Does](#what-it-does) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
 
@@ -38,7 +38,7 @@
 
 Every AI agent framework assumes your infrastructure is someone else's problem. They give you an agent that can think — but nowhere for it to live. So you SSH into a VPS, install things manually, pray nothing breaks at 3am, and when it does, you're the one waking up.
 
-osModa is the other half: **the machine itself is AI-native.** 88 structured tools across 9 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
+osModa is the other half: **the machine itself is AI-native.** 90 structured tools across 9 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
 
 **Why NixOS?** Every system change is a transaction. Every state has a generation number. Rolling back is one command. This makes AI root access meaningfully safer than on any traditional Linux distribution. (NixOS rollback covers OS state — not data sent to external APIs or deleted user data. See [Safety Model](#safety-model).)
 
@@ -125,9 +125,9 @@ agentctl verify-ledger --state-dir /var/lib/osmoda
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  AI Gateway (OpenClaw)          Multi-Agent Router                            │
-│  ├─ osmoda agent (Opus)         90 tools · 17 skills · full access · web      │
+│  ├─ osmoda agent (Opus)         90 tools · 19 skills · full access · web      │
 │  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA    │
-│  osmoda-bridge                  88 typed tools (shared plugin)                 │
+│  osmoda-bridge                  90 typed tools (shared plugin)                 │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤
 │ agentd │ watch  │routine │ teachd   │ mesh   │ voice │ mcpd │ keyd  │egress │
@@ -229,7 +229,7 @@ Append-only. Tamper-evident. Any single modification invalidates the chain. Veri
 
 > **Note:** `wallet/send` signs an intent string, not a fully-encoded blockchain transaction. Broadcasting requires external tooling. See [STATUS.md](docs/STATUS.md) for details.
 
-### 88 Bridge Tools
+### 90 Bridge Tools
 
 The AI doesn't shell out. It calls typed tools that return structured JSON:
 
@@ -238,35 +238,35 @@ system_health          system_query           system_discover
 event_log              memory_store           memory_recall
 shell_exec             file_read              file_write
 directory_list         service_status         journal_logs
-network_info           safe_switch_begin      safe_switch_status
-safe_switch_commit     safe_switch_rollback   watcher_add
-watcher_list           routine_add            routine_list
-routine_trigger        agent_card             receipt_list
-incident_create        incident_step          voice_status
-voice_speak            voice_transcribe       voice_record
-voice_listen           backup_create          backup_list
-mesh_identity          mesh_invite_create     mesh_invite_accept
-mesh_peers             mesh_peer_send         mesh_peer_disconnect
-mesh_health            mesh_room_create       mesh_room_join
-mesh_room_send         mesh_room_history      mcp_servers
-mcp_server_start       mcp_server_stop        mcp_server_restart
-teach_status           teach_observations     teach_patterns
-teach_knowledge        teach_knowledge_create teach_context
-teach_optimize_suggest teach_optimize_apply   teach_skill_candidates
-teach_skill_generate   teach_skill_promote    teach_observe_action
-teach_skill_execution  approval_request       approval_pending
-approval_approve       approval_check         sandbox_exec
-capability_mint        fleet_propose          fleet_status
-fleet_vote             fleet_rollback         app_deploy
-app_list               app_logs               app_stop
-app_restart            app_remove             wallet_create
-wallet_list            wallet_sign            wallet_send
-wallet_delete          wallet_receipt         wallet_build_tx
-safety_rollback        safety_status          safety_panic
-safety_restart
+network_info           safe_switch_begin      safe_switch_list
+safe_switch_status     safe_switch_commit     safe_switch_rollback
+watcher_add            watcher_list           routine_add
+routine_list           routine_trigger        agent_card
+receipt_list           incident_create        incident_step
+voice_status           voice_speak            voice_transcribe
+voice_record           voice_listen           backup_create
+backup_list            mesh_identity          mesh_invite_create
+mesh_invite_accept     mesh_peers             mesh_peer_send
+mesh_peer_disconnect   mesh_health            mesh_room_create
+mesh_room_join         mesh_room_send         mesh_room_history
+mcp_servers            mcp_server_start       mcp_server_stop
+mcp_server_restart     teach_status           teach_observations
+teach_patterns         teach_knowledge        teach_knowledge_create
+teach_context          teach_optimize_suggest teach_optimize_apply
+teach_skill_candidates teach_skill_generate   teach_skill_promote
+teach_observe_action   teach_skill_execution  teach_skill_detect
+approval_request       approval_pending       approval_approve
+approval_check         sandbox_exec           capability_mint
+fleet_propose          fleet_status           fleet_vote
+fleet_rollback         app_deploy             app_list
+app_logs               app_stop               app_restart
+app_remove             wallet_create          wallet_list
+wallet_sign            wallet_send            wallet_delete
+wallet_receipt         wallet_build_tx        safety_rollback
+safety_status          safety_panic           safety_restart
 ```
 
-### 17 System Skills
+### 19 System Skills
 
 Predefined behavioral patterns the agent can follow:
 
@@ -281,6 +281,8 @@ Predefined behavioral patterns the agent can follow:
 **Nix optimizer** — smart garbage collection and store deduplication.
 **App deployer** — deploy and manage user applications as systemd services with resource limits and boot persistence.
 **Deploy AI agent** — deploy AI agent workloads (LangChain, CrewAI, AutoGen, custom) with GPU checks, API key management, and health monitoring.
+**Swarm predict** — multi-perspective risk analysis using 6-8 expert persona debate before infrastructure changes, with SafeSwitch integration.
+**Scaled swarm predict** — large-scale social simulation with 50-200 demographically diverse personas on simulated Twitter/Reddit boards for outcome prediction.
 Plus: system monitor, package manager, config editor, file manager, network manager, service explorer.
 
 ### Remote Access
@@ -452,7 +454,7 @@ packages/osmoda-bridge/     AI gateway plugin (90 tools, TypeScript)
 nix/modules/osmoda.nix      NixOS module (single source of truth)
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity + tools + heartbeat
-skills/                     17 system skill definitions
+skills/                     19 system skill definitions
 ```
 
 ### Tech Stack
@@ -468,8 +470,8 @@ skills/                     17 system skill definitions
 **The numbers:**
 - 10 Rust crates (9 daemons + 1 CLI)
 - 205 tests passing (all green)
-- 89 bridge tools registered
-- 17 system skills
+- 90 bridge tools registered
+- 19 system skills
 - Stress tested: 700/700 concurrent health checks, 50 concurrent queries, hash chain verified across 300+ events with zero broken links
 
 **What works today:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto (Noise_XX + ML-KEM-768), local voice (whisper.cpp + piper), MCP server management, system learning and self-optimization with auto-generated skills, fleet coordination with quorum voting, approval gates for destructive ops, sandboxed execution, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management, ETH + SOL crypto wallets, one-command cloud deployment via [spawn.os.moda](https://spawn.os.moda).

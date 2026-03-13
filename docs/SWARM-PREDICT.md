@@ -11,7 +11,7 @@ A new osModa skill (`skills/swarm-predict/SKILL.md`) that adds structured multi-
 ```
 NEW   skills/swarm-predict/SKILL.md          — The skill definition (261 lines)
 EDIT  nix/hosts/server.nix                   — Added PageIndex MCP server config
-EDIT  CLAUDE.md                              — Updated skill count (17→18), added to lists
+EDIT  CLAUDE.md                              — Updated skill count (→19), added to lists
 ```
 
 ## How to Test

@@ -216,7 +216,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
               │  (default)     │    │                    │
               │  Opus 4.6      │    │  Sonnet 4.6        │
               │  90 tools      │    │  90 tools          │
-              │  17 skills     │    │  17 skills         │
+              │  19 skills     │    │  19 skills         │
               │  Full access   │    │  Full access       │
               │                │    │  Concise responses  │
               │  ← Web chat    │    │  ← Telegram         │

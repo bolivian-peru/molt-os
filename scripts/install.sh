@@ -13,7 +13,7 @@
 #      Server reboots into NixOS, then Phase 2 installs daemons automatically.
 #   2. Installs Rust toolchain + builds agentd
 #   3. Installs OpenClaw AI gateway
-#   4. Sets up the osmoda-bridge plugin (89 system tools)
+#   4. Sets up the osmoda-bridge plugin (90 system tools)
 #   5. Installs agent identity + skills
 #   6. Starts everything — agentd + OpenClaw
 #
@@ -458,7 +458,7 @@ rm -rf "$PLUGIN_DST"
 cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
 chown -R root:root "$PLUGIN_DST"
 
-log "Bridge plugin installed with 89 system tools."
+log "Bridge plugin installed with 90 system tools."
 
 # ---------------------------------------------------------------------------
 # Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)

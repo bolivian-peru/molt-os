@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-06
 
-Current state: 205 tests passing, 10 Rust crates (9 daemons + 1 CLI), 89 bridge tools, 17 skills.
+Current state: 205 tests passing, 10 Rust crates (9 daemons + 1 CLI), 90 bridge tools, 19 skills.
 This document covers what shipped and what's next, in priority order.
 
 ---

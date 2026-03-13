@@ -19,8 +19,8 @@ Last updated: 2026-03-08
 |--------|-------|
 | Rust crates | 10 (9 daemons + 1 CLI) |
 | Tests passing | 205 |
-| Bridge tools registered | 88 |
-| System skills | 17 |
+| Bridge tools registered | 90 |
+| System skills | 19 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 
 ---
@@ -220,7 +220,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
 | Tool registrations | **Functional** | **90 tools** registered. Not integration-tested against live daemons |
 
-### Tool breakdown (89 total)
+### Tool breakdown (90 total)
 
 | Category | Count | Tools |
 |----------|-------|-------|

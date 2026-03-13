@@ -28,7 +28,7 @@ Each agent is a config entry in `~/.openclaw/openclaw.json` with:
 - Server spawns with 2 agents (osmoda + mobile)
 - Telegram connection via dashboard
 - Web chat to the agent
-- 83 system tools, 17 skills
+- 90 system tools, 19 skills
 - All 9 Rust daemons running
 - API key management from dashboard
 
@@ -206,7 +206,7 @@ The server cost (osModa plan) stays the same regardless of agent count.
 
 - Max agents per server: reasonable cap at 10-20 (no hard technical limit)
 - All agents share the same API key (per-agent keys possible but complex)
-- All agents share the same 83 osModa tools (per-agent tool profiles can restrict)
+- All agents share the same 90 osModa tools (per-agent tool profiles can restrict)
 - Memory (RAM) constraint: each agent maintains session state in memory
   - Solo plan (4GB): comfortable with 3-5 agents
   - Pro plan (8GB): 5-10 agents
