@@ -218,7 +218,7 @@ All processing on-device. No cloud. No tracking. No data leaves the machine.
 | mesh-client.ts | **Functional** | HTTP-over-Unix-socket client for mesh daemon |
 | mcpd-client.ts | **Functional** | HTTP-over-Unix-socket client for mcpd |
 | teachd-client.ts | **Functional** | HTTP-over-Unix-socket client for teachd |
-| Tool registrations | **Functional** | **89 tools** registered. Not integration-tested against live daemons |
+| Tool registrations | **Functional** | **90 tools** registered. Not integration-tested against live daemons |
 
 ### Tool breakdown (89 total)
 
@@ -380,7 +380,7 @@ Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
 | `GET /api/v1/docs` | **Functional** | OpenAPI 3.0 spec with x402 extensions |
 | x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`, USDC on Base (EVM) + Solana (SVM) |
 | API token auth | **Functional** | Cryptographically random `osk_` tokens, SHA-256 hashed storage, timing-safe comparison |
-| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 89 tools |
+| Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 90 tools |
 
 ### Heartbeat Pipeline
 
@@ -397,6 +397,8 @@ Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
 | TeachD health | **Functional** | Observation/pattern/knowledge/optimization counts, loop status |
 | TeachD patterns | **Functional** | Top 10 high-confidence patterns (>0.7) |
 | MCP servers | **Functional** | Server list with name, status, PID, uptime from mcpd |
+| SafeSwitch sessions | **Functional** | Recent switch sessions (id, plan, status, health checks) from watch daemon |
+| NixOS generation | **Functional** | Current NixOS system generation path from /nix/var/nix/profiles/system |
 
 ---
 

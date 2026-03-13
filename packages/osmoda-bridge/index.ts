@@ -4,13 +4,13 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 89 tools registered:
+ * 90 tools registered:
  *   agentd:   system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:   shell_exec, file_read, file_write, directory_list (4)
  *   systemd:  service_status, journal_logs (2)
  *   network:  network_info (1)
  *   wallet:   wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt, wallet_build_tx (7, via keyd)
- *   switch:   safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback (4, via watch)
+ *   switch:   safe_switch_begin, safe_switch_list, safe_switch_status, safe_switch_commit, safe_switch_rollback (5, via watch)
  *   watcher:  watcher_add, watcher_list (2, via watch)
  *   routine:  routine_add, routine_list, routine_trigger (3, via routines)
  *   identity: agent_card (1, via agentd)
@@ -824,6 +824,21 @@ export default function register(api: any) {
       }
     },
   }), { names: ["safe_switch_begin"] });
+
+  // --- safe_switch_list ---
+  api.registerTool(() => ({
+    name: "safe_switch_list",
+    label: "SafeSwitch List",
+    description: "List all SafeSwitch deploy sessions (recent first). Shows id, plan, status, health checks, and timestamps.",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      try {
+        return { output: await watchRequest("GET", "/switch/list") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["safe_switch_list"] });
 
   // --- safe_switch_status ---
   api.registerTool(() => ({

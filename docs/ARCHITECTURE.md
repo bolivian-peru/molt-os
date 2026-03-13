@@ -36,7 +36,7 @@ TIER 2: Untrusted Execution
 ┌─────────────────────────────────────────────────────────────┐
 │ OpenClaw Gateway (:18789)                                    │
 │   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 89 tools registered                 │
+│   osmoda-bridge plugin → 90 tools registered                 │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -215,7 +215,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
               │  osmoda agent  │    │   mobile agent     │
               │  (default)     │    │                    │
               │  Opus 4.6      │    │  Sonnet 4.6        │
-              │  89 tools      │    │  89 tools          │
+              │  90 tools      │    │  90 tools          │
               │  17 skills     │    │  17 skills         │
               │  Full access   │    │  Full access       │
               │                │    │  Concise responses  │
@@ -237,7 +237,7 @@ One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain wi
 - `~/.openclaw/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
 - `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
 
-**Tool access:** Both agents have full access to all 89 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
+**Tool access:** Both agents have full access to all 90 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
 
 ## Data Flow
 
@@ -402,7 +402,7 @@ spawn.os.moda is the hosted option for deploying osModa servers. Handles payment
 - **System Intelligence** — TeachD observation/pattern/knowledge counts, detected patterns with confidence scores
 - **Tool Servers** — Running MCP servers with status, PID, and uptime
 
-**Heartbeat data pipeline:** 60-second heartbeat from each server collects daemon data via Unix sockets (routines, watchers, events, teachd health/patterns, MCP servers) and sends to spawn for dashboard rendering.
+**Heartbeat data pipeline:** 60-second heartbeat from each server collects daemon data via Unix sockets (routines, watchers, events, teachd health/patterns, MCP servers, SafeSwitch sessions, NixOS generation) and sends to spawn for dashboard rendering.
 
 ### v1 Programmatic API (x402 payment-gated)
 
@@ -422,7 +422,7 @@ Agents can spawn osModa servers programmatically — agents spawning agents.
 
 **Auth:** API tokens (`osk_...`) are cryptographically random (32 bytes), returned once at spawn. Stored server-side as SHA-256 hash, compared with timing-safe equality. Bearer token auth for status + WebSocket chat.
 
-**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 89 tools, mesh networking, self-install fallback.
+**Agent skill doc:** `GET /SKILL.md` — 369-line plain-text document for agents to read. Covers full API, x402 flow, all 90 tools, mesh networking, self-install fallback.
 
 ## Safety Boundaries
 

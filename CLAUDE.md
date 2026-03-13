@@ -28,12 +28,12 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    Structured receipts + incident workspaces for auditable troubleshooting.
 
 2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (89 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (90 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
    wallet_build_tx,
-   safe_switch_begin, safe_switch_status, safe_switch_commit, safe_switch_rollback,
+   safe_switch_begin, safe_switch_list, safe_switch_status, safe_switch_commit, safe_switch_rollback,
    watcher_add, watcher_list, routine_add, routine_list, routine_trigger,
    agent_card, receipt_list, incident_create, incident_step,
    voice_status, voice_speak, voice_transcribe, voice_record, voice_listen,
@@ -101,7 +101,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    and credential management; actual connections handled by OpenClaw.
 
 13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 89 tools, all 18 skills, full system access
+   - `osmoda` (default): Claude Opus, all 90 tools, all 18 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
@@ -209,7 +209,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 89 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 90 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
@@ -353,6 +353,7 @@ GET  /health               → { wallet_count, policy_loaded }
 
 ```
 POST /switch/begin         { plan, ttl_secs, health_checks[] } → { id, previous_generation }
+GET  /switch/list           → SwitchSession[] (all sessions, recent first)
 GET  /switch/status/{id}   → SwitchSession
 POST /switch/commit/{id}   → SwitchSession (committed)
 POST /switch/rollback/{id} → SwitchSession (rolled back)
@@ -527,6 +528,8 @@ Separate from the OS codebase. Lives in `apps/spawn/` (gitignored). Deployed via
 - Mesh identity + peers
 - Routines + routine history from routines daemon
 - Watchers from watch daemon
+- SafeSwitch sessions from watch daemon
+- NixOS generation from /nix/var/nix/profiles/system
 - Recent events (30) from agentd audit log
 - TeachD health + high-confidence patterns from teachd
 - MCP servers from mcpd

@@ -97,7 +97,7 @@ Memory system status: embedding model readiness, collection size, state director
 
 ## OpenClaw tools (registered by osmoda-bridge)
 
-These are the 89 tools available to the AI agent through OpenClaw.
+These are the 90 tools available to the AI agent through OpenClaw.
 Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
 
 ### agentd tools (communicate over Unix socket)
@@ -138,6 +138,7 @@ Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/i
 | Tool | Description |
 |------|-------------|
 | `safe_switch_begin` | Start a deploy transaction with health checks + TTL + auto-rollback |
+| `safe_switch_list` | List all switch sessions (recent first) |
 | `safe_switch_status` | Check probation status of a switch session |
 | `safe_switch_commit` | Manually commit a switch session |
 | `safe_switch_rollback` | Manually rollback to the previous NixOS generation |
