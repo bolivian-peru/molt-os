@@ -1077,7 +1077,7 @@ function connect() {
           platform: "linux", mode: "webchat", instanceId: instanceId
         },
         role: "operator",
-        scopes: ["operator.admin"],
+        scopes: ["operator.admin", "operator.write", "operator.read"],
         caps: [],
         userAgent: "osmoda-ws-relay/1.0", locale: "en"
       }
