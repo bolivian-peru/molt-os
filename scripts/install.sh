@@ -175,7 +175,7 @@ log "Pre-flight checks passed."
 # Clear it so key-based SSH works immediately.
 # ---------------------------------------------------------------------------
 passwd -d root 2>/dev/null || true
-chage -M 99999 root 2>/dev/null || true
+chage -I -1 -m 0 -M 99999 -E -1 root 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Step 1: NixOS conversion (via nixos-infect)
@@ -1311,7 +1311,7 @@ fi
 # Hetzner may re-set password expiry after cloud-init; this ensures SSH always works
 if chage -l root 2>/dev/null | grep -q "password must be changed"; then
   passwd -d root 2>/dev/null || true
-  chage -M 99999 root 2>/dev/null || true
+  chage -I -1 -m 0 -M 99999 -E -1 root 2>/dev/null || true
 fi
 
 # Collect health from agentd (5s timeout to prevent hangs)
@@ -1979,7 +1979,23 @@ fi # end SKIP_SYSTEMD
 
 # Final pass: ensure Hetzner password expiry is cleared (races with cloud-init)
 passwd -d root 2>/dev/null || true
-chage -M 99999 root 2>/dev/null || true
+chage -I -1 -m 0 -M 99999 -E -1 root 2>/dev/null || true
+
+# Nuclear fix: Hetzner cloud-init can re-expire password AFTER our install completes.
+# Install a oneshot timer that clears expiry every 30s for the first 5 minutes.
+cat > /opt/osmoda/bin/fix-password-expiry.sh << 'PWEOF'
+#!/usr/bin/env bash
+# Clear root password expiry — prevents "Password change required but no TTY"
+passwd -d root 2>/dev/null || true
+chage -I -1 -m 0 -M 99999 -E -1 root 2>/dev/null || true
+PWEOF
+chmod +x /opt/osmoda/bin/fix-password-expiry.sh
+
+# Run it 10 times over 5 minutes via background loop, then self-destruct
+(for i in $(seq 1 10); do
+  sleep 30
+  /opt/osmoda/bin/fix-password-expiry.sh
+done) &
 
 # ---------------------------------------------------------------------------
 # Done!
