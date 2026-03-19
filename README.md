@@ -111,7 +111,7 @@ git clone https://github.com/bolivian-peru/os-moda.git && cd os-moda
 curl -s --unix-socket /run/osmoda/agentd.sock http://localhost/health | jq
 
 # Audit ledger integrity
-agentctl verify-ledger --state-dir /var/lib/osmoda
+agentctl verify-ledger
 ```
 
 ---
