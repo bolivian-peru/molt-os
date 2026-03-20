@@ -217,9 +217,9 @@ if [ "$SKIP_NIXOS" = false ]; then
     sed -i 's/reboot -f/echo "[osmoda] reboot deferred for Phase 2 injection"/g' /tmp/nixos-infect.sh
     sed -i 's/shutdown -r now/echo "[osmoda] shutdown deferred for Phase 2 injection"/g' /tmp/nixos-infect.sh
 
-    log "Running nixos-infect (without reboot)..."
+    log "Running nixos-infect (without reboot, 15 min timeout)..."
     report_progress "nixos" "started" "Running nixos-infect (5-10 min)"
-    if NIX_CHANNEL=nixos-unstable PROVIDER="$PROVIDER" bash /tmp/nixos-infect.sh; then
+    if timeout 900 bash -c 'NIX_CHANNEL=nixos-unstable PROVIDER="$1" bash /tmp/nixos-infect.sh' _ "$PROVIDER"; then
       log "nixos-infect complete. Injecting Phase 2 service into NixOS config..."
       report_progress "nixos" "started" "Injecting Phase 2 auto-install service"
 
@@ -230,11 +230,29 @@ if [ "$SKIP_NIXOS" = false ]; then
         sed -i 's/{ config,/{ config, pkgs,/' /etc/nixos/configuration.nix 2>/dev/null || true
       fi
 
+      # Preserve SSH keys through NixOS conversion (safety net — nixos-infect should handle this,
+      # but losing SSH = losing the server, so we explicitly inject keys into NixOS config)
+      SSH_KEYS_NIX=""
+      if [ -f /root/.ssh/authorized_keys ]; then
+        while IFS= read -r key; do
+          [ -z "$key" ] && continue
+          [[ "$key" == \#* ]] && continue
+          # Escape double quotes in key
+          escaped_key=$(echo "$key" | sed 's/"/\\"/g')
+          SSH_KEYS_NIX="${SSH_KEYS_NIX}    \"${escaped_key}\"\n"
+        done < /root/.ssh/authorized_keys
+        log "Preserved $(grep -c '' /root/.ssh/authorized_keys) SSH keys for NixOS config"
+      fi
+
       # Write Phase 2 NixOS config block to a temp file, then inject before closing brace
       cat > /tmp/osmoda-phase2.nix.fragment <<NIXEOF
 
   # osModa Phase 2: auto-install daemons after NixOS conversion
-  environment.systemPackages = with pkgs; [ curl bash git cacert ];
+  environment.systemPackages = with pkgs; [ curl bash git cacert gcc gnumake pkg-config nix ];
+
+  # Preserve SSH access through conversion
+  users.users.root.openssh.authorizedKeys.keys = [
+$(echo -e "$SSH_KEYS_NIX")  ];
 
   systemd.services.osmoda-phase2 = {
     description = "osModa Phase 2 Install (post-NixOS conversion)";
@@ -266,12 +284,14 @@ NIXEOF
       . /root/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
       if nixos-install --no-root-passwd 2>&1 | tail -5; then
         log "NixOS closure rebuilt with Phase 2. Rebooting into NixOS..."
-        report_progress "nixos" "done" "NixOS ready, rebooting — daemons install in 5-10 min"
+        report_progress "nixos" "done" "NixOS conversion complete"
+        report_progress "reboot" "started" "Rebooting into NixOS (2-3 min)"
         reboot -f
         exit 0
       else
         error "nixos-install rebuild failed. Rebooting anyway (Phase 2 may not run)."
         report_progress "nixos" "error" "nixos-install rebuild failed, rebooting anyway"
+        report_progress "reboot" "started" "Rebooting (nixos-install had errors)"
         reboot -f
         exit 0
       fi
@@ -287,12 +307,13 @@ fi
 
 # If running as Phase 2 on NixOS, remove the Phase 2 service from configuration.nix
 if [ "$OS_TYPE" = "nixos" ] && grep -q 'osmoda-phase2' /etc/nixos/configuration.nix 2>/dev/null; then
+  report_progress "reboot" "done" "NixOS boot complete"
   log "Phase 2: Cleaning up auto-install service from NixOS config."
   CONF="/etc/nixos/configuration.nix"
   # Remove everything between "# osModa Phase 2" marker and its closing "};  };" block
   awk '/# osModa Phase 2/{skip=1} skip && /^  };$/{count++; if(count==2){skip=0; count=0; next}} !skip' "$CONF" > "$CONF.tmp"
   mv "$CONF.tmp" "$CONF"
-  report_progress "nixos" "done" "NixOS conversion complete, installing daemons"
+  log "Phase 2: NixOS conversion complete, installing daemons..."
 fi
 
 # ---------------------------------------------------------------------------
@@ -313,12 +334,13 @@ fi
 
 # Ensure build tools for Rust
 if [ "$OS_TYPE" = "nixos" ]; then
-  # NixOS: install via nix-env
-  for pkg in gcc gnumake pkg-config sqlite openssl cmake jq; do
-    if ! nix-env -q "$pkg" &>/dev/null; then
-      nix-env -iA "nixos.$pkg" 2>/dev/null || true
-    fi
+  # NixOS: install runtime tools via nix-env, build tools via nix-shell (later)
+  # nix-env gcc doesn't set up C headers properly — nix-shell does.
+  log "Installing NixOS runtime dependencies..."
+  for pkg in jq; do
+    nix-env -iA "nixos.$pkg" 2>/dev/null || true
   done
+  USE_NIX_SHELL=true
 elif [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
   log "Installing build dependencies for Ubuntu/Debian..."
   apt-get update -qq
@@ -381,11 +403,22 @@ log "Step 4: Building all daemons (this takes 2-5 minutes on first build)..."
 
 cd "$INSTALL_DIR"
 BUILD_LOG=$(mktemp /tmp/osmoda-build-XXXXXX.log)
-if ! cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
-  error "Build failed. Full output:"
-  cat "$BUILD_LOG"
-  rm -f "$BUILD_LOG"
-  die "Cargo build failed. See errors above."
+if [ "${USE_NIX_SHELL:-false}" = true ]; then
+  # NixOS: nix-shell provides gcc wrapper with proper C headers + linker paths
+  log "Building inside nix-shell (gcc + pkg-config)..."
+  if ! nix-shell -p gcc pkg-config gnumake --run "export PATH=\"\$HOME/.cargo/bin:\$PATH\" && cargo build --release --workspace" 2>&1 | tee "$BUILD_LOG"; then
+    error "Build failed. Full output:"
+    cat "$BUILD_LOG"
+    rm -f "$BUILD_LOG"
+    die "Cargo build failed inside nix-shell. See errors above."
+  fi
+else
+  if ! cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
+    error "Build failed. Full output:"
+    cat "$BUILD_LOG"
+    rm -f "$BUILD_LOG"
+    die "Cargo build failed. See errors above."
+  fi
 fi
 rm -f "$BUILD_LOG"
 
