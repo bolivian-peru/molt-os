@@ -1054,14 +1054,14 @@ if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
 
 cat > "$INSTALL_DIR/bin/osmoda-ws-relay.js" <<'WSEOF'
 #!/usr/bin/env node
-// osModa WS Relay — bridges spawn.os.moda dashboard chat to local OpenClaw gateway.
-// Handles OpenClaw's protocol-v3 connect handshake, then translates between
-// simple dashboard JSON and OpenClaw's RPC wire format.
+// osModa WS Relay — bridges spawn.os.moda dashboard to local OpenClaw gateway.
+// Uses device identity for proper scope binding (operator.write required for chat.send).
 const WebSocket = require("ws");
 const fs = require("fs");
 const crypto = require("crypto");
 
 const STATE_DIR = "/var/lib/osmoda";
+const IDENTITY_DIR = "/root/.openclaw/identity";
 const RECONNECT_DELAY = 5000;
 const OC_URL = "ws://127.0.0.1:18789";
 
@@ -1069,8 +1069,22 @@ function readConfig(name) {
   try { return fs.readFileSync(`${STATE_DIR}/config/${name}`, "utf8").trim(); }
   catch { return ""; }
 }
-
 function uid() { return crypto.randomUUID(); }
+
+function loadDeviceIdentity() {
+  try {
+    const device = JSON.parse(fs.readFileSync(`${IDENTITY_DIR}/device.json`, "utf8"));
+    const auth = JSON.parse(fs.readFileSync(`${IDENTITY_DIR}/device-auth.json`, "utf8"));
+    return { device, auth };
+  } catch (e) {
+    console.error("[ws-relay] no device identity found:", e.message);
+    return null;
+  }
+}
+
+function signPayload(privateKeyPem, payload) {
+  return crypto.sign(null, Buffer.from(payload), privateKeyPem).toString("base64url");
+}
 
 function connect() {
   const orderId = readConfig("order-id");
@@ -1078,6 +1092,13 @@ function connect() {
   const secret = readConfig("heartbeat-secret");
   if (!orderId || !callbackUrl || !secret) {
     console.error("[ws-relay] missing config, retrying in 30s...");
+    setTimeout(connect, 30000);
+    return;
+  }
+
+  const identity = loadDeviceIdentity();
+  if (!identity) {
+    console.error("[ws-relay] no device identity, retrying in 30s...");
     setTimeout(connect, 30000);
     return;
   }
@@ -1092,31 +1113,44 @@ function connect() {
   });
 
   let local = null;
-  let ocReady = false;       // true after OpenClaw connect handshake
-  let connectId = null;      // pending connect request id
+  let ocReady = false;
+  let connectId = null;
+  let challengeNonce = null;
   let sessionKey = "spawn-" + orderId.slice(0, 8);
-  let pendingChat = {};      // id → upstream tracking
+  let pendingChat = {};
   let instanceId = uid();
 
   function sendOcConnect() {
     connectId = uid();
-    const token = readConfig("gateway-token");
-    const msg = {
-      type: "req", id: connectId, method: "connect",
-      params: {
-        minProtocol: 3, maxProtocol: 3,
-        client: {
-          id: "gateway-client", version: "1.0.0",
-          platform: "linux", mode: "webchat", instanceId: instanceId
-        },
-        role: "operator",
-        scopes: ["operator.admin", "operator.write", "operator.read"],
-        caps: [],
-        userAgent: "osmoda-ws-relay/1.0", locale: "en"
-      }
+    const deviceToken = identity.auth.tokens?.operator?.token;
+    const deviceId = identity.device.deviceId;
+    const spkiB64 = identity.device.publicKeyPem.replace(/-----[^-]+-----/g, "").replace(/\s/g, "");
+    const spkiBuf = Buffer.from(spkiB64, "base64");
+    const publicKeyRaw = spkiBuf.subarray(spkiBuf.length - 32).toString("base64url");
+
+    const params = {
+      minProtocol: 3, maxProtocol: 3,
+      client: { id: "gateway-client", version: "1.0.0", platform: "linux", mode: "cli", instanceId },
+      role: "operator",
+      scopes: ["operator.admin", "operator.write", "operator.read"],
+      caps: [],
+      userAgent: "osmoda-ws-relay/1.0", locale: "en",
+      device: { id: deviceId, publicKey: publicKeyRaw },
+      auth: { deviceToken, token: readConfig("gateway-token") }
     };
-    if (token) msg.params.auth = { token: token };
-    local.send(JSON.stringify(msg));
+
+    if (challengeNonce) {
+      const now = Date.now();
+      const authToken = readConfig("gateway-token") || deviceToken || "";
+      const scopeStr = params.scopes.join(",");
+      // v3: v3|deviceId|clientId|clientMode|role|scopes|signedAt|token|nonce|platform|deviceFamily
+      const payload = `v3|${deviceId}|${params.client.id}|${params.client.mode}|${params.role}|${scopeStr}|${now}|${authToken}|${challengeNonce}|${params.client.platform}|`;
+      params.device.signature = signPayload(identity.device.privateKeyPem, payload);
+      params.device.nonce = challengeNonce;
+      params.device.signedAt = now;
+    }
+
+    local.send(JSON.stringify({ type: "req", id: connectId, method: "connect", params }));
   }
 
   upstream.on("open", () => {
@@ -1124,78 +1158,55 @@ function connect() {
     local = new WebSocket(OC_URL, { headers: { origin: "http://127.0.0.1:18789" } });
 
     local.on("open", () => {
-      console.log("[ws-relay] connected to OpenClaw, handshaking...");
-      sendOcConnect();
+      console.log("[ws-relay] connected to OpenClaw, waiting for challenge...");
     });
 
     local.on("message", (data) => {
-      const str = data.toString();
       let msg;
-      try { msg = JSON.parse(str); } catch { return; }
+      try { msg = JSON.parse(data.toString()); } catch { return; }
 
-      // Handle connect handshake
       if (!ocReady) {
         if (msg.type === "event" && msg.event === "connect.challenge") {
-          // Challenge is informational — store nonce for future reconnects.
-          // Do NOT re-send connect; the response to our original request follows.
-          console.log("[ws-relay] got challenge (storing nonce for future use)");
+          challengeNonce = msg.payload?.nonce || msg.nonce;
+          console.log("[ws-relay] got challenge, sending connect with device identity...");
+          sendOcConnect();
           return;
         }
         if (msg.type === "res" && msg.id === connectId) {
           if (msg.ok) {
             ocReady = true;
-            console.log("[ws-relay] OpenClaw handshake complete");
+            const scopes = msg.payload?.auth?.scopes || [];
+            console.log("[ws-relay] handshake complete, scopes:", JSON.stringify(scopes));
             if (upstream.readyState === WebSocket.OPEN) {
               upstream.send(JSON.stringify({ type: "status", openclaw_connected: true }));
             }
           } else {
-            console.error("[ws-relay] OpenClaw connect rejected:", JSON.stringify(msg.error));
+            console.error("[ws-relay] connect rejected:", JSON.stringify(msg.error));
             local.close();
           }
           return;
         }
-        // Other pre-handshake messages — ignore
         return;
       }
 
-      // Post-handshake: translate OpenClaw events to dashboard format
-      if (msg.type === "event") {
-        // Forward relevant events to dashboard
-        if (upstream.readyState === WebSocket.OPEN) {
-          upstream.send(JSON.stringify(msg));
-        }
-        return;
-      }
-
-      // Response to a chat.send or other request
-      if (msg.type === "res") {
-        if (upstream.readyState === WebSocket.OPEN) {
-          upstream.send(JSON.stringify(msg));
-        }
-        delete pendingChat[msg.id];
-        return;
+      if (msg.type === "event" || msg.type === "res") {
+        if (upstream.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(msg));
+        if (msg.type === "res") delete pendingChat[msg.id];
       }
     });
 
     local.on("close", () => {
       console.log("[ws-relay] OpenClaw disconnected, reconnecting...");
-      ocReady = false;
-      upstream.close();
+      ocReady = false; challengeNonce = null; upstream.close();
     });
-
-    local.on("error", (err) => {
-      console.error("[ws-relay] OpenClaw error:", err.message);
-    });
+    local.on("error", (err) => console.error("[ws-relay] OpenClaw error:", err.message));
   });
 
   upstream.on("message", (data) => {
     if (!local || local.readyState !== WebSocket.OPEN || !ocReady) return;
-    const str = data.toString();
     let msg;
-    try { msg = JSON.parse(str); } catch { return; }
+    try { msg = JSON.parse(data.toString()); } catch { return; }
 
-    // Dashboard sends simple chat: { type: "chat", text: "..." }
-    // Translate to OpenClaw RPC: { type: "req", method: "chat.send", params: {...} }
     if (msg.type === "chat" && msg.text) {
       const reqId = uid();
       pendingChat[reqId] = true;
@@ -1203,41 +1214,21 @@ function connect() {
         type: "req", id: reqId, method: "chat.send",
         params: { message: msg.text, idempotencyKey: reqId, sessionKey: sessionKey }
       }));
-      console.log("[ws-relay] sending chat.send:", msg.text.slice(0, 50));
+      console.log("[ws-relay] chat.send:", msg.text.slice(0, 50));
       return;
     }
-
-    // Dashboard sends chat abort: { type: "chat_abort" }
     if (msg.type === "chat_abort") {
-      local.send(JSON.stringify({
-        type: "req", id: uid(), method: "chat.abort",
-        params: { sessionKey: sessionKey }
-      }));
-      return;
+      local.send(JSON.stringify({ type: "req", id: uid(), method: "chat.abort", params: { sessionKey } }));
     }
-
-    // Dashboard sends chat history request: { type: "chat_history" }
-    if (msg.type === "chat_history") {
-      local.send(JSON.stringify({
-        type: "req", id: uid(), method: "chat.history",
-        params: { sessionKey: sessionKey }
-      }));
-      return;
-    }
-
-    // Do NOT pass through raw req messages — only allow specific methods above
   });
 
   upstream.on("close", () => {
     console.log("[ws-relay] spawn disconnected, reconnecting...");
-    ocReady = false;
+    ocReady = false; challengeNonce = null;
     if (local) local.close();
     setTimeout(connect, RECONNECT_DELAY);
   });
-
-  upstream.on("error", (err) => {
-    console.error("[ws-relay] spawn error:", err.message);
-  });
+  upstream.on("error", (err) => console.error("[ws-relay] spawn error:", err.message));
 }
 
 connect();
