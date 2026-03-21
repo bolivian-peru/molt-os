@@ -1107,7 +1107,7 @@ function connect() {
         minProtocol: 3, maxProtocol: 3,
         client: {
           id: "gateway-client", version: "1.0.0",
-          platform: "linux", mode: "cli", instanceId: instanceId
+          platform: "linux", mode: "webchat", instanceId: instanceId
         },
         role: "operator",
         scopes: ["operator.admin", "operator.write", "operator.read"],
