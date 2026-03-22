@@ -216,6 +216,10 @@ if [ "$SKIP_NIXOS" = false ]; then
     # Remove all reboot calls — we reboot manually after injecting Phase 2
     sed -i 's/reboot -f/echo "[osmoda] reboot deferred for Phase 2 injection"/g' /tmp/nixos-infect.sh
     sed -i 's/shutdown -r now/echo "[osmoda] shutdown deferred for Phase 2 injection"/g' /tmp/nixos-infect.sh
+    # Fix nixos-infect bug: $bootFs can be empty on Hetzner, causing 'mv .bak' to fail
+    sed -i 's/mv -v $bootFs $bootFs.bak/[ -n "$bootFs" ] \&\& mv -v $bootFs $bootFs.bak/g' /tmp/nixos-infect.sh
+    sed -i 's/cp -a $bootFs $bootFs.bak/[ -n "$bootFs" ] \&\& cp -a $bootFs $bootFs.bak/g' /tmp/nixos-infect.sh
+    sed -i 's/rm -rf $bootFs.bak/[ -n "$bootFs" ] \&\& rm -rf $bootFs.bak/g' /tmp/nixos-infect.sh
 
     log "Running nixos-infect (without reboot, 15 min timeout)..."
     report_progress "nixos" "started" "Running nixos-infect (5-10 min)"
