@@ -777,6 +777,33 @@ AUTHEOF
 fi
 
 # ---------------------------------------------------------------------------
+# Step 8b: Generate OpenClaw device identity keypair for WS relay
+# ---------------------------------------------------------------------------
+# The WS relay needs a paired device identity with operator.write scope.
+# Generate the keypair now; pairing happens after the gateway starts (Step 9).
+IDENTITY_DIR="/root/.openclaw/identity"
+if [ ! -f "$IDENTITY_DIR/device.json" ]; then
+  log "Generating Ed25519 device identity keypair..."
+  mkdir -p "$IDENTITY_DIR"
+  node -e "
+const crypto=require('crypto'),fs=require('fs'),path=require('path');
+const{publicKey,privateKey}=crypto.generateKeyPairSync('ed25519');
+const spkiDer=publicKey.export({type:'spki',format:'der'});
+const rawKey=spkiDer.subarray(spkiDer.length-32);
+const deviceId=crypto.createHash('sha256').update(rawKey).digest('hex');
+fs.writeFileSync('$IDENTITY_DIR/device.json',JSON.stringify({
+  version:1,deviceId,
+  publicKeyPem:publicKey.export({type:'spki',format:'pem'}),
+  privateKeyPem:privateKey.export({type:'pkcs8',format:'pem'}),
+  createdAtMs:Date.now()
+},null,2),{mode:0o600});
+console.log('[device] keypair generated, deviceId:',deviceId.slice(0,16)+'...');
+" 2>&1 || warn "Device keypair generation failed"
+else
+  log "Device identity keypair already exists."
+fi
+
+# ---------------------------------------------------------------------------
 # Step 9: Create and start systemd services
 # ---------------------------------------------------------------------------
 report_progress "apikey" "done" "Auth profiles written"
@@ -1991,6 +2018,57 @@ if [ -f "$SYSTEMD_DIR/osmoda-heartbeat.timer" ]; then
   systemctl enable osmoda-heartbeat.timer
   systemctl start osmoda-heartbeat.timer
   log "Heartbeat timer started (every 5 min)."
+fi
+
+# Pair device identity with OpenClaw (requires gateway to be running)
+# This gives the WS relay operator.write scope for sending chat messages
+IDENTITY_DIR="/root/.openclaw/identity"
+if [ -f "$IDENTITY_DIR/device.json" ] && [ ! -f "$IDENTITY_DIR/device-auth.json" ] || \
+   ([ -f "$IDENTITY_DIR/device-auth.json" ] && ! grep -q '"operator"' "$IDENTITY_DIR/device-auth.json" 2>/dev/null); then
+  log "Pairing device identity with OpenClaw gateway..."
+  # Wait for gateway to be ready
+  for i in $(seq 1 10); do
+    if curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  if curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
+    GATEWAY_TOKEN_VAL=""
+    [ -f "$STATE_DIR/config/gateway-token" ] && GATEWAY_TOKEN_VAL=$(cat "$STATE_DIR/config/gateway-token")
+    cd /opt/openclaw && node -e "
+const crypto=require('crypto'),fs=require('fs'),WebSocket=require('ws');
+const id=JSON.parse(fs.readFileSync('$IDENTITY_DIR/device.json'));
+const spkiDer=crypto.createPublicKey(id.publicKeyPem).export({type:'spki',format:'der'});
+const rawKey=spkiDer.subarray(spkiDer.length-32);
+const ws=new WebSocket('ws://127.0.0.1:18789',{headers:{origin:'http://127.0.0.1:18789'}});
+let cid=null;
+ws.on('error',()=>{fs.writeFileSync('$IDENTITY_DIR/device-auth.json',JSON.stringify({version:1,deviceId:id.deviceId,tokens:{}}),{mode:0o600});process.exit(0)});
+ws.on('message',(d)=>{
+  const m=JSON.parse(d.toString());
+  if(m.type==='event'&&m.event==='connect.challenge'){
+    const n=m.payload?.nonce||m.nonce;cid=crypto.randomUUID();
+    const now=Date.now(),s='operator.admin,operator.write,operator.read';
+    const p='v3|'+id.deviceId+'|gateway-client|cli|operator|'+s+'|'+now+'|$GATEWAY_TOKEN_VAL|'+n+'|linux|';
+    const sig=crypto.sign(null,Buffer.from(p),id.privateKeyPem).toString('base64url');
+    ws.send(JSON.stringify({type:'req',id:cid,method:'connect',params:{
+      minProtocol:3,maxProtocol:3,client:{id:'gateway-client',version:'1.0.0',platform:'linux',mode:'cli',instanceId:cid},
+      role:'operator',scopes:['operator.admin','operator.write','operator.read'],caps:[],
+      device:{id:id.deviceId,publicKey:rawKey.toString('base64url'),signature:sig,nonce:n,signedAt:now},
+      auth:{token:'$GATEWAY_TOKEN_VAL'}
+    }}));
+  }
+  if(m.type==='res'&&m.id===cid){
+    const sc=m.payload?.auth?.scopes||[],dt=m.payload?.auth?.deviceToken||'';
+    console.log('[device] paired, scopes:',sc.join(','));
+    fs.writeFileSync('$IDENTITY_DIR/device-auth.json',JSON.stringify({version:1,deviceId:id.deviceId,
+      tokens:{operator:{token:dt,role:'operator',scopes:sc,updatedAtMs:Date.now()}}},null,2),{mode:0o600});
+    ws.close();process.exit(0);
+  }
+});
+setTimeout(()=>process.exit(0),15000);
+" 2>&1 || warn "Device pairing failed (relay will work in read-only mode)"
+  else
+    warn "Gateway not responding — device pairing skipped (relay will retry)"
+  fi
 fi
 
 # Enable WS relay if configured
