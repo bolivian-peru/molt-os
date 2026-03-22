@@ -2034,6 +2034,8 @@ if [ -f "$IDENTITY_DIR/device.json" ] && [ ! -f "$IDENTITY_DIR/device-auth.json"
   if curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
     GATEWAY_TOKEN_VAL=""
     [ -f "$STATE_DIR/config/gateway-token" ] && GATEWAY_TOKEN_VAL=$(cat "$STATE_DIR/config/gateway-token")
+    # Step 1: Connect to trigger pairing request
+    DEVICE_ID=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$IDENTITY_DIR/device.json')).deviceId)")
     cd /opt/openclaw && node -e "
 const crypto=require('crypto'),fs=require('fs'),WebSocket=require('ws');
 const id=JSON.parse(fs.readFileSync('$IDENTITY_DIR/device.json'));
@@ -2041,7 +2043,63 @@ const spkiDer=crypto.createPublicKey(id.publicKeyPem).export({type:'spki',format
 const rawKey=spkiDer.subarray(spkiDer.length-32);
 const ws=new WebSocket('ws://127.0.0.1:18789',{headers:{origin:'http://127.0.0.1:18789'}});
 let cid=null;
-ws.on('error',()=>{fs.writeFileSync('$IDENTITY_DIR/device-auth.json',JSON.stringify({version:1,deviceId:id.deviceId,tokens:{}}),{mode:0o600});process.exit(0)});
+ws.on('error',()=>process.exit(0));
+ws.on('message',(d)=>{
+  const m=JSON.parse(d.toString());
+  if(m.type==='event'&&m.event==='connect.challenge'){
+    const n=m.payload?.nonce||m.nonce;cid=crypto.randomUUID();
+    const now=Date.now(),s='operator.admin,operator.write,operator.read';
+    const p='v3|'+id.deviceId+'|gateway-client|cli|operator|'+s+'|'+now+'|$GATEWAY_TOKEN_VAL|'+n+'|linux|';
+    const sig=crypto.sign(null,Buffer.from(p),id.privateKeyPem).toString('base64url');
+    ws.send(JSON.stringify({type:'req',id:cid,method:'connect',params:{
+      minProtocol:3,maxProtocol:3,client:{id:'gateway-client',version:'1.0.0',platform:'linux',mode:'cli',instanceId:cid},
+      role:'operator',scopes:['operator.admin','operator.write','operator.read'],caps:[],
+      device:{id:id.deviceId,publicKey:rawKey.toString('base64url'),signature:sig,nonce:n,signedAt:now},
+      auth:{token:'$GATEWAY_TOKEN_VAL'}
+    }}));
+  }
+  if(m.type==='res'&&m.id===cid){
+    if(m.ok){
+      const sc=m.payload?.auth?.scopes||[],dt=m.payload?.auth?.deviceToken||'';
+      console.log('[device] auto-paired, scopes:',sc.join(','));
+      fs.writeFileSync('$IDENTITY_DIR/device-auth.json',JSON.stringify({version:1,deviceId:id.deviceId,
+        tokens:{operator:{token:dt,role:'operator',scopes:sc,updatedAtMs:Date.now()}}},null,2),{mode:0o600});
+    } else {
+      console.log('[device] pairing request sent, needs approval');
+    }
+    ws.close();process.exit(0);
+  }
+});
+setTimeout(()=>process.exit(0),10000);
+" 2>&1
+
+    # Step 2: Approve the pending pairing request via CLI
+    if [ ! -f "$IDENTITY_DIR/device-auth.json" ] || ! grep -q '"operator.write"' "$IDENTITY_DIR/device-auth.json" 2>/dev/null; then
+      log "Approving device pairing request..."
+      export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
+      # Get the pending request ID and approve it
+      PENDING_INFO=$(openclaw devices list --json 2>/dev/null | node -e "
+        const d=[];process.stdin.on('data',c=>d.push(c));
+        process.stdin.on('end',()=>{
+          try{const j=JSON.parse(Buffer.concat(d));
+          const p=(j.pending||[]).find(p=>p.deviceId&&p.deviceId.startsWith('$DEVICE_ID'.slice(0,16)));
+          if(p)console.log(p.requestId||p.id||'');
+          }catch{}
+        });
+      " 2>/dev/null)
+      if [ -n "$PENDING_INFO" ] && [ "$PENDING_INFO" != "" ]; then
+        openclaw devices approve "$PENDING_INFO" 2>&1 || true
+        log "Device approved. Reconnecting to get token..."
+        # Step 3: Reconnect to get the device token after approval
+        sleep 2
+        cd /opt/openclaw && node -e "
+const crypto=require('crypto'),fs=require('fs'),WebSocket=require('ws');
+const id=JSON.parse(fs.readFileSync('$IDENTITY_DIR/device.json'));
+const spkiDer=crypto.createPublicKey(id.publicKeyPem).export({type:'spki',format:'der'});
+const rawKey=spkiDer.subarray(spkiDer.length-32);
+const ws=new WebSocket('ws://127.0.0.1:18789',{headers:{origin:'http://127.0.0.1:18789'}});
+let cid=null;
+ws.on('error',()=>process.exit(0));
 ws.on('message',(d)=>{
   const m=JSON.parse(d.toString());
   if(m.type==='event'&&m.event==='connect.challenge'){
@@ -2058,14 +2116,19 @@ ws.on('message',(d)=>{
   }
   if(m.type==='res'&&m.id===cid){
     const sc=m.payload?.auth?.scopes||[],dt=m.payload?.auth?.deviceToken||'';
-    console.log('[device] paired, scopes:',sc.join(','));
+    console.log('[device] paired with scopes:',sc.join(','));
     fs.writeFileSync('$IDENTITY_DIR/device-auth.json',JSON.stringify({version:1,deviceId:id.deviceId,
       tokens:{operator:{token:dt,role:'operator',scopes:sc,updatedAtMs:Date.now()}}},null,2),{mode:0o600});
     ws.close();process.exit(0);
   }
 });
-setTimeout(()=>process.exit(0),15000);
-" 2>&1 || warn "Device pairing failed (relay will work in read-only mode)"
+setTimeout(()=>process.exit(0),10000);
+" 2>&1
+      else
+        warn "No pending pairing request found to approve"
+      fi
+    fi
+    2>&1 || warn "Device pairing failed (relay will work in read-only mode)"
   else
     warn "Gateway not responding — device pairing skipped (relay will retry)"
   fi
