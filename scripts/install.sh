@@ -1044,37 +1044,113 @@ Environment=RUST_LOG=info
 WantedBy=multi-user.target
 EOF
 
-# app-restore (restores managed apps on boot)
+# app-restore script (restores managed apps on boot from registry.json)
+cat > "$INSTALL_DIR/bin/osmoda-app-restore.sh" <<'RESTOREOF'
+#!/bin/bash
+# osModa App Process Restore — runs on boot to recreate transient units from registry
+# Skips apps marked as persistent (they have their own unit files)
+set -euo pipefail
+
+REGISTRY="/var/lib/osmoda/apps/registry.json"
+if [ ! -f "$REGISTRY" ]; then
+  echo "[app-restore] No registry found, nothing to restore"
+  exit 0
+fi
+
+if ! command -v jq &>/dev/null; then
+  echo "[app-restore] jq not found, cannot parse registry"
+  exit 1
+fi
+
+APP_COUNT=0
+FAIL_COUNT=0
+
+jq -r '.apps | to_entries[] | select(.value.status == "running") | .key' "$REGISTRY" 2>/dev/null | while read -r APP_NAME; do
+  # Skip apps with persistent unit files
+  PERSISTENT=$(jq -r --arg n "$APP_NAME" '.apps[$n].persistent // false' "$REGISTRY")
+  if [ "$PERSISTENT" = "true" ]; then
+    echo "[app-restore] Skipping $APP_NAME (has persistent unit file)"
+    continue
+  fi
+
+  COMMAND=$(jq -r --arg n "$APP_NAME" '.apps[$n].command' "$REGISTRY")
+  if [ -z "$COMMAND" ] || [ "$COMMAND" = "null" ]; then
+    echo "[app-restore] Skipping $APP_NAME (no command)"
+    continue
+  fi
+
+  RESTART=$(jq -r --arg n "$APP_NAME" '.apps[$n].restart_policy // "on-failure"' "$REGISTRY")
+  WORKDIR=$(jq -r --arg n "$APP_NAME" '.apps[$n].working_dir // empty' "$REGISTRY")
+  MEMMAX=$(jq -r --arg n "$APP_NAME" '.apps[$n].memory_max // empty' "$REGISTRY")
+  CPUQUOTA=$(jq -r --arg n "$APP_NAME" '.apps[$n].cpu_quota // empty' "$REGISTRY")
+  USER=$(jq -r --arg n "$APP_NAME" '.apps[$n].user // empty' "$REGISTRY")
+
+  SAFE_NAME=$(echo "$APP_NAME" | tr -cd 'a-zA-Z0-9_-')
+  UNIT="osmoda-app-$SAFE_NAME"
+
+  # Skip if unit already running
+  if systemctl is-active "$UNIT" &>/dev/null; then
+    echo "[app-restore] $APP_NAME ($UNIT) already running, skipping"
+    continue
+  fi
+
+  # Build systemd-run command
+  ARGS=()
+  ARGS+=(--unit "$UNIT")
+  ARGS+=(--service-type=simple)
+  ARGS+=("--property=Restart=$RESTART")
+  ARGS+=(--property=StartLimitIntervalSec=0)
+  ARGS+=(--property=RestartSec=3)
+
+  if [ -n "$USER" ] && [ "$USER" != "null" ]; then
+    ARGS+=("--uid=$USER")
+  fi
+
+  [ -n "$WORKDIR" ] && [ "$WORKDIR" != "null" ] && ARGS+=("--working-directory=$WORKDIR")
+  [ -n "$MEMMAX" ] && [ "$MEMMAX" != "null" ] && ARGS+=("--property=MemoryMax=$MEMMAX")
+  [ -n "$CPUQUOTA" ] && [ "$CPUQUOTA" != "null" ] && ARGS+=("--property=CPUQuota=$CPUQUOTA")
+
+  # Restore environment variables
+  ENV_KEYS=$(jq -r --arg n "$APP_NAME" '.apps[$n].env // {} | keys[]' "$REGISTRY" 2>/dev/null)
+  for KEY in $ENV_KEYS; do
+    VAL=$(jq -r --arg n "$APP_NAME" --arg k "$KEY" '.apps[$n].env[$k]' "$REGISTRY")
+    ARGS+=("--setenv=${KEY}=${VAL}")
+  done
+
+  # Command + args
+  ARGS+=(--)
+  ARGS+=("$COMMAND")
+  ARG_COUNT=$(jq -r --arg n "$APP_NAME" '.apps[$n].args // [] | length' "$REGISTRY" 2>/dev/null)
+  if [ "$ARG_COUNT" -gt 0 ] 2>/dev/null; then
+    for i in $(seq 0 $((ARG_COUNT - 1))); do
+      ARG=$(jq -r --arg n "$APP_NAME" --argjson i "$i" '.apps[$n].args[$i]' "$REGISTRY")
+      ARGS+=("$ARG")
+    done
+  fi
+
+  echo "[app-restore] Restoring: $APP_NAME → $UNIT"
+  if systemd-run "${ARGS[@]}"; then
+    APP_COUNT=$((APP_COUNT + 1))
+  else
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    echo "[app-restore] FAIL: $APP_NAME"
+  fi
+done
+
+echo "[app-restore] Done. Restored: $APP_COUNT, Failed: $FAIL_COUNT"
+RESTOREOF
+chmod +x "$INSTALL_DIR/bin/osmoda-app-restore.sh"
+
+# app-restore systemd service (calls the script)
 cat > "$SYSTEMD_DIR/osmoda-app-restore.service" <<'AREOF'
 [Unit]
 Description=osModa App Process Restore
-After=osmoda-agentd.service
-Requires=osmoda-agentd.service
+After=network.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash -c '\
-  REGISTRY="/var/lib/osmoda/apps/registry.json"; \
-  if [ ! -f "$REGISTRY" ]; then exit 0; fi; \
-  for APP_NAME in $(jq -r ".apps | to_entries[] | select(.value.status == \"running\") | .key" "$REGISTRY" 2>/dev/null); do \
-    COMMAND=$(jq -r --arg n "$APP_NAME" ".apps[\$n].command" "$REGISTRY"); \
-    RESTART=$(jq -r --arg n "$APP_NAME" ".apps[\$n].restart_policy // \"on-failure\"" "$REGISTRY"); \
-    WORKDIR=$(jq -r --arg n "$APP_NAME" ".apps[\$n].working_dir // empty" "$REGISTRY"); \
-    MEMMAX=$(jq -r --arg n "$APP_NAME" ".apps[\$n].memory_max // empty" "$REGISTRY"); \
-    CPUQUOTA=$(jq -r --arg n "$APP_NAME" ".apps[\$n].cpu_quota // empty" "$REGISTRY"); \
-    USER=$(jq -r --arg n "$APP_NAME" ".apps[\$n].user // empty" "$REGISTRY"); \
-    SAFE_NAME=$(echo "$APP_NAME" | tr -cd "a-zA-Z0-9_-"); \
-    UNIT="osmoda-app-$SAFE_NAME"; \
-    SYSARGS=(--unit "$UNIT" --service-type=simple "--property=Restart=$RESTART" --property=StartLimitIntervalSec=0 --property=RestartSec=3); \
-    if [ -n "$USER" ]; then SYSARGS+=("--uid=$USER"); else SYSARGS+=("--property=DynamicUser=yes"); fi; \
-    [ -n "$WORKDIR" ] && SYSARGS+=("--working-directory=$WORKDIR"); \
-    [ -n "$MEMMAX" ] && SYSARGS+=("--property=MemoryMax=$MEMMAX"); \
-    [ -n "$CPUQUOTA" ] && SYSARGS+=("--property=CPUQuota=$CPUQUOTA"); \
-    SYSARGS+=("--" "$COMMAND"); \
-    echo "Restoring app: $APP_NAME (unit: $UNIT)"; \
-    systemd-run "${SYSARGS[@]}" || echo "Failed to restore $APP_NAME"; \
-  done'
+ExecStart=/opt/osmoda/bin/osmoda-app-restore.sh
 
 [Install]
 WantedBy=multi-user.target
