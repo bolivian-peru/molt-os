@@ -859,9 +859,11 @@ if [ "$OS_TYPE" = "nixos" ] && [ ! -w "/etc/systemd/system" ]; then
   # NixOS: /etc/systemd/system is read-only (Nix store). Use runtime directory.
   SYSTEMD_DIR="/run/systemd/system"
   mkdir -p "$SYSTEMD_DIR" 2>/dev/null || true
+  MKDIR_BIN="/run/current-system/sw/bin/mkdir"
   log "NixOS read-only /etc: using $SYSTEMD_DIR for service units"
 else
   SYSTEMD_DIR="/etc/systemd/system"
+  MKDIR_BIN="/bin/mkdir"
 fi
 
 mkdir -p "$RUN_DIR" "$STATE_DIR"
@@ -893,8 +895,8 @@ ExecStart=$INSTALL_DIR/bin/agentd --socket $RUN_DIR/agentd.sock --state-dir $STA
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
-ExecStartPre=+/bin/sh -c 'mkdir -p $RUN_DIR'
-ExecStartPre=+/bin/sh -c 'mkdir -p $STATE_DIR'
+ExecStartPre=+${MKDIR_BIN} -p $RUN_DIR
+ExecStartPre=+${MKDIR_BIN} -p $STATE_DIR
 
 [Install]
 WantedBy=multi-user.target
