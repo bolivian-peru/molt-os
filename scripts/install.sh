@@ -353,6 +353,13 @@ elif [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
     libsqlite3-dev libssl-dev curl jq 2>&1 | tail -3
 fi
 
+# Ensure nix channels exist on NixOS (needed for nix-shell -p)
+if [ "$OS_TYPE" = "nixos" ] && ! nix-instantiate --eval -E '<nixpkgs>' &>/dev/null; then
+  log "Setting up nix channels (required for nix-shell)..."
+  nix-channel --add https://nixos.org/channels/nixos-unstable nixos 2>/dev/null || true
+  nix-channel --update 2>&1 | tail -2
+fi
+
 # Ensure Rust toolchain
 if ! command -v cargo &>/dev/null; then
   log "Installing Rust toolchain via rustup..."
@@ -411,12 +418,19 @@ if [ "${USE_NIX_SHELL:-false}" = true ]; then
   # NixOS: need gcc + pkg-config for Rust builds with C dependencies
   if command -v gcc &>/dev/null && command -v pkg-config &>/dev/null; then
     # gcc + pkg-config already in PATH (e.g. NixOS snapshot with pre-installed tools)
-    log "Build tools already in PATH, building directly..."
-    if ! cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
-      error "Build failed. Full output:"
-      cat "$BUILD_LOG"
+    # Check if system Rust is new enough, otherwise use nix-shell with unstable
+    if cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
+      log "Build succeeded with system Rust."
+    else
+      warn "System Rust too old for some deps, retrying with nix-shell (nixos-unstable)..."
       rm -f "$BUILD_LOG"
-      die "Cargo build failed. See errors above."
+      BUILD_LOG=$(mktemp /tmp/osmoda-build-XXXXXX.log)
+      if ! nix-shell -p cargo rustc gcc pkg-config gnumake openssl.dev --run "cargo build --release --workspace" 2>&1 | tee "$BUILD_LOG"; then
+        error "Build failed. Full output:"
+        cat "$BUILD_LOG"
+        rm -f "$BUILD_LOG"
+        die "Cargo build failed. See errors above."
+      fi
     fi
   else
     # Fallback: nix-shell provides gcc wrapper with proper C headers + linker paths
