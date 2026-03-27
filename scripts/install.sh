@@ -855,7 +855,14 @@ if [ "$OS_TYPE" = "nixos" ]; then
 fi
 
 SKIP_SYSTEMD=false
-SYSTEMD_DIR="/etc/systemd/system"
+if [ "$OS_TYPE" = "nixos" ] && [ ! -w "/etc/systemd/system" ]; then
+  # NixOS: /etc/systemd/system is read-only (Nix store). Use runtime directory.
+  SYSTEMD_DIR="/run/systemd/system"
+  mkdir -p "$SYSTEMD_DIR" 2>/dev/null || true
+  log "NixOS read-only /etc: using $SYSTEMD_DIR for service units"
+else
+  SYSTEMD_DIR="/etc/systemd/system"
+fi
 
 mkdir -p "$RUN_DIR" "$STATE_DIR"
 mkdir -p "$STATE_DIR"/{keyd/keys,watch,routines,mesh,config}
@@ -1424,6 +1431,7 @@ INSTALL_DIR="/opt/osmoda"
 
 # Self-heal mesh daemon config (one-time migration for servers deployed before --public-addr)
 MESH_SERVICE_FILE="/etc/systemd/system/osmoda-mesh.service"
+[ ! -w "$MESH_SERVICE_FILE" ] && MESH_SERVICE_FILE="/run/systemd/system/osmoda-mesh.service"
 if [ -f "$MESH_SERVICE_FILE" ] && ! grep -q "listen-addr 0.0.0.0" "$MESH_SERVICE_FILE"; then
   MESH_PUBLIC_IP=$(curl -sf -m 3 http://169.254.169.254/hetzner/v1/metadata/public-ipv4 2>/dev/null || curl -sf -m 3 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
   # Validate IP format before using in sed
