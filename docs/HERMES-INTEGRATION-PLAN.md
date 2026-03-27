@@ -266,37 +266,244 @@ curl -fsSL .../install.sh | bash -s -- --runtime openclaw --order-id '...'  # de
 
 ---
 
-## 8. Implementation Priority
+## 8. Implementation Plan — 8-Hour Sprint Blocks
 
-### Phase 1: MCP Bridge (Week 1-2)
-Build `osmoda-mcp-bridge.js` — extract tool handlers from osmoda-bridge, wrap in MCP stdio server. Test with Hermes locally.
+Each phase is scoped for an 8-hour focused sprint. Phases are sequential — each builds on the previous. Every phase has an exact prompt you can paste into a Claude Code session to execute it.
 
-**Deliverable**: `hermes` can call all 90 osModa tools via MCP.
+---
 
-### Phase 2: install.sh `--runtime hermes` (Week 3)
-Add Hermes install path to install.sh. Test full install on NixOS snapshot.
+### Phase 1: MCP Bridge Foundation (8 hours)
 
-**Deliverable**: `curl | bash -s -- --runtime hermes` produces a working Hermes + osModa server.
+**Goal**: A working MCP server that exposes all 90 osModa tools over stdio.
 
-### Phase 3: NixOS Module (Week 4)
-Add `osmoda.runtime` option to `osmoda.nix`. Import Hermes's flake. Generate configs.
+**Pre-research done**:
+- osmoda-bridge has 90 tools in `packages/osmoda-bridge/index.ts`
+- Each tool has: name, description, JSON Schema params, handler function
+- Handler functions call daemon Unix sockets via `agentdRequest()`, `keydRequest()`, etc.
+- MCP protocol: JSON-RPC over stdio, `tools/list` returns schemas, `tools/call` executes
+- Hermes discovers MCP tools at startup via `list_tools()`
 
-**Deliverable**: `services.osmoda.runtime = "hermes"` works declaratively.
+**Files to create**:
+```
+packages/osmoda-mcp-bridge/
+  package.json           # name: osmoda-mcp-bridge, deps: @modelcontextprotocol/sdk
+  index.ts               # MCP server: reads stdio, routes tool calls to daemon sockets
+  tools.ts               # Tool registry: 90 tool definitions (name, schema, handler)
+  daemon-clients.ts      # Shared Unix socket HTTP clients (copied from osmoda-bridge)
+```
 
-### Phase 4: Spawn Integration (Week 5-6)
-Runtime selector in spawn flow. Dashboard chat adaptation. Model picker.
+**Exact approach**:
+1. `npm init` the new package with `@modelcontextprotocol/sdk` dependency
+2. Extract all `agentdRequest`, `keydRequest`, `watchRequest`, `routinesRequest`, `meshRequest`, `mcpdRequest`, `teachdRequest` HTTP-over-Unix-socket clients into `daemon-clients.ts`
+3. Extract all 90 tool definitions (name + JSON Schema + handler) from `index.ts` into `tools.ts` as a flat array
+4. In `index.ts`, create MCP `Server` instance, register all 90 tools via `server.setRequestHandler(ListToolsRequestSchema, ...)` and `server.setRequestHandler(CallToolRequestSchema, ...)`
+5. Connect server to stdio transport: `new StdioServerTransport()`
+6. Test locally: `echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node packages/osmoda-mcp-bridge/index.ts`
 
-**Deliverable**: Users choose runtime + model when spawning on spawn.os.moda.
+**Sprint prompt** (paste into Claude Code):
+```
+Read packages/osmoda-bridge/index.ts fully. Extract all 90 tool registrations into a new MCP server package at packages/osmoda-mcp-bridge/. The MCP server must:
+1. Use @modelcontextprotocol/sdk (npm package)
+2. Run over stdio transport (stdin/stdout JSON-RPC)
+3. Export all 90 tools with identical names, descriptions, and JSON Schema params
+4. Route tool calls to the same daemon Unix sockets as osmoda-bridge
+5. Share the HTTP-over-Unix-socket client code (agentdRequest, keydRequest, etc.)
+Test by piping a tools/list request through stdin and verifying all 90 tools appear.
+Do NOT modify osmoda-bridge — create a new standalone package.
+```
 
-### Phase 5: Skill Convergence (Week 7-8)
-Connect teachd's skill candidates to both runtimes. Shared `skills/auto/` directory.
+**Verification**: `cat test-list.json | node packages/osmoda-mcp-bridge/index.ts` returns 90 tools.
 
-**Deliverable**: Skills are portable between runtimes. teachd feeds both.
+---
 
-### Phase 6: Memory Upgrade (Week 9-10)
-3-tier memory: session (in-memory), persistent (ZVEC + FTS5), procedural (skills).
+### Phase 2: Hermes + MCP Bridge End-to-End (8 hours)
 
-**Deliverable**: Memory organized by purpose, better recall quality.
+**Goal**: Hermes running locally, calling osModa tools via the MCP bridge, against a real server.
+
+**Pre-research done**:
+- Hermes installs via `pip install hermes-agent` or `nix profile install github:nousresearch/hermes-agent`
+- Config at `~/.hermes/config.yaml` with `mcp_servers:` section
+- Hermes auto-discovers MCP tools on startup
+- Hermes has `hermes claw migrate` to import OpenClaw config
+- Hermes gateway mode: `hermes gateway` runs as a daemon
+
+**Steps**:
+1. Install Hermes locally (pip or nix)
+2. Configure `~/.hermes/config.yaml`:
+   ```yaml
+   model:
+     default: "anthropic/claude-sonnet-4-6"
+   mcp_servers:
+     osmoda:
+       command: "node"
+       args: ["packages/osmoda-mcp-bridge/index.ts"]
+       env:
+         AGENTD_SOCKET: "/run/osmoda/agentd.sock"
+   ```
+3. SSH tunnel to a real osModa server: `ssh -L /tmp/agentd.sock:/run/osmoda/agentd.sock root@168.119.157.243`
+4. Point MCP bridge at the tunneled socket
+5. Run `hermes` and test: "Check system health" → should call `system_health` via MCP → return real data
+6. Test 5 critical tools: `system_health`, `shell_exec`, `file_read`, `service_status`, `journal_logs`
+
+**Sprint prompt**:
+```
+I have a working osmoda-mcp-bridge at packages/osmoda-mcp-bridge/. Now:
+1. Install Hermes agent (pip install hermes-agent or use nix)
+2. Create a test config at ~/.hermes/config.yaml that connects to osmoda-mcp-bridge
+3. I have an SSH tunnel to a live osModa server at /tmp/agentd.sock
+4. Configure the MCP bridge to use that socket
+5. Test that Hermes can call system_health, shell_exec, file_read, service_status, journal_logs
+6. Document any issues with tool parameter mapping between Hermes and our schemas
+```
+
+**Verification**: Hermes chat session successfully calls 5 osModa tools and returns real system data.
+
+---
+
+### Phase 3: install.sh `--runtime hermes` (8 hours)
+
+**Goal**: Fresh NixOS server installs with Hermes instead of OpenClaw.
+
+**Pre-research done**:
+- Hermes has official Nix flake at `github:nousresearch/hermes-agent`
+- `nix profile install github:nousresearch/hermes-agent` installs `hermes` binary
+- Hermes config: `~/.hermes/config.yaml` (model, mcp_servers, etc.)
+- Hermes identity: `~/.hermes/SOUL.md` (same format as OpenClaw's)
+- Hermes service: `hermes gateway` as systemd ExecStart
+
+**Changes to install.sh**:
+1. New flag: `--runtime hermes|openclaw` (default: openclaw)
+2. When `--runtime hermes`:
+   - Skip OpenClaw npm install (Step 5)
+   - Skip osmoda-bridge setup (Step 6)
+   - Instead: `nix profile install github:nousresearch/hermes-agent`
+   - Build osmoda-mcp-bridge: `cd /opt/osmoda/packages/osmoda-mcp-bridge && npm install`
+   - Generate `~/.hermes/config.yaml` with model + mcp_servers pointing to osmoda-mcp-bridge
+   - Copy `templates/SOUL.md` to `~/.hermes/SOUL.md`
+   - Copy `skills/` to `~/.hermes/skills/`
+   - Create `hermes-agent.service` systemd unit: `ExecStart=hermes gateway`
+3. Shared steps (both runtimes): daemon build, heartbeat, ws-relay, device identity
+
+**Sprint prompt**:
+```
+Read scripts/install.sh. Add a --runtime flag (hermes|openclaw, default openclaw).
+When --runtime hermes:
+- Skip Steps 5-6 (OpenClaw + osmoda-bridge)
+- Install Hermes via: nix profile install github:nousresearch/hermes-agent
+- Build the MCP bridge: cd /opt/osmoda/packages/osmoda-mcp-bridge && npm install
+- Generate ~/.hermes/config.yaml with:
+  - model from --provider/--api-key args
+  - mcp_servers.osmoda pointing to /opt/osmoda/packages/osmoda-mcp-bridge/index.ts
+- Copy templates/SOUL.md to ~/.hermes/SOUL.md
+- Copy skills/ to ~/.hermes/skills/
+- Create /run/systemd/system/hermes-agent.service (or /etc/systemd/system/ on Ubuntu)
+- WS relay adaptation: detect hermes runtime and use HTTP API at localhost:8642
+Keep all daemon installation identical for both runtimes.
+Test on the NixOS snapshot (image 370676004) on Hetzner.
+```
+
+**Verification**: `curl | bash -s -- --runtime hermes --skip-nixos` on NixOS snapshot → Hermes running, MCP bridge connected, 90 tools available.
+
+---
+
+### Phase 4: WS Relay + Dashboard Chat for Hermes (8 hours)
+
+**Goal**: Dashboard chat works with Hermes runtime (browser ↔ spawn ↔ Hermes).
+
+**Pre-research done**:
+- Current ws-relay connects to OpenClaw's WebSocket at `ws://127.0.0.1:18789`
+- Hermes exposes OpenAI-compatible API at `http://127.0.0.1:8642`
+- Hermes API: `POST /v1/chat/completions` with streaming (SSE)
+- Dashboard chat endpoint at `POST /api/dashboard/servers/:id/chat` uses `room.agent`
+
+**Changes**:
+1. WS relay (`osmoda-ws-relay.js`): detect runtime by checking which port responds
+   - Port 18789 open → OpenClaw mode (existing WebSocket protocol)
+   - Port 8642 open → Hermes mode (HTTP streaming)
+2. Hermes mode in ws-relay:
+   - Receive `{ type: "chat", text: "..." }` from spawn
+   - POST to `http://127.0.0.1:8642/v1/chat/completions` with `stream: true`
+   - Parse SSE chunks → forward as `{ type: "event", event: "agent", payload: { stream: "assistant", data: { delta: "..." } } }`
+   - On `[DONE]` → forward lifecycle end event
+3. The spawn server (server.js) needs zero changes — it talks to `room.agent` (ws-relay) which handles the protocol difference
+
+**Sprint prompt**:
+```
+Read /opt/osmoda/bin/osmoda-ws-relay.js on server 168.119.157.243 (SSH via spawn server).
+Also read the Hermes OpenAI-compatible API docs at http://localhost:8642.
+Modify osmoda-ws-relay.js to support both runtimes:
+1. On startup, probe port 18789 (OpenClaw) and 8642 (Hermes)
+2. If OpenClaw: use existing WebSocket protocol (unchanged)
+3. If Hermes: when receiving { type: "chat", text } from spawn, POST to localhost:8642/v1/chat/completions with streaming, convert SSE chunks to the same event format spawn expects
+4. The spawn server (server.js) must not need any changes
+Test by switching a test server from OpenClaw to Hermes and verifying dashboard chat works.
+```
+
+**Verification**: Send message in dashboard chat → Hermes processes it → response appears in browser.
+
+---
+
+### Phase 5: Spawn Runtime Selector (8 hours)
+
+**Goal**: Users choose runtime when spawning on spawn.os.moda.
+
+**Changes**:
+1. **Plan cards** (`index.html`): Add runtime toggle (OpenClaw default / Hermes)
+2. **Spawn API** (`server.js`):
+   - `POST /api/dashboard/deploy` accepts `runtime` field
+   - `POST /api/v1/spawn/:planId` accepts `runtime` field
+   - Cloud-init passes `--runtime hermes` or `--runtime openclaw` to install.sh
+   - Store `runtime` in order record
+3. **Dashboard Settings**: Show which runtime is active, option to switch (triggers rebuild)
+4. **Model picker**: When Hermes selected, show expanded model dropdown (OpenRouter models)
+5. **Heartbeat**: Report which runtime is active so dashboard shows correct status
+
+**Sprint prompt**:
+```
+Modify the spawn.os.moda dashboard to support runtime selection:
+1. index.html plan cards: add a small toggle "Runtime: OpenClaw | Hermes" (default OpenClaw)
+2. server.js deploy/spawn endpoints: accept runtime parameter, pass --runtime to cloud-init
+3. server.js order schema: add runtime field
+4. dashboard.html Settings tab: show active runtime
+5. dashboard.html Overview: show runtime badge next to agent info
+6. When Hermes is selected in spawn flow, show model dropdown with popular options:
+   Claude Opus, Claude Sonnet, DeepSeek V3, Llama 3.3, Mistral Large, Qwen3
+Existing servers stay unchanged. Only affects new spawns.
+```
+
+**Verification**: Spawn a new server with Hermes runtime → install completes → dashboard shows "Hermes" badge → chat works.
+
+---
+
+### Phase 6: Skill Convergence + Testing (8 hours)
+
+**Goal**: Skills work across both runtimes. Full integration test.
+
+**Changes**:
+1. Copy all `skills/` to Hermes's skill directory during install
+2. teachd's `teach_skill_generate` writes to `skills/auto/` — accessible by both runtimes
+3. Hermes's built-in `skill_manage` also writes to `~/.hermes/skills/` — sync with `skills/auto/`
+4. Add a `skill_sync` routine that copies between skill directories
+5. Integration test script: spawn both runtime types, verify all daemons, test chat, test 10 tools
+
+**Sprint prompt**:
+```
+1. Ensure install.sh copies all skills/ to both:
+   - /root/.openclaw/workspace-osmoda/skills/ (OpenClaw)
+   - /root/.hermes/skills/ (Hermes)
+2. Add a skill sync mechanism: when teachd generates a skill in skills/auto/,
+   also symlink or copy it to the active runtime's skill directory
+3. Write an integration test script at scripts/test-integration.sh that:
+   - Creates two Hetzner CX23 servers from NixOS snapshot 370676004
+   - Installs one with --runtime openclaw, one with --runtime hermes
+   - Waits for both to send heartbeat
+   - Tests SSH, 5 tools via dashboard chat, file browser
+   - Verifies all 10 daemons are running on both
+   - Cleans up (deletes servers)
+4. Run the test and fix any issues found
+```
+
+**Verification**: Both runtimes pass the integration test. Skills visible in both.
 
 ---
 
