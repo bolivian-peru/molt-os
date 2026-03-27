@@ -1,0 +1,88 @@
+#!/usr/bin/env node
+/**
+ * osModa MCP Bridge — exposes all 90 osModa tools as an MCP server over stdio.
+ *
+ * Usage:
+ *   node index.js                     # MCP server on stdin/stdout
+ *   node index.js --list-tools        # Print tool names and exit
+ *
+ * Hermes config (~/.hermes/config.yaml):
+ *   mcp_servers:
+ *     osmoda:
+ *       command: "node"
+ *       args: ["/opt/osmoda/packages/osmoda-mcp-bridge/index.js"]
+ *
+ * Any MCP client can connect to this server and use all osModa daemon tools.
+ */
+
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import { getAllTools, type ToolDef } from "./tools.js";
+
+// Load all 90 tools
+const tools: ToolDef[] = getAllTools();
+const toolMap = new Map<string, ToolDef>();
+for (const t of tools) toolMap.set(t.name, t);
+
+// --list-tools flag: print tool names and exit
+if (process.argv.includes("--list-tools")) {
+  console.log(`osModa MCP Bridge — ${tools.length} tools available:\n`);
+  for (const t of tools) console.log(`  ${t.name.padEnd(28)} ${t.description.slice(0, 70)}`);
+  process.exit(0);
+}
+
+// Create MCP server
+const server = new Server(
+  { name: "osmoda-mcp-bridge", version: "0.1.0" },
+  { capabilities: { tools: {} } },
+);
+
+// Handle tools/list
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: tools.map(t => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: t.inputSchema,
+  })),
+}));
+
+// Handle tools/call
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  const tool = toolMap.get(name);
+
+  if (!tool) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({ error: `Unknown tool: ${name}` }) }],
+      isError: true,
+    };
+  }
+
+  try {
+    const result = await tool.handler(args || {});
+    return {
+      content: [{ type: "text", text: result }],
+    };
+  } catch (e: any) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({ error: e.message }) }],
+      isError: true,
+    };
+  }
+});
+
+// Connect to stdio transport and run
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  // Server runs until stdin closes
+}
+
+main().catch((e) => {
+  console.error("MCP Bridge fatal:", e);
+  process.exit(1);
+});
