@@ -353,11 +353,22 @@ elif [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
     libsqlite3-dev libssl-dev curl jq 2>&1 | tail -3
 fi
 
-# Ensure Rust toolchain
+# Ensure Rust toolchain (need 1.85+ for edition2024 support)
+NEED_RUSTUP=false
 if ! command -v cargo &>/dev/null; then
-  log "Installing Rust toolchain..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  export PATH="$HOME/.cargo/bin:$PATH"
+  NEED_RUSTUP=true
+else
+  CARGO_VER=$(cargo --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
+  CARGO_MAJOR=$(echo "$CARGO_VER" | cut -d. -f1)
+  CARGO_MINOR=$(echo "$CARGO_VER" | cut -d. -f2)
+  if [ "${CARGO_MAJOR:-0}" -lt 1 ] || ([ "${CARGO_MAJOR:-0}" -eq 1 ] && [ "${CARGO_MINOR:-0}" -lt 85 ]); then
+    log "Cargo $CARGO_VER is too old (need 1.85+), installing via rustup..."
+    NEED_RUSTUP=true
+  fi
+fi
+if [ "$NEED_RUSTUP" = true ]; then
+  log "Installing Rust toolchain via rustup..."
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>&1 | tail -3
 fi
 export PATH="$HOME/.cargo/bin:$PATH"
 
