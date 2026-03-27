@@ -2101,8 +2101,12 @@ WantedBy=timers.target
 EOF
 fi
 
+# On NixOS with read-only /etc, `systemctl enable` fails (can't create symlinks).
+# Services will be started directly; osmoda-app-restore handles boot persistence.
+svc_enable() { systemctl enable "$1" 2>/dev/null || true; }
+
 systemctl daemon-reload
-systemctl enable osmoda-agentd.service
+svc_enable osmoda-agentd.service
 systemctl start osmoda-agentd.service
 
 # Wait for agentd socket (30s timeout — builds can be slow to start)
@@ -2121,13 +2125,13 @@ fi
 # Start all daemons
 for svc in osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice osmoda-egress osmoda-app-restore; do
   if [ -f "$SYSTEMD_DIR/${svc}.service" ]; then
-    systemctl enable "${svc}.service"
+    svc_enable "${svc}.service"
     systemctl start "${svc}.service"
   fi
 done
 
 # Always enable gateway (auto-start on reboot once key exists)
-systemctl enable osmoda-gateway.service
+svc_enable osmoda-gateway.service
 if [ -f "$STATE_DIR/config/api-key" ] || [ -f "$STATE_DIR/config/env" ]; then
   systemctl start osmoda-gateway.service
   log "OpenClaw gateway starting on port 18789..."
@@ -2137,7 +2141,7 @@ fi
 
 # Enable heartbeat timer if configured
 if [ -f "$SYSTEMD_DIR/osmoda-heartbeat.timer" ]; then
-  systemctl enable osmoda-heartbeat.timer
+  svc_enable osmoda-heartbeat.timer
   systemctl start osmoda-heartbeat.timer
   log "Heartbeat timer started (every 5 min)."
 fi
@@ -2258,7 +2262,7 @@ fi
 
 # Enable WS relay if configured
 if [ -f "$SYSTEMD_DIR/osmoda-ws-relay.service" ]; then
-  systemctl enable osmoda-ws-relay.service
+  svc_enable osmoda-ws-relay.service
   systemctl start osmoda-ws-relay.service
   log "WebSocket chat relay started."
 fi
