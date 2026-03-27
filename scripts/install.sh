@@ -338,11 +338,12 @@ fi
 
 # Ensure build tools for Rust
 if [ "$OS_TYPE" = "nixos" ]; then
-  # NixOS: install runtime tools via nix-env, build tools via nix-shell (later)
-  # nix-env gcc doesn't set up C headers properly — nix-shell does.
+  # NixOS: install runtime tools if not already in PATH
   log "Installing NixOS runtime dependencies..."
   for pkg in jq; do
-    nix-env -iA "nixos.$pkg" 2>/dev/null || true
+    if ! command -v "$pkg" &>/dev/null; then
+      nix-env -iA "nixos.$pkg" 2>/dev/null || nix-env -iA "nixpkgs.$pkg" 2>/dev/null || true
+    fi
   done
   USE_NIX_SHELL=true
 elif [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
@@ -363,7 +364,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # Ensure Node.js for OpenClaw
 if ! command -v node &>/dev/null; then
   if command -v nix-env &>/dev/null; then
-    nix-env -iA nixos.nodejs_22
+    nix-env -iA nixos.nodejs_22 2>/dev/null || nix-env -iA nixpkgs.nodejs_22 2>/dev/null || true
   elif command -v apt-get &>/dev/null; then
     log "Installing Node.js 22 via NodeSource..."
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -408,13 +409,31 @@ log "Step 4: Building all daemons (this takes 2-5 minutes on first build)..."
 cd "$INSTALL_DIR"
 BUILD_LOG=$(mktemp /tmp/osmoda-build-XXXXXX.log)
 if [ "${USE_NIX_SHELL:-false}" = true ]; then
-  # NixOS: nix-shell provides gcc wrapper with proper C headers + linker paths
-  log "Building inside nix-shell (gcc + pkg-config)..."
-  if ! nix-shell -p gcc pkg-config gnumake --run "export PATH=\"\$HOME/.cargo/bin:\$PATH\" && cargo build --release --workspace" 2>&1 | tee "$BUILD_LOG"; then
-    error "Build failed. Full output:"
-    cat "$BUILD_LOG"
-    rm -f "$BUILD_LOG"
-    die "Cargo build failed inside nix-shell. See errors above."
+  # NixOS: need gcc + pkg-config for Rust builds with C dependencies
+  if command -v gcc &>/dev/null && command -v pkg-config &>/dev/null; then
+    # gcc + pkg-config already in PATH (e.g. NixOS snapshot with pre-installed tools)
+    log "Build tools already in PATH, building directly..."
+    if ! cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
+      error "Build failed. Full output:"
+      cat "$BUILD_LOG"
+      rm -f "$BUILD_LOG"
+      die "Cargo build failed. See errors above."
+    fi
+  else
+    # Fallback: nix-shell provides gcc wrapper with proper C headers + linker paths
+    log "Building inside nix-shell (gcc + pkg-config)..."
+    # Ensure nix channels exist for nix-shell -p to work
+    if ! nix-shell -p gcc pkg-config gnumake --run "echo ok" &>/dev/null; then
+      log "Setting up nix channels..."
+      nix-channel --add https://nixos.org/channels/nixos-24.11 nixos 2>/dev/null || true
+      nix-channel --update 2>/dev/null || true
+    fi
+    if ! nix-shell -p gcc pkg-config gnumake --run "export PATH=\"\$HOME/.cargo/bin:\$PATH\" && cargo build --release --workspace" 2>&1 | tee "$BUILD_LOG"; then
+      error "Build failed. Full output:"
+      cat "$BUILD_LOG"
+      rm -f "$BUILD_LOG"
+      die "Cargo build failed inside nix-shell. See errors above."
+    fi
   fi
 else
   if ! cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
