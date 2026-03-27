@@ -854,8 +854,8 @@ ExecStart=$INSTALL_DIR/bin/agentd --socket $RUN_DIR/agentd.sock --state-dir $STA
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
-ExecStartPre=/bin/mkdir -p $RUN_DIR
-ExecStartPre=/bin/mkdir -p $STATE_DIR
+ExecStartPre=+/bin/sh -c 'mkdir -p $RUN_DIR'
+ExecStartPre=+/bin/sh -c 'mkdir -p $STATE_DIR'
 
 [Install]
 WantedBy=multi-user.target
@@ -1046,7 +1046,7 @@ EOF
 
 # app-restore script (restores managed apps on boot from registry.json)
 cat > "$INSTALL_DIR/bin/osmoda-app-restore.sh" <<'RESTOREOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # osModa App Process Restore — runs on boot to recreate transient units from registry
 # Skips apps marked as persistent (they have their own unit files)
 set -euo pipefail
@@ -1349,7 +1349,7 @@ After=osmoda-gateway.service
 Wants=osmoda-gateway.service
 [Service]
 Type=simple
-ExecStart=/usr/bin/env node $INSTALL_DIR/bin/osmoda-ws-relay.js
+ExecStart=/bin/sh -c 'exec node $INSTALL_DIR/bin/osmoda-ws-relay.js'
 Restart=always
 RestartSec=5
 Environment=NODE_PATH=$OPENCLAW_DIR/node_modules
@@ -1542,7 +1542,7 @@ fi
 
 # Collect recent events from agentd (3s timeout)
 RECENT_EVENTS="[]"
-if systemctl is-active agentd &>/dev/null; then
+if systemctl is-active osmoda-agentd &>/dev/null; then
   RECENT_EVENTS=$(curl -sf --max-time 3 --unix-socket "$RUN_DIR/agentd.sock" "http://l/events/log?limit=30" 2>/dev/null || echo "[]")
 fi
 
@@ -2208,7 +2208,7 @@ setTimeout(()=>process.exit(0),10000);
         warn "No pending pairing request found to approve"
       fi
     fi
-    2>&1 || warn "Device pairing failed (relay will work in read-only mode)"
+    # Device pairing attempted above; failures are non-fatal (relay retries)
   else
     warn "Gateway not responding — device pairing skipped (relay will retry)"
   fi
