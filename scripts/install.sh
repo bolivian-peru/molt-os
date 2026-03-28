@@ -79,6 +79,7 @@ ORDER_ID=""
 CALLBACK_URL=""
 HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
+RUNTIME="openclaw"  # openclaw or hermes
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -89,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --callback-url)      CALLBACK_URL="$2"; shift 2 ;;
     --heartbeat-secret)  HEARTBEAT_SECRET="$2"; shift 2 ;;
     --provider)          PROVIDER_TYPE="$2"; shift 2 ;;
+    --runtime)           RUNTIME="$2"; shift 2 ;;
     --help|-h)
       echo "osModa Installer v${VERSION}"
       echo ""
@@ -486,48 +488,122 @@ export PATH="$INSTALL_DIR/bin:$PATH"
 log "Build complete."
 
 # ---------------------------------------------------------------------------
-# Step 5: Install OpenClaw
+# Step 5: Install agent runtime (OpenClaw or Hermes)
 # ---------------------------------------------------------------------------
 report_progress "build" "done" "All daemons compiled"
-report_progress "openclaw" "started" "Installing OpenClaw AI gateway"
-log "Step 5: Installing OpenClaw AI gateway..."
+report_progress "openclaw" "started" "Installing agent runtime ($RUNTIME)"
+log "Step 5: Installing agent runtime ($RUNTIME)..."
 
-if ! command -v npm &>/dev/null; then
-  die "npm is required but not found. Install Node.js (>= 18) and retry."
-fi
-
-if ! command -v openclaw &>/dev/null; then
-  mkdir -p "$OPENCLAW_DIR"
-  cd "$OPENCLAW_DIR"
-  if [ ! -f package.json ]; then
-    npm init -y >/dev/null 2>&1
+if [ "$RUNTIME" = "hermes" ]; then
+  # ─── HERMES RUNTIME ───
+  log "Installing Hermes Agent..."
+  if ! command -v hermes &>/dev/null; then
+    if command -v nix &>/dev/null; then
+      nix profile install github:nousresearch/hermes-agent 2>&1 | tail -5
+    else
+      die "Hermes requires Nix package manager. Install NixOS or run on NixOS snapshot."
+    fi
   fi
-  npm install openclaw 2>&1 | tail -3 || die "Failed to install OpenClaw via npm. Check network and npm permissions."
-  ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
-  # NixOS: add to profile if /usr/local/bin doesn't work
-  echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
-  export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
+  log "Hermes $(hermes --version 2>/dev/null | head -1) installed."
+
+  # Install MCP bridge (gives Hermes access to all 90 osModa tools)
+  log "Setting up osModa MCP bridge (90 tools)..."
+  MCP_BRIDGE="$INSTALL_DIR/packages/osmoda-mcp-bridge"
+  cd "$MCP_BRIDGE"
+  npm install --production 2>&1 | tail -3
+  # Compile TypeScript if tsc available, otherwise use pre-compiled dist/
+  if command -v npx &>/dev/null && [ -f tsconfig.json ]; then
+    npx tsc 2>/dev/null || true
+  fi
+  log "MCP bridge installed with 90 system tools."
+
+  # Generate Hermes config
+  mkdir -p /root/.hermes
+  cat > /root/.hermes/config.yaml << HERMESCFG
+model:
+  default: "${PROVIDER_TYPE:-anthropic}/claude-sonnet-4-6"
+
+mcp_servers:
+  osmoda:
+    command: "node"
+    args: ["$MCP_BRIDGE/dist/index.js"]
+    env:
+      AGENTD_SOCKET: "/run/osmoda/agentd.sock"
+      KEYD_SOCKET: "/run/osmoda/keyd.sock"
+      WATCH_SOCKET: "/run/osmoda/watch.sock"
+      ROUTINES_SOCKET: "/run/osmoda/routines.sock"
+      MESH_SOCKET: "/run/osmoda/mesh.sock"
+      MCPD_SOCKET: "/run/osmoda/mcpd.sock"
+      TEACHD_SOCKET: "/run/osmoda/teachd.sock"
+      VOICE_SOCKET: "/run/osmoda/voice.sock"
+HERMESCFG
+
+  # Copy SOUL.md for agent identity
+  if [ -f "$INSTALL_DIR/templates/SOUL.md" ]; then
+    cp "$INSTALL_DIR/templates/SOUL.md" /root/.hermes/SOUL.md
+  fi
+
+  # Copy skills
+  if [ -d "$INSTALL_DIR/skills" ]; then
+    mkdir -p /root/.hermes/skills
+    cp -r "$INSTALL_DIR/skills/"* /root/.hermes/skills/ 2>/dev/null || true
+    log "Skills copied to Hermes."
+  fi
+
+  # Write Hermes .env with API key if provided
+  if [ -n "$API_KEY" ]; then
+    DECODED_KEY="$API_KEY"
+    if echo "$API_KEY" | grep -qE '^[A-Za-z0-9+/=]+$' && [ ${#API_KEY} -gt 50 ]; then
+      DECODED_KEY=$(echo "$API_KEY" | base64 -d 2>/dev/null) || DECODED_KEY="$API_KEY"
+    fi
+    echo "ANTHROPIC_API_KEY=$DECODED_KEY" > /root/.hermes/.env
+    chmod 600 /root/.hermes/.env
+  fi
+
+else
+  # ─── OPENCLAW RUNTIME (default) ───
+  log "Installing OpenClaw AI gateway..."
+
+  if ! command -v npm &>/dev/null; then
+    die "npm is required but not found. Install Node.js (>= 18) and retry."
+  fi
+
+  if ! command -v openclaw &>/dev/null; then
+    mkdir -p "$OPENCLAW_DIR"
+    cd "$OPENCLAW_DIR"
+    if [ ! -f package.json ]; then
+      npm init -y >/dev/null 2>&1
+    fi
+    npm install openclaw 2>&1 | tail -3 || die "Failed to install OpenClaw via npm. Check network and npm permissions."
+    ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
+    echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
+    export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
+  fi
+
+  log "OpenClaw installed."
 fi
 
-log "OpenClaw installed."
-
 # ---------------------------------------------------------------------------
-# Step 6: Set up osmoda-bridge plugin
+# Step 6: Set up tool bridge
 # ---------------------------------------------------------------------------
-report_progress "openclaw" "done" "OpenClaw installed"
-report_progress "bridge" "started" "Installing 90-tool bridge plugin"
-log "Step 6: Setting up osmoda-bridge plugin..."
+report_progress "openclaw" "done" "$RUNTIME runtime installed"
+report_progress "bridge" "started" "Setting up tool bridge"
+log "Step 6: Setting up tool bridge..."
 
-PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
-PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
-
-# Copy plugin to OpenClaw extensions (chown root — OpenClaw blocks non-root plugins)
-mkdir -p /root/.openclaw/extensions
-rm -rf "$PLUGIN_DST"
-cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
-chown -R root:root "$PLUGIN_DST"
-
-log "Bridge plugin installed with 90 system tools."
+if [ "$RUNTIME" = "hermes" ]; then
+  # Hermes uses MCP bridge (already set up in Step 5)
+  log "Hermes MCP bridge already configured (90 tools via MCP)."
+else
+  # OpenClaw uses osmoda-bridge plugin
+  log "Setting up osmoda-bridge plugin..."
+  PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
+  PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
+  mkdir -p /root/.openclaw/extensions
+  rm -rf "$PLUGIN_DST"
+  cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
+  chown -R root:root "$PLUGIN_DST"
+  log "Bridge plugin installed with 90 system tools."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)
@@ -611,6 +687,10 @@ if [ -n "$ORDER_ID" ]; then
     chmod 600 "$STATE_DIR/config/heartbeat-secret"
   fi
 fi
+
+# Store runtime choice
+printf '%s\n' "$RUNTIME" > "$STATE_DIR/config/runtime"
+chmod 644 "$STATE_DIR/config/runtime"
 
 # ---------------------------------------------------------------------------
 # Step 8: Set up API key (if provided) or generate placeholder config
@@ -902,7 +982,28 @@ ExecStartPre=+${MKDIR_BIN} -p $STATE_DIR
 WantedBy=multi-user.target
 EOF
 
-# OpenClaw gateway service
+# Agent runtime service (OpenClaw or Hermes)
+if [ "$RUNTIME" = "hermes" ]; then
+cat > "$SYSTEMD_DIR/osmoda-gateway.service" <<EOF
+[Unit]
+Description=osModa Gateway (Hermes Agent)
+After=network.target osmoda-agentd.service
+Wants=osmoda-agentd.service
+
+[Service]
+Type=simple
+ExecStart=/root/.nix-profile/bin/hermes gateway
+Restart=always
+RestartSec=5
+WorkingDirectory=/root
+EnvironmentFile=-/root/.hermes/.env
+Environment=HOME=/root
+Environment=HERMES_HOME=/root/.hermes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+else
 cat > "$SYSTEMD_DIR/osmoda-gateway.service" <<EOF
 [Unit]
 Description=osModa Gateway (OpenClaw)
@@ -930,6 +1031,7 @@ Environment=OSMODA_TEACHD_SOCKET=$RUN_DIR/teachd.sock
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
 # keyd
 cat > "$SYSTEMD_DIR/osmoda-keyd.service" <<EOF
