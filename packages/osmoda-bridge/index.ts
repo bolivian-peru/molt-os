@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 90 tools registered:
+ * 91 tools registered:
  *   agentd:   system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:   shell_exec, file_read, file_write, directory_list (4)
  *   systemd:  service_status, journal_logs (2)
@@ -23,7 +23,8 @@
  *   teach:    teach_status, teach_observations, teach_patterns, teach_knowledge, teach_knowledge_create,
  *             teach_context, teach_optimize_suggest, teach_optimize_apply,
  *             teach_skill_candidates, teach_skill_generate, teach_skill_promote,
- *             teach_observe_action, teach_skill_execution, teach_skill_detect (14, via osmoda-teachd)
+ *             teach_observe_action, teach_skill_execution, teach_skill_detect,
+ *             teach_skill_verify (15, via osmoda-teachd)
  *   approval: approval_request, approval_pending, approval_approve, approval_check (4, via agentd)
  *   sandbox:  sandbox_exec, capability_mint (2, via agentd)
  *   fleet:    fleet_propose, fleet_status, fleet_vote, fleet_rollback (4, via watch)
@@ -233,6 +234,7 @@ const SHELL_EXEC_WINDOW_MS = 60000;
 // Tools that should NOT be logged (prevents feedback loops with teachd)
 const TEACHD_SKIP_TOOLS = new Set([
   "teach_observe_action", "teach_skill_execution", "teach_skill_detect",
+  "teach_skill_verify",
   "teach_status", "teach_observations", "teach_patterns", "teach_knowledge",
   "teach_knowledge_create", "teach_context", "teach_optimize_suggest",
   "teach_optimize_apply", "teach_skill_candidates", "teach_skill_generate",
@@ -1960,6 +1962,21 @@ export default function register(api: any) {
       }
     },
   }), { names: ["teach_skill_detect"] });
+
+  // --- teach_skill_verify ---
+  api.registerTool(() => ({
+    name: "teach_skill_verify",
+    label: "Verify Skill Effectiveness",
+    description: "Manually trigger the skill verification cycle. Evaluates execution outcomes for all Generated and Promoted skills. Auto-promotes skills with 80%+ success rate (5+ runs), auto-rejects below 30%, and retires promoted skills that degrade below 40%. Normally runs every 30 minutes automatically.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, unknown>) {
+      try {
+        return { output: await teachdRequest("POST", "/skills/verify") };
+      } catch (e: any) {
+        return { output: JSON.stringify({ error: e.message }) };
+      }
+    },
+  }), { names: ["teach_skill_verify"] });
 
   // =========================================================================
   // Approval Gate tools (via agentd — destructive operation approval)

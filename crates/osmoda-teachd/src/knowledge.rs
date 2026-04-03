@@ -857,6 +857,7 @@ pub enum SkillCandidateStatus {
     Generated,
     Promoted,
     Rejected,
+    Retired,
 }
 
 impl std::fmt::Display for SkillCandidateStatus {
@@ -866,6 +867,7 @@ impl std::fmt::Display for SkillCandidateStatus {
             Self::Generated => write!(f, "generated"),
             Self::Promoted => write!(f, "promoted"),
             Self::Rejected => write!(f, "rejected"),
+            Self::Retired => write!(f, "retired"),
         }
     }
 }
@@ -877,6 +879,7 @@ impl SkillCandidateStatus {
             "generated" => Self::Generated,
             "promoted" => Self::Promoted,
             "rejected" => Self::Rejected,
+            "retired" => Self::Retired,
             _ => Self::Pending,
         }
     }

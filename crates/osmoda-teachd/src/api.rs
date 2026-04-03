@@ -31,6 +31,7 @@ pub struct HealthResponse {
     pub observer_running: bool,
     pub learner_running: bool,
     pub skillgen_running: bool,
+    pub verifier_running: bool,
 }
 
 pub async fn health_handler(State(state): State<SharedState>) -> Json<HealthResponse> {
@@ -55,6 +56,7 @@ pub async fn health_handler(State(state): State<SharedState>) -> Json<HealthResp
         observer_running: true,
         learner_running: true,
         skillgen_running: true,
+        verifier_running: true,
     })
 }
 
@@ -478,6 +480,17 @@ pub async fn skill_detect_handler(
     }))
 }
 
+// ── POST /skills/verify ──
+
+pub async fn skill_verify_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<crate::verifier::VerifyCycleResult>, (axum::http::StatusCode, String)> {
+    crate::verifier::run_verify_cycle(&state)
+        .await
+        .map(Json)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
 // ── GET /skills/candidates ──
 
 #[derive(Debug, Deserialize)]
@@ -673,6 +686,7 @@ mod tests {
             observer_running: true,
             learner_running: true,
             skillgen_running: true,
+            verifier_running: true,
         };
 
         let json = serde_json::to_value(&health).expect("serialize");
@@ -683,6 +697,7 @@ mod tests {
         assert_eq!(json["optimization_count"], 1);
         assert!(json["observer_running"].as_bool().unwrap());
         assert!(json["learner_running"].as_bool().unwrap());
+        assert!(json["verifier_running"].as_bool().unwrap());
     }
 
     #[test]

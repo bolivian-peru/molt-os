@@ -6,6 +6,7 @@ mod optimizer;
 mod receipt;
 mod skillgen;
 mod teacher;
+mod verifier;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -127,6 +128,13 @@ async fn main() {
         skillgen::skillgen_loop(skillgen_state, skillgen_cancel).await;
     });
 
+    // Spawn VERIFY loop (every 30m, evaluates skill execution outcomes → auto-promote/reject/retire)
+    let verifier_state = state.clone();
+    let verifier_cancel = cancel.clone();
+    tokio::spawn(async move {
+        verifier::verifier_loop(verifier_state, verifier_cancel).await;
+    });
+
     let app = Router::new()
         .route("/health", get(api::health_handler))
         .route("/observations", get(api::observations_handler))
@@ -149,6 +157,7 @@ async fn main() {
         .route("/skills/promote/{id}", post(api::skill_promote_handler))
         .route("/skills/execution", post(api::skill_execution_handler))
         .route("/skills/executions", get(api::skill_executions_list_handler))
+        .route("/skills/verify", post(api::skill_verify_handler))
         .layer(DefaultBodyLimit::max(1024 * 1024)) // 1 MiB
         .with_state(state.clone());
 

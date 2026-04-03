@@ -121,6 +121,13 @@ pub fn generate_skill_md(candidate: &SkillCandidate) -> String {
         ));
     }
 
+    // Add a final step instructing the agent to report execution outcome
+    steps.push_str(&format!(
+        "{}. **Report results** (required for skill learning):\n   ```\n   teach_skill_execution({{ skill_name: \"{}\", outcome: \"success\" | \"failure\" | \"partial\", notes: \"<what happened>\" }})\n   ```\n\n",
+        candidate.tools.len() + 1,
+        candidate.name,
+    ));
+
     format!(
         r#"---
 name: {}
