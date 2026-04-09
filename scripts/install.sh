@@ -35,6 +35,8 @@ INSTALL_DIR="/opt/osmoda"
 STATE_DIR="/var/lib/osmoda"
 RUN_DIR="/run/osmoda"
 OPENCLAW_DIR="/opt/openclaw"
+GATEWAY_DIR="$INSTALL_DIR/packages/osmoda-gateway"
+MCP_BRIDGE_DIR="$INSTALL_DIR/packages/osmoda-mcp-bridge"
 WORKSPACE_DIR="/root/workspace"
 
 # ---------------------------------------------------------------------------
@@ -79,6 +81,7 @@ ORDER_ID=""
 CALLBACK_URL=""
 HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
+RUNTIME="claude-code"  # claude-code (default) or openclaw (legacy)
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -89,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --callback-url)      CALLBACK_URL="$2"; shift 2 ;;
     --heartbeat-secret)  HEARTBEAT_SECRET="$2"; shift 2 ;;
     --provider)          PROVIDER_TYPE="$2"; shift 2 ;;
+    --runtime)           RUNTIME="$2"; shift 2 ;;
     --help|-h)
       echo "osModa Installer v${VERSION}"
       echo ""
@@ -486,48 +490,80 @@ export PATH="$INSTALL_DIR/bin:$PATH"
 log "Build complete."
 
 # ---------------------------------------------------------------------------
-# Step 5: Install OpenClaw
+# Step 5: Install agent runtime
 # ---------------------------------------------------------------------------
 report_progress "build" "done" "All daemons compiled"
-report_progress "openclaw" "started" "Installing OpenClaw AI gateway"
-log "Step 5: Installing OpenClaw AI gateway..."
+report_progress "openclaw" "started" "Installing agent runtime ($RUNTIME)"
+log "Step 5: Installing agent runtime ($RUNTIME)..."
 
 if ! command -v npm &>/dev/null; then
   die "npm is required but not found. Install Node.js (>= 18) and retry."
 fi
 
-if ! command -v openclaw &>/dev/null; then
-  mkdir -p "$OPENCLAW_DIR"
-  cd "$OPENCLAW_DIR"
-  if [ ! -f package.json ]; then
-    npm init -y >/dev/null 2>&1
+if [ "$RUNTIME" = "claude-code" ]; then
+  # ─── CLAUDE CODE SDK RUNTIME ───
+  log "Installing Claude Code SDK gateway..."
+
+  # Install @anthropic-ai/claude-code CLI (provides the 'claude' binary)
+  if ! command -v claude &>/dev/null; then
+    npm install -g @anthropic-ai/claude-code 2>&1 | tail -3 || warn "Claude Code CLI install failed (gateway will use PATH)"
   fi
-  npm install openclaw 2>&1 | tail -3 || die "Failed to install OpenClaw via npm. Check network and npm permissions."
-  ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
-  # NixOS: add to profile if /usr/local/bin doesn't work
-  echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
-  export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
+
+  # Build the osmoda-gateway (HTTP+WS server that spawns claude CLI with MCP tools)
+  cd "$GATEWAY_DIR"
+  if [ ! -d node_modules ]; then
+    npm install 2>&1 | tail -3 || die "Failed to install gateway dependencies"
+  fi
+  if [ ! -f dist/index.js ]; then
+    npx tsc 2>/dev/null || true  # dist/ should already be in repo, but compile if needed
+  fi
+
+  # Install MCP bridge dependencies (provides 91 tools via MCP protocol)
+  cd "$MCP_BRIDGE_DIR"
+  if [ ! -d node_modules ]; then
+    npm install 2>&1 | tail -3 || die "Failed to install MCP bridge dependencies"
+  fi
+
+  log "Claude Code SDK gateway installed."
+else
+  # ─── OPENCLAW RUNTIME (legacy) ───
+  log "Installing OpenClaw AI gateway..."
+
+  if ! command -v openclaw &>/dev/null; then
+    mkdir -p "$OPENCLAW_DIR"
+    cd "$OPENCLAW_DIR"
+    if [ ! -f package.json ]; then
+      npm init -y >/dev/null 2>&1
+    fi
+    npm install openclaw 2>&1 | tail -3 || die "Failed to install OpenClaw via npm. Check network and npm permissions."
+    ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
+    echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
+    export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
+  fi
+
+  log "OpenClaw installed."
 fi
 
-log "OpenClaw installed."
-
 # ---------------------------------------------------------------------------
-# Step 6: Set up osmoda-bridge plugin
+# Step 6: Set up tool bridge
 # ---------------------------------------------------------------------------
-report_progress "openclaw" "done" "OpenClaw installed"
-report_progress "bridge" "started" "Installing 90-tool bridge plugin"
-log "Step 6: Setting up osmoda-bridge plugin..."
+report_progress "openclaw" "done" "$RUNTIME runtime installed"
+report_progress "bridge" "started" "Setting up tool bridge (91 tools)"
+log "Step 6: Setting up tool bridge..."
 
-PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
-PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
-
-# Copy plugin to OpenClaw extensions (chown root — OpenClaw blocks non-root plugins)
-mkdir -p /root/.openclaw/extensions
-rm -rf "$PLUGIN_DST"
-cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
-chown -R root:root "$PLUGIN_DST"
-
-log "Bridge plugin installed with 90 system tools."
+if [ "$RUNTIME" = "claude-code" ]; then
+  # Claude Code uses MCP bridge (installed in Step 5)
+  log "MCP bridge ready with 91 tools (via osmoda-mcp-bridge)."
+else
+  # OpenClaw uses osmoda-bridge plugin
+  PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
+  PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
+  mkdir -p /root/.openclaw/extensions
+  rm -rf "$PLUGIN_DST"
+  cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
+  chown -R root:root "$PLUGIN_DST"
+  log "Bridge plugin installed with 91 system tools."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)
@@ -536,52 +572,66 @@ report_progress "bridge" "done" "90 tools registered"
 report_progress "workspaces" "started" "Setting up agent workspaces + skills"
 log "Step 7: Setting up multi-agent workspaces..."
 
-# OpenClaw multi-agent layout:
-#   ~/.openclaw/workspace-osmoda/  — main agent (Opus, full access)
-#   ~/.openclaw/workspace-mobile/  — mobile agent (Sonnet, full access, concise)
-#   ~/.openclaw/agents/<id>/agent/ — per-agent state + auth
-#   ~/.openclaw/agents/<id>/sessions/ — per-agent sessions
+# Multi-agent workspace layout:
+#   /root/workspace/               — main agent (Opus, full access) [shared]
+#   ~/.openclaw/workspace-osmoda/  — OpenClaw main workspace (legacy)
+#   ~/.openclaw/workspace-mobile/  — OpenClaw mobile workspace (legacy)
+#   /var/lib/osmoda/workspace-mobile/ — mobile agent workspace (Claude Code)
 OC_BASE="/root/.openclaw"
 WS_OSMODA="$OC_BASE/workspace-osmoda"
 WS_MOBILE="$OC_BASE/workspace-mobile"
+WS_MOBILE_CC="$STATE_DIR/workspace-mobile"
 
-mkdir -p "$WORKSPACE_DIR" "$WS_OSMODA" "$WS_MOBILE"
-mkdir -p "$OC_BASE/agents/osmoda/agent" "$OC_BASE/agents/osmoda/sessions"
-mkdir -p "$OC_BASE/agents/mobile/agent" "$OC_BASE/agents/mobile/sessions"
+mkdir -p "$WORKSPACE_DIR" "$WS_MOBILE_CC"
+if [ "$RUNTIME" = "openclaw" ]; then
+  mkdir -p "$WS_OSMODA" "$WS_MOBILE"
+  mkdir -p "$OC_BASE/agents/osmoda/agent" "$OC_BASE/agents/osmoda/sessions"
+  mkdir -p "$OC_BASE/agents/mobile/agent" "$OC_BASE/agents/mobile/sessions"
+fi
 
 # --- Main agent (osmoda): full templates + all skills ---
 for tpl in AGENTS.md SOUL.md TOOLS.md IDENTITY.md USER.md HEARTBEAT.md; do
   if [ -f "$INSTALL_DIR/templates/$tpl" ]; then
     cp "$INSTALL_DIR/templates/$tpl" "$WORKSPACE_DIR/$tpl"
-    cp "$INSTALL_DIR/templates/$tpl" "$WS_OSMODA/$tpl"
+    [ "$RUNTIME" = "openclaw" ] && cp "$INSTALL_DIR/templates/$tpl" "$WS_OSMODA/$tpl"
   fi
 done
 
 if [ -d "$INSTALL_DIR/skills" ]; then
-  mkdir -p "$WORKSPACE_DIR/skills" "$WS_OSMODA/skills"
+  mkdir -p "$WORKSPACE_DIR/skills"
   cp -r "$INSTALL_DIR/skills/"* "$WORKSPACE_DIR/skills/" 2>/dev/null || true
-  cp -r "$INSTALL_DIR/skills/"* "$WS_OSMODA/skills/" 2>/dev/null || true
+  if [ "$RUNTIME" = "openclaw" ]; then
+    mkdir -p "$WS_OSMODA/skills"
+    cp -r "$INSTALL_DIR/skills/"* "$WS_OSMODA/skills/" 2>/dev/null || true
+  fi
 fi
 
 # --- Mobile agent: mobile-specific templates (concise style, full access) ---
 if [ -d "$INSTALL_DIR/templates/agents/mobile" ]; then
-  cp "$INSTALL_DIR/templates/agents/mobile/AGENTS.md" "$WS_MOBILE/AGENTS.md"
-  cp "$INSTALL_DIR/templates/agents/mobile/SOUL.md" "$WS_MOBILE/SOUL.md"
+  cp "$INSTALL_DIR/templates/agents/mobile/AGENTS.md" "$WS_MOBILE_CC/AGENTS.md"
+  cp "$INSTALL_DIR/templates/agents/mobile/SOUL.md" "$WS_MOBILE_CC/SOUL.md"
+  if [ "$RUNTIME" = "openclaw" ]; then
+    cp "$INSTALL_DIR/templates/agents/mobile/AGENTS.md" "$WS_MOBILE/AGENTS.md"
+    cp "$INSTALL_DIR/templates/agents/mobile/SOUL.md" "$WS_MOBILE/SOUL.md"
+  fi
 fi
 # Share TOOLS.md and IDENTITY.md from main templates
 for tpl in TOOLS.md IDENTITY.md USER.md; do
   if [ -f "$INSTALL_DIR/templates/$tpl" ]; then
-    cp "$INSTALL_DIR/templates/$tpl" "$WS_MOBILE/$tpl"
+    cp "$INSTALL_DIR/templates/$tpl" "$WS_MOBILE_CC/$tpl"
+    [ "$RUNTIME" = "openclaw" ] && cp "$INSTALL_DIR/templates/$tpl" "$WS_MOBILE/$tpl"
   fi
 done
 
 # Mobile skills: all skills (same as main agent)
 MOBILE_SKILLS="self-healing morning-briefing security-hardening natural-language-config predictive-resources drift-detection generation-timeline flight-recorder nix-optimizer system-monitor system-packages system-config file-manager network-manager service-explorer app-deployer deploy-ai-agent swarm-predict scaled-swarm-predict"
 if [ -d "$INSTALL_DIR/skills" ]; then
-  mkdir -p "$WS_MOBILE/skills"
+  mkdir -p "$WS_MOBILE_CC/skills"
+  [ "$RUNTIME" = "openclaw" ] && mkdir -p "$WS_MOBILE/skills"
   for skill in $MOBILE_SKILLS; do
     if [ -d "$INSTALL_DIR/skills/$skill" ]; then
-      cp -r "$INSTALL_DIR/skills/$skill" "$WS_MOBILE/skills/$skill"
+      cp -r "$INSTALL_DIR/skills/$skill" "$WS_MOBILE_CC/skills/$skill"
+      [ "$RUNTIME" = "openclaw" ] && cp -r "$INSTALL_DIR/skills/$skill" "$WS_MOBILE/skills/$skill"
     fi
   done
 fi
@@ -612,6 +662,10 @@ if [ -n "$ORDER_ID" ]; then
   fi
 fi
 
+# Store runtime choice
+printf '%s\n' "$RUNTIME" > "$STATE_DIR/config/runtime"
+chmod 644 "$STATE_DIR/config/runtime"
+
 # ---------------------------------------------------------------------------
 # Step 8: Set up API key (if provided) or generate placeholder config
 # ---------------------------------------------------------------------------
@@ -639,7 +693,39 @@ if [ -n "$API_KEY" ]; then
   fi
   chmod 600 "$STATE_DIR/config/env"
 
-  # Write OpenClaw auth-profiles.json for BOTH agents (shared API key)
+  # Write auth profiles (OpenClaw) or gateway config (Claude Code)
+  if [ "$RUNTIME" = "claude-code" ]; then
+    # Claude Code: generate gateway.json (no auth-profiles needed)
+    GATEWAY_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
+    printf '%s' "$GATEWAY_TOKEN" > "$STATE_DIR/config/gateway-token"
+    chmod 600 "$STATE_DIR/config/gateway-token"
+
+    if command -v node &>/dev/null; then
+      node - "$GATEWAY_TOKEN" <<'GWCONFIGEOF'
+const fs = require('fs');
+const gwToken = process.argv[2] || '';
+const config = {
+  port: 18789,
+  authToken: gwToken,
+  agents: [
+    { id: 'osmoda', model: 'claude-opus-4-6', "default": true, systemPromptFile: '/root/workspace/SOUL.md' },
+    { id: 'mobile', model: 'claude-sonnet-4-6', systemPromptFile: '/var/lib/osmoda/workspace-mobile/SOUL.md' }
+  ],
+  bindings: [
+    { agentId: 'mobile', channel: 'telegram' },
+    { agentId: 'mobile', channel: 'whatsapp' }
+  ],
+  mcpBridgePath: '/opt/osmoda/packages/osmoda-mcp-bridge/dist/index.js'
+};
+fs.mkdirSync('/var/lib/osmoda/config', { recursive: true });
+fs.writeFileSync('/var/lib/osmoda/config/gateway.json', JSON.stringify(config, null, 2));
+GWCONFIGEOF
+      log "Gateway config written to $STATE_DIR/config/gateway.json"
+    fi
+  fi
+
+  # Write OpenClaw auth-profiles.json for BOTH agents (shared API key) — only for openclaw runtime
+  if [ "$RUNTIME" = "openclaw" ]; then
   for AGENT_ID in osmoda mobile; do
     mkdir -p "/root/.openclaw/agents/$AGENT_ID/agent"
     if command -v node &>/dev/null; then
@@ -665,15 +751,18 @@ AUTHEOF
       fi
     fi
   done
+  fi  # end RUNTIME=openclaw auth-profiles block
 
-  # Generate gateway token for WS relay auth
+  # Generate gateway token for WS relay auth (needed by both runtimes)
+  if [ ! -f "$STATE_DIR/config/gateway-token" ]; then
   GATEWAY_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
   printf '%s' "$GATEWAY_TOKEN" > "$STATE_DIR/config/gateway-token"
   chmod 600 "$STATE_DIR/config/gateway-token"
   log "Generated gateway token for relay auth"
+  fi  # end gateway-token generation
 
-  # Generate multi-agent OpenClaw config with env block + compaction
-  if command -v node &>/dev/null; then
+  # Generate multi-agent OpenClaw config with env block + compaction (openclaw only)
+  if [ "$RUNTIME" = "openclaw" ] && command -v node &>/dev/null; then
     node - "$GATEWAY_TOKEN" "$DECODED_KEY" "$EFFECTIVE_PROVIDER" <<'CONFIGEOF'
 const fs = require('fs');
 const gwToken = process.argv[2] || '';
@@ -744,13 +833,39 @@ GWEOF
 else
   log "Step 8: No API key provided — generating gateway config (key can be set via dashboard)."
 
-  # Still need gateway token + openclaw.json even without API key
+  # Still need gateway token even without API key
   GATEWAY_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 64)
   printf '%s' "$GATEWAY_TOKEN" > "$STATE_DIR/config/gateway-token"
   chmod 600 "$STATE_DIR/config/gateway-token"
 
-  if command -v node &>/dev/null; then
-    node - "$GATEWAY_TOKEN" <<'CONFIGEOF'
+  if [ "$RUNTIME" = "claude-code" ]; then
+    # Claude Code: write gateway.json (no API key, gateway won't start until key is set)
+    if command -v node &>/dev/null; then
+      node - "$GATEWAY_TOKEN" <<'GWCONFIGEOF'
+const fs = require('fs');
+const gwToken = process.argv[2] || '';
+const config = {
+  port: 18789,
+  authToken: gwToken,
+  agents: [
+    { id: 'osmoda', model: 'claude-opus-4-6', "default": true, systemPromptFile: '/root/workspace/SOUL.md' },
+    { id: 'mobile', model: 'claude-sonnet-4-6', systemPromptFile: '/var/lib/osmoda/workspace-mobile/SOUL.md' }
+  ],
+  bindings: [
+    { agentId: 'mobile', channel: 'telegram' },
+    { agentId: 'mobile', channel: 'whatsapp' }
+  ],
+  mcpBridgePath: '/opt/osmoda/packages/osmoda-mcp-bridge/dist/index.js'
+};
+fs.mkdirSync('/var/lib/osmoda/config', { recursive: true });
+fs.writeFileSync('/var/lib/osmoda/config/gateway.json', JSON.stringify(config, null, 2));
+GWCONFIGEOF
+      log "Gateway config written (no API key — set via dashboard)"
+    fi
+  else
+    # OpenClaw: write openclaw.json
+    if command -v node &>/dev/null; then
+      node - "$GATEWAY_TOKEN" <<'CONFIGEOF'
 const fs = require('fs');
 const gwToken = process.argv[2] || '';
 const config = {
@@ -758,35 +873,18 @@ const config = {
   gateway: { mode: 'local', auth: gwToken ? { mode: 'token', token: gwToken } : { mode: 'none' } },
   plugins: { allow: ['osmoda-bridge', 'device-pair', 'memory-core', 'phone-control', 'talk-voice'] },
   agents: {
-    defaults: {
-      compaction: { mode: 'safeguard' }
-    },
+    defaults: { compaction: { mode: 'safeguard' } },
     list: [
-      {
-        id: 'osmoda',
-        default: true,
-        name: 'osModa',
-        workspace: '/root/.openclaw/workspace-osmoda',
-        agentDir: '/root/.openclaw/agents/osmoda/agent',
-        model: 'anthropic/claude-opus-4-6'
-      },
-      {
-        id: 'mobile',
-        name: 'osModa Mobile',
-        workspace: '/root/.openclaw/workspace-mobile',
-        agentDir: '/root/.openclaw/agents/mobile/agent',
-        model: 'anthropic/claude-sonnet-4-6'
-      }
+      { id: 'osmoda', default: true, name: 'osModa', workspace: '/root/.openclaw/workspace-osmoda', agentDir: '/root/.openclaw/agents/osmoda/agent', model: 'anthropic/claude-opus-4-6' },
+      { id: 'mobile', name: 'osModa Mobile', workspace: '/root/.openclaw/workspace-mobile', agentDir: '/root/.openclaw/agents/mobile/agent', model: 'anthropic/claude-sonnet-4-6' }
     ]
   },
-  bindings: [
-    { agentId: 'mobile', match: { channel: 'telegram' } },
-    { agentId: 'mobile', match: { channel: 'whatsapp' } }
-  ]
+  bindings: [ { agentId: 'mobile', match: { channel: 'telegram' } }, { agentId: 'mobile', match: { channel: 'whatsapp' } } ]
 };
 fs.writeFileSync('/root/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
 CONFIGEOF
-    log "Multi-agent config written (no API key — set via dashboard)"
+      log "Multi-agent config written (no API key — set via dashboard)"
+    fi
   fi
 
   # Gateway env vars for daemon sockets
@@ -802,22 +900,27 @@ OSMODA_TEACHD_SOCKET=/run/osmoda/teachd.sock
 GWEOF
   chmod 600 "$STATE_DIR/config/gateway-env"
 
-  # Create placeholder auth-profiles for both agents (user will set key later)
-  for AGENT_ID in osmoda mobile; do
-    mkdir -p "/root/.openclaw/agents/$AGENT_ID/agent"
-    cat > "/root/.openclaw/agents/$AGENT_ID/agent/auth-profiles.json" <<'AUTHEOF'
+  # Create placeholder auth-profiles for openclaw agents (user will set key later)
+  if [ "$RUNTIME" = "openclaw" ]; then
+    for AGENT_ID in osmoda mobile; do
+      mkdir -p "/root/.openclaw/agents/$AGENT_ID/agent"
+      cat > "/root/.openclaw/agents/$AGENT_ID/agent/auth-profiles.json" <<'AUTHEOF'
 {"type":"api_key","provider":"anthropic","key":""}
 AUTHEOF
-  done
-  log "Placeholder auth-profiles created (key will be set by user)."
+    done
+    log "Placeholder auth-profiles created (key will be set by user)."
+  fi
 fi
 
 # ---------------------------------------------------------------------------
-# Step 8b: Generate OpenClaw device identity keypair for WS relay
+# Step 8b: Generate device identity keypair for WS relay
 # ---------------------------------------------------------------------------
-# The WS relay needs a paired device identity with operator.write scope.
-# Generate the keypair now; pairing happens after the gateway starts (Step 9).
-IDENTITY_DIR="/root/.openclaw/identity"
+# The WS relay needs a device identity for authenticating with the spawn server.
+if [ "$RUNTIME" = "claude-code" ]; then
+  IDENTITY_DIR="$STATE_DIR/identity"
+else
+  IDENTITY_DIR="/root/.openclaw/identity"
+fi
 if [ ! -f "$IDENTITY_DIR/device.json" ]; then
   log "Generating Ed25519 device identity keypair..."
   mkdir -p "$IDENTITY_DIR"
@@ -843,7 +946,7 @@ fi
 # Step 9: Create and start systemd services
 # ---------------------------------------------------------------------------
 report_progress "apikey" "done" "Auth profiles written"
-report_progress "services" "started" "Starting 9 daemons + OpenClaw gateway"
+report_progress "services" "started" "Starting 9 daemons + gateway"
 log "Step 9: Starting services..."
 
 if [ "$OS_TYPE" = "nixos" ]; then
@@ -902,7 +1005,37 @@ ExecStartPre=+${MKDIR_BIN} -p $STATE_DIR
 WantedBy=multi-user.target
 EOF
 
-# OpenClaw gateway service
+# Agent gateway service (runtime-dependent)
+if [ "$RUNTIME" = "claude-code" ]; then
+cat > "$SYSTEMD_DIR/osmoda-gateway.service" <<EOF
+[Unit]
+Description=osModa Gateway (Claude Code SDK)
+After=network.target osmoda-agentd.service
+Wants=osmoda-agentd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node $GATEWAY_DIR/dist/index.js
+Restart=always
+RestartSec=5
+WorkingDirectory=/root
+EnvironmentFile=-$STATE_DIR/config/env
+Environment=HOME=/root
+Environment=NODE_ENV=production
+Environment=OSMODA_GATEWAY_CONFIG=$STATE_DIR/config/gateway.json
+Environment=OSMODA_SOCKET=$RUN_DIR/agentd.sock
+Environment=OSMODA_KEYD_SOCKET=$RUN_DIR/keyd.sock
+Environment=OSMODA_WATCH_SOCKET=$RUN_DIR/watch.sock
+Environment=OSMODA_ROUTINES_SOCKET=$RUN_DIR/routines.sock
+Environment=OSMODA_VOICE_SOCKET=$RUN_DIR/voice.sock
+Environment=OSMODA_MESH_SOCKET=$RUN_DIR/mesh.sock
+Environment=OSMODA_MCPD_SOCKET=$RUN_DIR/mcpd.sock
+Environment=OSMODA_TEACHD_SOCKET=$RUN_DIR/teachd.sock
+
+[Install]
+WantedBy=multi-user.target
+EOF
+else
 cat > "$SYSTEMD_DIR/osmoda-gateway.service" <<EOF
 [Unit]
 Description=osModa Gateway (OpenClaw)
@@ -930,6 +1063,7 @@ Environment=OSMODA_TEACHD_SOCKET=$RUN_DIR/teachd.sock
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
 # keyd
 cat > "$SYSTEMD_DIR/osmoda-keyd.service" <<EOF
@@ -1197,19 +1331,20 @@ ExecStart=/opt/osmoda/bin/osmoda-app-restore.sh
 WantedBy=multi-user.target
 AREOF
 
-# WebSocket relay (bridges dashboard chat to OpenClaw gateway)
+# WebSocket relay (bridges dashboard chat to local gateway)
 if [ -n "$ORDER_ID" ] && [ -n "$CALLBACK_URL" ]; then
 
 cat > "$INSTALL_DIR/bin/osmoda-ws-relay.js" <<'WSEOF'
 #!/usr/bin/env node
-// osModa WS Relay — bridges spawn.os.moda dashboard to local OpenClaw gateway.
-// Uses device identity for proper scope binding (operator.write required for chat.send).
+// osModa WS Relay — bridges spawn.os.moda dashboard to local gateway.
+// Supports both Claude Code SDK gateway and OpenClaw gateway (auto-detects).
 const WebSocket = require("ws");
 const fs = require("fs");
 const crypto = require("crypto");
 
 const STATE_DIR = "/var/lib/osmoda";
-const IDENTITY_DIR = "/root/.openclaw/identity";
+const RUNTIME = (() => { try { return fs.readFileSync(`${STATE_DIR}/config/runtime`, "utf8").trim(); } catch { return "openclaw"; } })();
+const IDENTITY_DIR = RUNTIME === "claude-code" ? `${STATE_DIR}/identity` : "/root/.openclaw/identity";
 const RECONNECT_DELAY = 5000;
 const OC_URL = "ws://127.0.0.1:18789";
 
@@ -1245,7 +1380,7 @@ function connect() {
   }
 
   const identity = loadDeviceIdentity();
-  if (!identity) {
+  if (!identity && RUNTIME === "openclaw") {
     console.error("[ws-relay] no device identity, retrying in 30s...");
     setTimeout(connect, 30000);
     return;
@@ -1268,6 +1403,42 @@ function connect() {
   let pendingChat = {};
   let instanceId = uid();
 
+  // ─── Claude Code SDK: simple WS protocol ───
+  function connectClaudeCode() {
+    const gwToken = readConfig("gateway-token");
+    local = new WebSocket(`${OC_URL}/ws`, {
+      headers: { "Authorization": `Bearer ${gwToken}` },
+    });
+    local.on("open", () => {
+      ocReady = true;
+      console.log("[ws-relay] connected to Claude Code gateway");
+      if (upstream.readyState === WebSocket.OPEN) {
+        upstream.send(JSON.stringify({ type: "status", openclaw_connected: true, gateway_connected: true }));
+      }
+    });
+    local.on("message", (data) => {
+      let msg;
+      try { msg = JSON.parse(data.toString()); } catch { return; }
+      // Forward gateway events to upstream (spawn dashboard)
+      // Convert from gateway format to spawn-expected format
+      if (msg.type === "text") {
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "assistant", data: { delta: msg.text } } }));
+      } else if (msg.type === "tool_use") {
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_use", data: { name: msg.name } } }));
+      } else if (msg.type === "done") {
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "end" } }));
+      } else if (msg.type === "error") {
+        upstream.send(JSON.stringify({ type: "event", event: "error", payload: { message: msg.text } }));
+      }
+    });
+    local.on("close", () => {
+      console.log("[ws-relay] gateway disconnected, reconnecting...");
+      ocReady = false; upstream.close();
+    });
+    local.on("error", (err) => console.error("[ws-relay] gateway error:", err.message));
+  }
+
+  // ─── OpenClaw: complex challenge/device identity protocol ───
   function sendOcConnect() {
     connectId = uid();
     const deviceToken = identity.auth.tokens?.operator?.token;
@@ -1291,7 +1462,6 @@ function connect() {
       const now = Date.now();
       const authToken = readConfig("gateway-token") || deviceToken || "";
       const scopeStr = params.scopes.join(",");
-      // v3: v3|deviceId|clientId|clientMode|role|scopes|signedAt|token|nonce|platform|deviceFamily
       const payload = `v3|${deviceId}|${params.client.id}|${params.client.mode}|${params.role}|${scopeStr}|${now}|${authToken}|${challengeNonce}|${params.client.platform}|`;
       params.device.signature = signPayload(identity.device.privateKeyPem, payload);
       params.device.nonce = challengeNonce;
@@ -1301,8 +1471,7 @@ function connect() {
     local.send(JSON.stringify({ type: "req", id: connectId, method: "connect", params }));
   }
 
-  upstream.on("open", () => {
-    console.log("[ws-relay] connected to spawn server");
+  function connectOpenClaw() {
     local = new WebSocket(OC_URL, { headers: { origin: "http://127.0.0.1:18789" } });
 
     local.on("open", () => {
@@ -1348,6 +1517,15 @@ function connect() {
       ocReady = false; challengeNonce = null; upstream.close();
     });
     local.on("error", (err) => console.error("[ws-relay] OpenClaw error:", err.message));
+  }
+
+  upstream.on("open", () => {
+    console.log("[ws-relay] connected to spawn server");
+    if (RUNTIME === "claude-code") {
+      connectClaudeCode();
+    } else {
+      connectOpenClaw();
+    }
   });
 
   upstream.on("message", (data) => {
@@ -1356,17 +1534,27 @@ function connect() {
     try { msg = JSON.parse(data.toString()); } catch { return; }
 
     if (msg.type === "chat" && msg.text) {
-      const reqId = uid();
-      pendingChat[reqId] = true;
-      local.send(JSON.stringify({
-        type: "req", id: reqId, method: "chat.send",
-        params: { message: msg.text, idempotencyKey: reqId, sessionKey: sessionKey }
-      }));
-      console.log("[ws-relay] chat.send:", msg.text.slice(0, 50));
+      if (RUNTIME === "claude-code") {
+        // Claude Code gateway: simple chat message
+        local.send(JSON.stringify({ type: "chat", text: msg.text, sessionKey: sessionKey }));
+      } else {
+        // OpenClaw: chat.send RPC
+        const reqId = uid();
+        pendingChat[reqId] = true;
+        local.send(JSON.stringify({
+          type: "req", id: reqId, method: "chat.send",
+          params: { message: msg.text, idempotencyKey: reqId, sessionKey: sessionKey }
+        }));
+      }
+      console.log("[ws-relay] chat:", msg.text.slice(0, 50));
       return;
     }
     if (msg.type === "chat_abort") {
-      local.send(JSON.stringify({ type: "req", id: uid(), method: "chat.abort", params: { sessionKey } }));
+      if (RUNTIME === "claude-code") {
+        local.send(JSON.stringify({ type: "abort" }));
+      } else {
+        local.send(JSON.stringify({ type: "req", id: uid(), method: "chat.abort", params: { sessionKey } }));
+      }
     }
   });
 
@@ -1393,7 +1581,7 @@ Type=simple
 ExecStart=/bin/sh -c 'exec node $INSTALL_DIR/bin/osmoda-ws-relay.js'
 Restart=always
 RestartSec=5
-Environment=NODE_PATH=$OPENCLAW_DIR/node_modules
+Environment=NODE_PATH=$INSTALL_DIR/packages/osmoda-gateway/node_modules:$OPENCLAW_DIR/node_modules
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -1447,9 +1635,11 @@ if [ -f "$MESH_SERVICE_FILE" ] && ! grep -q "listen-addr 0.0.0.0" "$MESH_SERVICE
   fi
 fi
 
-# Self-heal Telegram security: close open access on existing servers (one-time migration)
+# Self-heal Telegram security: close open access on existing servers (one-time migration) — openclaw only
+RUNTIME_CFG=$(cat "$STATE_DIR/config/runtime" 2>/dev/null || echo "openclaw")
 OPENCLAW_CONFIG="/root/.openclaw/openclaw.json"
-if [ -f "$OPENCLAW_CONFIG" ] && command -v node >/dev/null 2>&1; then
+GATEWAY_CONFIG="$STATE_DIR/config/gateway.json"
+if [ "$RUNTIME_CFG" = "openclaw" ] && [ -f "$OPENCLAW_CONFIG" ] && command -v node >/dev/null 2>&1; then
   # Check returns exit 1 ONLY if wildcard found; exit 0 for clean or errors
   if node - <<'TGCHKEOF'
 try{var c=JSON.parse(require('fs').readFileSync('/root/.openclaw/openclaw.json','utf8'));
@@ -1506,13 +1696,24 @@ if [ -f "$COMPLETED_FILE" ] && [ -s "$COMPLETED_FILE" ]; then
   COMPLETED_JSON=$(cat "$COMPLETED_FILE")
 fi
 
-# Collect agent instances (enriched from openclaw.json)
+# Collect agent instances (from gateway.json or openclaw.json)
 AGENTS_JSON="[]"
-if [ -d /root/.openclaw/agents ]; then
-  GW_ACTIVE="false"
-  systemctl is-active osmoda-gateway.service >/dev/null 2>&1 && GW_ACTIVE="true"
+GW_ACTIVE="false"
+systemctl is-active osmoda-gateway.service >/dev/null 2>&1 && GW_ACTIVE="true"
 
-  # Parse openclaw.json for model + binding info
+if [ "$RUNTIME_CFG" = "claude-code" ] && [ -f "$GATEWAY_CONFIG" ]; then
+  # Claude Code: parse gateway.json for agent info
+  AGENTS_JSON=$(jq -c --arg status "$([ "$GW_ACTIVE" = "true" ] && echo running || echo stopped)" \
+    '[.agents[]? | {name: .id, status: $status, model: .model, channels: [], "default": (.default // false)}]' \
+    "$GATEWAY_CONFIG" 2>/dev/null || echo "[]")
+  # Enrich with binding channels
+  for agent_id in $(jq -r '.agents[]?.id' "$GATEWAY_CONFIG" 2>/dev/null); do
+    ACHANNELS=$(jq -c --arg id "$agent_id" '[.bindings[]? | select(.agentId == $id) | .channel]' "$GATEWAY_CONFIG" 2>/dev/null || echo "[]")
+    AGENTS_JSON=$(echo "$AGENTS_JSON" | jq --arg id "$agent_id" --argjson ch "$ACHANNELS" \
+      '[.[] | if .name == $id then .channels = $ch else . end]')
+  done
+elif [ -d /root/.openclaw/agents ]; then
+  # OpenClaw: parse openclaw.json + agent dirs
   OC_CONFIG=""
   [ -f /root/.openclaw/openclaw.json ] && OC_CONFIG=$(cat /root/.openclaw/openclaw.json 2>/dev/null)
 
@@ -1522,7 +1723,6 @@ if [ -d /root/.openclaw/agents ]; then
     ASTATUS="stopped"
     [ "$GW_ACTIVE" = "true" ] && ASTATUS="running"
 
-    # Extract model + channels from openclaw.json
     AMODEL=""
     ACHANNELS="[]"
     ADEFAULT="false"
@@ -1729,7 +1929,8 @@ PAYLOAD=$(jq -n \
   --argjson teachd_patterns "$TEACHD_PATTERNS" \
   --argjson mcp_servers "$MCP_SERVERS" \
   --argjson apps "$APPS_JSON" \
-  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers, routines: $routines, routine_history: $routine_history, watchers: $watchers, switch_sessions: $switch_sessions, nixos_generation: $nixos_generation, recent_events: $recent_events, teachd_health: $teachd_health, teachd_patterns: $teachd_patterns, mcp_servers: $mcp_servers, apps: $apps}'
+  --arg runtime "$RUNTIME_CFG" \
+  '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: $oc_ready, gateway_ready: $oc_ready, runtime: $runtime, health: {cpu: $cpu, ram: $ram, disk: $disk, uptime: $uptime}, completed_actions: $completed, agents: $agents, daemon_health: $daemon_health, mesh_identity: $mesh_identity, mesh_peers: $mesh_peers, routines: $routines, routine_history: $routine_history, watchers: $watchers, switch_sessions: $switch_sessions, nixos_generation: $nixos_generation, recent_events: $recent_events, teachd_health: $teachd_health, teachd_patterns: $teachd_patterns, mcp_servers: $mcp_servers, apps: $apps}'
 )
 
 # Send heartbeat (with HMAC signature if secret is set)
@@ -1872,22 +2073,23 @@ DECEOF
           printf 'ANTHROPIC_API_KEY=%s\n' "$AKEY" > "$STATE_DIR/config/env"
         fi
         chmod 600 "$STATE_DIR/config/env"
-        # Update auth-profiles.json for all agents
-        SAFE_PROVIDER="anthropic"
-        if [ "$APROVIDER" = "openai" ]; then SAFE_PROVIDER="openai"; fi
-        # Detect OAuth tokens (sk-ant-oat prefix) for correct auth type
-        AUTH_TYPE="api_key"
-        AUTH_FIELD="key"
-        if [ "$SAFE_PROVIDER" = "anthropic" ] && echo "$AKEY" | grep -q '^sk-ant-oat'; then
-          AUTH_TYPE="token"
-          AUTH_FIELD="token"
+        # Update auth-profiles.json for all agents (openclaw only)
+        if [ "$RUNTIME_CFG" = "openclaw" ]; then
+          SAFE_PROVIDER="anthropic"
+          if [ "$APROVIDER" = "openai" ]; then SAFE_PROVIDER="openai"; fi
+          AUTH_TYPE="api_key"
+          AUTH_FIELD="key"
+          if [ "$SAFE_PROVIDER" = "anthropic" ] && echo "$AKEY" | grep -q '^sk-ant-oat'; then
+            AUTH_TYPE="token"
+            AUTH_FIELD="token"
+          fi
+          for _AGID in osmoda mobile; do
+            mkdir -p "/root/.openclaw/agents/$_AGID/agent"
+            jq -n --arg type "$AUTH_TYPE" --arg provider "$SAFE_PROVIDER" --arg key "$AKEY" --arg field "$AUTH_FIELD" \
+              '{type: $type, provider: $provider, ($field): $key}' \
+              > "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
+          done
         fi
-        for _AGID in osmoda mobile; do
-          mkdir -p "/root/.openclaw/agents/$_AGID/agent"
-          jq -n --arg type "$AUTH_TYPE" --arg provider "$SAFE_PROVIDER" --arg key "$AKEY" --arg field "$AUTH_FIELD" \
-            '{type: $type, provider: $provider, ($field): $key}' \
-            > "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
-        done
         # Ensure gateway token exists for relay auth
         HBGWTOKEN=""
         if [ -f "$STATE_DIR/config/gateway-token" ]; then
@@ -1898,8 +2100,8 @@ DECEOF
           printf '%s' "$HBGWTOKEN" > "$STATE_DIR/config/gateway-token"
           chmod 600 "$STATE_DIR/config/gateway-token"
         fi
-        # Create or update openclaw.json — ALWAYS patch env block with API key
-        if command -v node >/dev/null 2>&1; then
+        # Create or update config — ALWAYS patch env block with API key
+        if [ "$RUNTIME_CFG" = "openclaw" ] && command -v node >/dev/null 2>&1; then
           node - "$HBGWTOKEN" "$AKEY" "$SAFE_PROVIDER" <<'HBCONFIGEOF'
 var fs = require('fs'), t = process.argv[2] || '', apiKey = process.argv[3], provider = process.argv[4];
 var configPath = '/root/.openclaw/openclaw.json';
@@ -1955,9 +2157,11 @@ GWENVEOF
     remove_api_key)
       # Remove API key + stop gateway
       rm -f "$STATE_DIR/config/api-key" "$STATE_DIR/config/env"
-      for _AGID in osmoda mobile; do
-        rm -f "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
-      done
+      if [ "$RUNTIME_CFG" = "openclaw" ]; then
+        for _AGID in osmoda mobile; do
+          rm -f "/root/.openclaw/agents/$_AGID/agent/auth-profiles.json"
+        done
+      fi
       systemctl stop osmoda-gateway.service 2>/dev/null || true
       systemctl disable osmoda-gateway.service 2>/dev/null || true
       NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
@@ -1993,8 +2197,18 @@ DECEOF
         mkdir -p "$STATE_DIR/secrets"
         printf '%s' "$ATOKEN" > "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
         chmod 600 "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
-        # Update openclaw.json to add channel config with user whitelist
-        if command -v node >/dev/null 2>&1; then
+        # Update config to add channel
+        if [ "$RUNTIME_CFG" = "claude-code" ] && [ -f "$GATEWAY_CONFIG" ] && command -v node >/dev/null 2>&1; then
+          node - "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" "$ALLOWED_USERS" <<'GWCHADDEOF'
+var fs=require('fs'),ch=process.argv[2],tf=process.argv[3],au=process.argv[4]||'';
+var config=JSON.parse(fs.readFileSync('/var/lib/osmoda/config/gateway.json','utf8'));
+if(!config.telegram) config.telegram = {};
+var allowList=au?au.split(',').filter(function(u){return u.trim()!=='';}):[];
+config.telegram.botToken = fs.readFileSync(tf,'utf8').trim();
+if(allowList.length>0) config.telegram.allowedUsers = allowList;
+fs.writeFileSync('/var/lib/osmoda/config/gateway.json',JSON.stringify(config,null,2));
+GWCHADDEOF
+        elif command -v node >/dev/null 2>&1; then
           node - "$ACHANNEL" "$STATE_DIR/secrets/${ACHANNEL}-bot-token" "$ALLOWED_USERS" <<'CHADDEOF'
 var fs=require('fs'),ch=process.argv[2],tf=process.argv[3],au=process.argv[4]||'';
 var configPath='/root/.openclaw/openclaw.json';
@@ -2014,15 +2228,17 @@ CHADDEOF
       fi
       ;;
     pairing_approve)
-      ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
-      ACODE=$(echo "$ACTION_JSON" | jq -r '.code' 2>/dev/null) || continue
-      if [ -n "$ACHANNEL" ] && [ "$ACHANNEL" != "null" ] && [ -n "$ACODE" ] && [ "$ACODE" != "null" ]; then
-        # Sanitize: only allow alphanumeric codes
-        SAFE_CODE=$(echo "$ACODE" | tr -cd 'A-Z0-9')
-        SAFE_CHANNEL=$(echo "$ACHANNEL" | tr -cd 'a-z')
-        openclaw pairing approve "$SAFE_CHANNEL" "$SAFE_CODE" 2>/dev/null || true
-        NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
+      # OpenClaw-only: approve channel pairing
+      if [ "$RUNTIME_CFG" = "openclaw" ]; then
+        ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
+        ACODE=$(echo "$ACTION_JSON" | jq -r '.code' 2>/dev/null) || continue
+        if [ -n "$ACHANNEL" ] && [ "$ACHANNEL" != "null" ] && [ -n "$ACODE" ] && [ "$ACODE" != "null" ]; then
+          SAFE_CODE=$(echo "$ACODE" | tr -cd 'A-Z0-9')
+          SAFE_CHANNEL=$(echo "$ACHANNEL" | tr -cd 'a-z')
+          openclaw pairing approve "$SAFE_CHANNEL" "$SAFE_CODE" 2>/dev/null || true
+        fi
       fi
+      NEW_COMPLETED=$(echo "$NEW_COMPLETED" | jq --arg id "$AID" '. + [$id]')
       ;;
     disconnect_channel)
       ACHANNEL=$(echo "$ACTION_JSON" | jq -r '.channel' 2>/dev/null) || continue
@@ -2031,8 +2247,15 @@ CHADDEOF
       if [ -n "$ACHANNEL" ] && [ "$ACHANNEL" != "null" ]; then
         # Remove token file
         rm -f "$STATE_DIR/secrets/${ACHANNEL}-bot-token"
-        # Remove channel from openclaw.json
-        if [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
+        # Remove channel from config
+        if [ "$RUNTIME_CFG" = "claude-code" ] && [ -f "$GATEWAY_CONFIG" ] && command -v node >/dev/null 2>&1; then
+          node - "$ACHANNEL" <<'GWCHRMEOF'
+var fs=require('fs'),ch=process.argv[2];
+var config=JSON.parse(fs.readFileSync('/var/lib/osmoda/config/gateway.json','utf8'));
+if(config.telegram) delete config.telegram;
+fs.writeFileSync('/var/lib/osmoda/config/gateway.json',JSON.stringify(config,null,2));
+GWCHRMEOF
+        elif [ -f "/root/.openclaw/openclaw.json" ] && command -v node >/dev/null 2>&1; then
           node - "$ACHANNEL" <<'CHRMEOF'
 var fs=require('fs'),ch=process.argv[2];
 var config=JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json','utf8'));
@@ -2053,7 +2276,7 @@ if [ "$NEW_COMPLETED" != "[]" ] && [ -n "$NEW_COMPLETED" ]; then
   PAYLOAD2=$(jq -n \
     --arg oid "$OID" \
     --argjson completed "$NEW_COMPLETED" \
-    '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: '"$OC_READY"', completed_actions: $completed}'
+    '{order_id: $oid, status: "alive", setup_complete: true, openclaw_ready: '"$OC_READY"', gateway_ready: '"$OC_READY"', completed_actions: $completed}'
   )
   if [ -n "$HBSECRET" ]; then
     HB_TS2=$(date +%s000)
@@ -2134,9 +2357,9 @@ done
 svc_enable osmoda-gateway.service
 if [ -f "$STATE_DIR/config/api-key" ] || [ -f "$STATE_DIR/config/env" ]; then
   systemctl start osmoda-gateway.service
-  log "OpenClaw gateway starting on port 18789..."
+  log "Gateway ($RUNTIME) starting on port 18789..."
 else
-  log "OpenClaw gateway enabled (will auto-start after API key is set and service started)."
+  log "Gateway enabled (will auto-start after API key is set and service started)."
 fi
 
 # Enable heartbeat timer if configured
@@ -2146,8 +2369,9 @@ if [ -f "$SYSTEMD_DIR/osmoda-heartbeat.timer" ]; then
   log "Heartbeat timer started (every 5 min)."
 fi
 
-# Pair device identity with OpenClaw (requires gateway to be running)
-# This gives the WS relay operator.write scope for sending chat messages
+# Pair device identity with OpenClaw (requires gateway to be running) — openclaw only
+# Claude Code runtime uses simple token auth (no pairing needed)
+if [ "$RUNTIME" = "openclaw" ]; then
 IDENTITY_DIR="/root/.openclaw/identity"
 if [ -f "$IDENTITY_DIR/device.json" ] && [ ! -f "$IDENTITY_DIR/device-auth.json" ] || \
    ([ -f "$IDENTITY_DIR/device-auth.json" ] && ! grep -q '"operator"' "$IDENTITY_DIR/device-auth.json" 2>/dev/null); then
@@ -2259,6 +2483,7 @@ setTimeout(()=>process.exit(0),10000);
     warn "Gateway not responding — device pairing skipped (relay will retry)"
   fi
 fi
+fi  # end RUNTIME=openclaw pairing block
 
 # Enable WS relay if configured
 if [ -f "$SYSTEMD_DIR/osmoda-ws-relay.service" ]; then
@@ -2311,19 +2536,12 @@ else
   info "  1. Write the env file:"
   info "     echo 'ANTHROPIC_API_KEY=sk-ant-api03-YOUR_KEY' > $STATE_DIR/config/env"
   info ""
-  info "  2. Write auth profiles for both agents:"
-  info "     KEY=sk-ant-api03-YOUR_KEY"
-  info "     for agent in osmoda mobile; do"
-  info "       printf '{\"type\":\"api_key\",\"provider\":\"anthropic\",\"key\":\"%s\"}' \"\$KEY\" \\"
-  info "         > /root/.openclaw/agents/\$agent/agent/auth-profiles.json"
-  info "     done"
-  info ""
-  info "  3. Start the gateway:"
+  info "  2. Start the gateway:"
   info "     systemctl start osmoda-gateway"
 fi
 
 echo ""
-info "Messaging channels (optional — requires OpenClaw channel support):"
+info "Messaging channels (optional):"
 info "  Telegram: Create a bot via @BotFather, save token to $STATE_DIR/secrets/telegram-bot-token"
 info "            Then add to configuration.nix: services.osmoda.channels.telegram.enable = true;"
 info "  Guide:    https://github.com/bolivian-peru/os-moda/blob/main/docs/CHANNELS.md"
