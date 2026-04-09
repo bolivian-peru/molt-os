@@ -1,0 +1,25 @@
+{
+  "name": "osmoda-gateway",
+  "version": "0.1.0",
+  "description": "osModa Gateway — Claude Code SDK agent runtime with 91 MCP tools",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "osmoda-gateway": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-code": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.6.0"
+  }
+}
