@@ -45,11 +45,10 @@ When a user asks to connect Telegram:
 3. Ask them to paste the bot token (starts with a number, contains `:`)
 4. Save the token:
    - Use `file_write` to write the token to `/var/lib/osmoda/secrets/telegram-bot-token` (this path has 0600 permissions)
-5. Enable the channel:
-   - Use `shell_exec` to run: `openclaw config set channels.telegram.enabled true`
-   - Use `shell_exec` to run: `openclaw config set channels.telegram.tokenFile /var/lib/osmoda/secrets/telegram-bot-token`
-6. Ask for their Telegram username if they want to restrict access:
-   - Use `shell_exec` to run: `openclaw config set channels.telegram.allowedUsers '["username"]'`
+5. Enable the channel by updating the gateway config:
+   - Use `file_read` to read `/var/lib/osmoda/config/gateway.json`
+   - Add `"telegram": {"botToken": "<token>"}` to the config (or `"allowedUsers": ["username"]` to restrict)
+   - Use `file_write` to save the updated config
 7. Restart the gateway:
    - Use `shell_exec` to run: `systemctl restart osmoda-gateway`
 8. Tell them to find the bot on Telegram and send a message
@@ -58,11 +57,10 @@ When a user asks to connect Telegram:
 
 When a user asks to connect WhatsApp:
 
-1. Enable the channel:
-   - Use `shell_exec` to run: `openclaw config set channels.whatsapp.enabled true`
-   - Use `shell_exec` to run: `openclaw config set channels.whatsapp.credentialDir /var/lib/osmoda/whatsapp`
-2. Ask for their phone number if they want to restrict access:
-   - Use `shell_exec` to run: `openclaw config set channels.whatsapp.allowedNumbers '["+1234567890"]'`
+1. Enable the channel by updating the gateway config:
+   - Use `file_read` to read `/var/lib/osmoda/config/gateway.json`
+   - Add WhatsApp config to the JSON
+   - Use `file_write` to save the updated config
 3. Restart the gateway:
    - Use `shell_exec` to run: `systemctl restart osmoda-gateway`
 4. Tell them to check the gateway logs for a QR code:

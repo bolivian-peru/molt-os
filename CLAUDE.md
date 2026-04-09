@@ -27,8 +27,13 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    Agent Card (EIP-8004) identity + capability discovery.
    Structured receipts + incident workspaces for auditable troubleshooting.
 
-2. **osmoda-bridge** (TypeScript) — OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (90 tools): system_health, system_query,
+2. **osmoda-gateway** (TypeScript) — Agent gateway. HTTP+WS server on port 18789.
+   Spawns Claude Code CLI with MCP bridge for 91 tools. WebSocket for dashboard chat,
+   Telegram webhook, multi-agent routing (osmoda=Opus, mobile=Sonnet).
+   Config at `/var/lib/osmoda/config/gateway.json`.
+
+2b. **osmoda-bridge** (TypeScript) — Legacy OpenClaw plugin. Registers tools via
+   `api.registerTool()` factory pattern (91 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
@@ -95,15 +100,14 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    swarm-predict, scaled-swarm-predict.
 
 12. **NixOS module** (osmoda.nix) — single module that wires everything as systemd services.
-   Generates multi-agent OpenClaw config from NixOS options (agents, bindings, channels, plugins).
+   Generates gateway config from NixOS options (agents, bindings, channels).
    Multi-agent routing: `osmoda` (Opus, full access, web default) + `mobile` (Sonnet, full access, Telegram/WhatsApp).
-   Channel options: `channels.telegram` and `channels.whatsapp` — config generation
-   and credential management; actual connections handled by OpenClaw.
+   `cfg.gateway.runtime`: `"claude-code"` (default) or `"openclaw"` (legacy).
 
-13. **Multi-agent routing** — One OpenClaw gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 90 tools, all 19 skills, full system access
+13. **Multi-agent routing** — One gateway, multiple routed agents:
+   - `osmoda` (default): Claude Opus, all 91 tools, all 19 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
-   Each agent has its own workspace (`workspace-<agentId>/`), session store, and auth profile.
+   Each agent has its own workspace and system prompt. Config at `/var/lib/osmoda/config/gateway.json`.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
    Both agents have full tool access; mobile agent uses concise, phone-optimized response style.
 
@@ -206,10 +210,20 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
       ├── knowledge.rs                   # Knowledge document + agent action + skill candidate CRUD
       ├── api.rs                         # Axum handlers (19 endpoints)
       └── receipt.rs                     # Audit logging to agentd ledger
-./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin
+./packages/osmoda-gateway/               # TypeScript: Claude Code SDK gateway
+  ├── package.json                       # deps: ws (Claude Code CLI spawned as subprocess)
+  ├── src/index.ts                       # HTTP+WS server (port 18789), Telegram webhook
+  ├── src/agent.ts                       # Claude Code CLI wrapper (--print --stream-json)
+  └── src/sessions.ts                    # Session management (30-min expiry)
+./packages/osmoda-mcp-bridge/            # TypeScript: MCP server (91 tools over stdio)
+  └── dist/
+      ├── index.js                       # MCP server entry + teachd auto-logging middleware
+      ├── tools.js                       # All 91 tool definitions + handlers
+      └── daemon-clients.js              # Unix socket HTTP clients for all daemons
+./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin (legacy)
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 90 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 91 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines
@@ -267,7 +281,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
 ## Tech stack
 
 - **Rust**: agentd, agentctl, egress proxy, keyd, watch, routines, mesh (axum, rusqlite, tokio, sha2, clap, k256, ed25519-dalek, aes-gcm, sha3, snow, ml-kem)
-- **TypeScript**: osmoda-bridge OpenClaw plugin
+- **TypeScript**: osmoda-gateway (Claude Code SDK), osmoda-mcp-bridge (MCP server), osmoda-bridge (OpenClaw legacy)
 - **Nix**: flakes, crane (Rust builds), flake-utils (multi-system), nixos-generators
 - **NixOS**: systemd services, nftables, bubblewrap
 - **Desktop**: Sway (Wayland), kitty, Firefox

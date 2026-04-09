@@ -48,7 +48,7 @@ Response includes: `{ found: [{ name, pid, port, protocol, detected_as, health_u
 ### GET /events/log
 Query the hash-chained audit log.
 
-**Query params:** `?type=system.query&actor=openclaw&limit=50`
+**Query params:** `?type=system.query&actor=gateway&limit=50`
 
 ### POST /memory/ingest
 Ingest a new event into the memory system.
@@ -59,7 +59,7 @@ Ingest a new event into the memory system.
   "event": {
     "category": "diagnosis",
     "subcategory": "root_cause",
-    "actor": "openclaw.main",
+    "actor": "gateway.osmoda",
     "summary": "High CPU caused by Docker build",
     "detail": "Docker build spawned 47 processes...",
     "metadata": { "severity": "warning", "tags": ["docker", "cpu"] }
@@ -95,10 +95,10 @@ Explicitly store something in long-term memory.
 ### GET /memory/health
 Memory system status: embedding model readiness, collection size, state directory.
 
-## OpenClaw tools (registered by osmoda-bridge)
+## Agent tools (91 tools via MCP bridge)
 
-These are the 90 tools available to the AI agent through OpenClaw.
-Registered via `api.registerTool()` factory pattern in `packages/osmoda-bridge/index.ts`.
+These are the 91 tools available to the AI agent.
+Exposed via MCP protocol (`packages/osmoda-mcp-bridge/`) or OpenClaw plugin (`packages/osmoda-bridge/`).
 
 ### agentd tools (communicate over Unix socket)
 
@@ -186,12 +186,9 @@ Set up messaging channels so the user can talk to you from Telegram or WhatsApp.
 | Action | How |
 |--------|-----|
 | Save Telegram token | `file_write` to `/var/lib/osmoda/secrets/telegram-bot-token` |
-| Enable Telegram | `shell_exec`: `openclaw config set channels.telegram.enabled true` |
-| Set Telegram token path | `shell_exec`: `openclaw config set channels.telegram.tokenFile /var/lib/osmoda/secrets/telegram-bot-token` |
-| Restrict Telegram users | `shell_exec`: `openclaw config set channels.telegram.allowedUsers '["username"]'` |
-| Enable WhatsApp | `shell_exec`: `openclaw config set channels.whatsapp.enabled true` |
-| Set WhatsApp cred dir | `shell_exec`: `openclaw config set channels.whatsapp.credentialDir /var/lib/osmoda/whatsapp` |
-| Restrict WhatsApp numbers | `shell_exec`: `openclaw config set channels.whatsapp.allowedNumbers '["+1234567890"]'` |
+| Enable Telegram | Write bot token to `/var/lib/osmoda/secrets/telegram-bot-token`, update `gateway.json`, restart gateway |
+| Restrict Telegram users | Add `allowedUsers` array to `telegram` section in `/var/lib/osmoda/config/gateway.json` |
+| Enable WhatsApp | Configure WhatsApp credentials in gateway config, restart gateway |
 | Apply channel changes | `shell_exec`: `systemctl restart osmoda-gateway` |
 | Check for WhatsApp QR | `shell_exec`: `journalctl -u osmoda-gateway --since '30 sec ago' --no-pager` |
 
@@ -277,7 +274,7 @@ Emergency controls that execute immediately without AI involvement. The user alw
 | `safety_rollback` | EMERGENCY: Immediate `nixos-rebuild --rollback switch` |
 | `safety_status` | Raw system health dump. Tries agentd, falls back to shell if agentd is down |
 | `safety_panic` | Stop all osModa services (except agentd) + rollback NixOS |
-| `safety_restart` | Restart the OpenClaw gateway service |
+| `safety_restart` | Restart the agent gateway service |
 
 ### Wallet tools — optional (via osmoda-keyd at `/run/osmoda/keyd.sock`)
 
