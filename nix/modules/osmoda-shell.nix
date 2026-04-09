@@ -1,5 +1,5 @@
 # osModa Shell — Kiosk-mode desktop shell
-# Sway in full-screen kiosk mode with Firefox pointed at OpenClaw Gateway.
+# Sway in full-screen kiosk mode with Firefox pointed at osModa Gateway.
 # The conversation IS the desktop. Minimal chrome, maximum focus.
 { config, lib, pkgs, ... }:
 
@@ -7,7 +7,7 @@ with lib;
 
 let
   cfg = config.services.osmoda.shell;
-  gatewayPort = config.services.osmoda.openclaw.port;
+  gatewayPort = config.services.osmoda.gateway.port;
 
   # Sway kiosk configuration — full-screen chat, no desktop metaphors
   swayKioskConfig = pkgs.writeText "sway-kiosk-config" ''

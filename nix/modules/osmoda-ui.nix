@@ -1,9 +1,9 @@
 # osModa Custom Chat UI — The OS Experience
 #
 # Serves a beautiful dark full-screen chat and proxies all API/WebSocket
-# traffic to the OpenClaw gateway running on an internal port.
+# traffic to the agent gateway running on an internal port.
 #
-# Flow: Firefox → :18789 (osmoda-ui) → :18790 (OpenClaw gateway)
+# Flow: Firefox → :18789 (osmoda-ui) → :18790 (gateway)
 { config, lib, pkgs, ... }:
 
 with lib;
@@ -33,8 +33,9 @@ in {
       };
 
       environment = {
-        PORT = toString cfg.openclaw.port;
-        OPENCLAW_PORT = toString cfg.openclaw.internalPort;
+        PORT = toString cfg.gateway.port;
+        GATEWAY_PORT = toString cfg.gateway.internalPort;
+        OPENCLAW_PORT = toString cfg.gateway.internalPort;  # backward compat
       };
     };
   };

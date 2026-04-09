@@ -5,75 +5,84 @@ with lib;
 let
   cfg = config.services.osmoda;
   # When osModa UI fronts the gateway, use the internal port
-  gatewayPort = if cfg.ui.enable then cfg.openclaw.internalPort else cfg.openclaw.port;
+  gatewayPort = if cfg.ui.enable then cfg.gateway.internalPort else cfg.gateway.port;
 
-  # Generate multi-agent OpenClaw config from NixOS options
-  channelConfig = {
-    gateway = {
-      auth.mode = "none";
-    };
-    plugins.allow = [ "osmoda-bridge" ];
-
-    # Multi-agent routing: main (Opus) + mobile (Sonnet)
-    agents.list = [
+  # Generate gateway config from NixOS options (works for both Claude Code SDK and OpenClaw)
+  gatewayConfig = {
+    port = gatewayPort;
+    agents = [
       {
         id = "osmoda";
         default = true;
-        name = "osModa";
-        workspace = "${cfg.stateDir}/workspace-osmoda";
-        agentDir = "/root/.openclaw/agents/osmoda/agent";
-        model = cfg.openclaw.model;
+        model = cfg.gateway.model;
+        systemPromptFile = "${cfg.stateDir}/workspace-osmoda/SOUL.md";
       }
       {
         id = "mobile";
-        name = "osModa Mobile";
-        workspace = "${cfg.stateDir}/workspace-mobile";
-        agentDir = "/root/.openclaw/agents/mobile/agent";
-        model = "anthropic/claude-sonnet-4-6";
+        model = cfg.gateway.mobileModel;
+        systemPromptFile = "${cfg.stateDir}/workspace-mobile/SOUL.md";
       }
     ];
+    bindings = [
+      { agentId = "mobile"; channel = "telegram"; }
+      { agentId = "mobile"; channel = "whatsapp"; }
+    ];
+    mcpBridgePath = "${cfg.stateDir}/packages/osmoda-mcp-bridge/dist/index.js";
+  } // optionalAttrs cfg.channels.telegram.enable {
+    telegram = {
+      botToken = ""; # Set via bot-token file at runtime
+    } // optionalAttrs (cfg.channels.telegram.allowedUsers != []) {
+      allowedUsers = cfg.channels.telegram.allowedUsers;
+    };
+  };
 
-    # Route Telegram/WhatsApp to mobile agent, web chat defaults to osmoda
+  # Legacy OpenClaw config (for backward compat)
+  openclawConfig = {
+    gateway.auth.mode = "none";
+    plugins.allow = [ "osmoda-bridge" ];
+    agents.list = [
+      {
+        id = "osmoda"; default = true; name = "osModa";
+        workspace = "${cfg.stateDir}/workspace-osmoda";
+        agentDir = "/root/.openclaw/agents/osmoda/agent";
+        model = cfg.gateway.model;
+      }
+      {
+        id = "mobile"; name = "osModa Mobile";
+        workspace = "${cfg.stateDir}/workspace-mobile";
+        agentDir = "/root/.openclaw/agents/mobile/agent";
+        model = cfg.gateway.mobileModel;
+      }
+    ];
     bindings = [
       { agentId = "mobile"; match = { channel = "telegram"; }; }
       { agentId = "mobile"; match = { channel = "whatsapp"; }; }
     ];
-  } // optionalAttrs cfg.channels.telegram.enable {
-    channels.telegram = {
-      enabled = true;
-    } // optionalAttrs (cfg.channels.telegram.botTokenFile != null) {
-      tokenFile = toString cfg.channels.telegram.botTokenFile;
-    } // optionalAttrs (cfg.channels.telegram.allowedUsers != []) {
-      allowedUsers = cfg.channels.telegram.allowedUsers;
-    };
-  } // optionalAttrs cfg.channels.whatsapp.enable {
-    channels.whatsapp = {
-      enabled = true;
-      credentialDir = toString cfg.channels.whatsapp.credentialDir;
-    } // optionalAttrs (cfg.channels.whatsapp.allowedNumbers != []) {
-      allowedNumbers = cfg.channels.whatsapp.allowedNumbers;
-    };
   };
 
-  generatedConfigFile = pkgs.writeText "openclaw-config.json" (builtins.toJSON channelConfig);
+  generatedGatewayConfigFile = pkgs.writeText "gateway-config.json" (builtins.toJSON gatewayConfig);
+  generatedOpenclawConfigFile = pkgs.writeText "openclaw-config.json" (builtins.toJSON openclawConfig);
 
-  # Use user-provided config file if set, otherwise generate from NixOS options
   effectiveConfigFile =
-    if cfg.openclaw.configFile != null then cfg.openclaw.configFile
-    else generatedConfigFile;
+    if cfg.gateway.configFile != null then cfg.gateway.configFile
+    else if cfg.gateway.runtime == "openclaw" then generatedOpenclawConfigFile
+    else generatedGatewayConfigFile;
 in {
   options.services.osmoda = {
     enable = mkEnableOption "osModa - AI-native system platform";
 
-    # --- Gateway (OpenClaw) ---
-    openclaw = {
-      enable = mkOption { type = types.bool; default = true; description = "Enable OpenClaw Gateway"; };
-      package = mkOption { type = types.package; default = pkgs.openclaw; description = "OpenClaw package"; };
-      port = mkOption { type = types.port; default = 18789; description = "Gateway WebSocket port (user-facing)"; };
+    # --- Gateway (Claude Code SDK or OpenClaw) ---
+    gateway = {
+      enable = mkOption { type = types.bool; default = true; description = "Enable osModa Gateway"; };
+      runtime = mkOption { type = types.enum [ "claude-code" "openclaw" ]; default = "claude-code"; description = "Agent runtime: claude-code (default) or openclaw (legacy)"; };
+      port = mkOption { type = types.port; default = 18789; description = "Gateway port (user-facing)"; };
       internalPort = mkOption { type = types.port; default = 18790; description = "Internal gateway port (used when osModa UI fronts it)"; };
-      model = mkOption { type = types.str; default = "anthropic/claude-opus-4-6"; description = "Default LLM model"; };
-      configFile = mkOption { type = types.nullOr types.path; default = null; description = "OpenClaw config file"; };
+      model = mkOption { type = types.str; default = "anthropic/claude-opus-4-6"; description = "Default LLM model (main agent)"; };
+      mobileModel = mkOption { type = types.str; default = "anthropic/claude-sonnet-4-6"; description = "Mobile agent model"; };
+      configFile = mkOption { type = types.nullOr types.path; default = null; description = "Gateway config file (JSON)"; };
     };
+    # Backward compat alias
+    openclaw = cfg.gateway;
 
     # --- Agent Kernel Daemon ---
     agentd = {
@@ -332,8 +341,8 @@ in {
       iproute2
       # Sandbox tools
       bubblewrap
-    ] ++ optionals cfg.openclaw.enable [
-      cfg.openclaw.package
+    ] ++ optionals (cfg.gateway.enable && cfg.gateway.runtime == "openclaw") [
+      pkgs.openclaw or pkgs.nodejs
     ] ++ optionals cfg.voice.enable [
       pkgs.openai-whisper-cpp
       pkgs.piper-tts
@@ -374,29 +383,35 @@ in {
       };
     };
 
-    # ===== OPENCLAW GATEWAY =====
-    systemd.services.osmoda-gateway = mkIf cfg.openclaw.enable {
-      description = "osModa Gateway (OpenClaw)";
+    # ===== AGENT GATEWAY =====
+    systemd.services.osmoda-gateway = mkIf cfg.gateway.enable {
+      description = "osModa Gateway (${cfg.gateway.runtime})";
       wantedBy = [ "multi-user.target" ];
       after = [ "osmoda-agentd.service" ];
       requires = [ "osmoda-agentd.service" ];
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = concatStringsSep " " [
-          "${cfg.openclaw.package}/bin/openclaw"
-          "gateway"
-          "--port ${toString gatewayPort}"
-          "--verbose"
-          "--config ${effectiveConfigFile}"
-        ];
+        ExecStart =
+          if cfg.gateway.runtime == "claude-code" then
+            "${pkgs.nodejs}/bin/node ${cfg.stateDir}/packages/osmoda-gateway/dist/index.js --config ${effectiveConfigFile}"
+          else
+            concatStringsSep " " [
+              "${pkgs.openclaw or pkgs.nodejs}/bin/openclaw"
+              "gateway"
+              "--port ${toString gatewayPort}"
+              "--verbose"
+              "--config ${effectiveConfigFile}"
+            ];
         Restart = "always";
         RestartSec = 5;
         StateDirectory = "osmoda";
+        EnvironmentFile = "-${cfg.stateDir}/config/env";
       };
 
       environment = {
         NODE_ENV = "production";
+        OSMODA_GATEWAY_CONFIG = "${effectiveConfigFile}";
         OSMODA_SOCKET = cfg.agentd.socketPath;
         OSMODA_KEYD_SOCKET = cfg.keyd.socketPath;
         OSMODA_WATCH_SOCKET = cfg.watch.socketPath;
@@ -405,7 +420,7 @@ in {
         OSMODA_MESH_SOCKET = cfg.mesh.socketPath;
         OSMODA_MCPD_SOCKET = cfg.mcp.socketPath;
         OSMODA_TEACHD_SOCKET = cfg.teachd.socketPath;
-        HOME = cfg.stateDir;
+        HOME = "/root";
       };
     };
 
@@ -605,7 +620,7 @@ in {
           "--state-dir ${cfg.stateDir}/mcp"
           "--agentd-socket ${cfg.agentd.socketPath}"
           "--egress-port ${toString cfg.sandbox.egressProxy.port}"
-          "--output-config ${cfg.stateDir}/mcp/openclaw-mcp.json"
+          "--output-config ${cfg.stateDir}/mcp/gateway-mcp.json"
         ];
         Restart = "always";
         RestartSec = 3;
@@ -737,7 +752,7 @@ in {
     networking.firewall = {
       enable = true;
       allowedTCPPorts = [ ]
-        ++ optionals cfg.ui.enable [ cfg.openclaw.port ]
+        ++ optionals cfg.ui.enable [ cfg.gateway.port ]
         ++ optionals cfg.mesh.enable [ cfg.mesh.listenPort ];
     };
 
@@ -835,8 +850,13 @@ in {
       mkdir -p ${cfg.stateDir}/{workspace-osmoda,workspace-mobile,ledger,artifacts,memory,voice/models,voice/cache,keyd/keys,watch,routines,mesh,mcp,teachd,apps,secrets}
       mkdir -p ${cfg.stateDir}/workspace-osmoda/skills
       mkdir -p ${cfg.stateDir}/workspace-mobile/skills
+      # Create agent dirs based on runtime
+      ${if cfg.gateway.runtime == "openclaw" then ''
       mkdir -p /root/.openclaw/agents/osmoda/{agent,sessions}
       mkdir -p /root/.openclaw/agents/mobile/{agent,sessions}
+      '' else ''
+      mkdir -p ${cfg.stateDir}/identity
+      ''}
       mkdir -p /var/backups/osmoda
 
       # Secure state directories

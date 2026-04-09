@@ -16,7 +16,7 @@ let
   cfg = config.services.osmoda;
   apiKeyFile = "${cfg.stateDir}/config/api-key";
   envFile = "${cfg.stateDir}/config/env";
-  setupPort = cfg.openclaw.port; # Serve setup on the same port as gateway
+  setupPort = cfg.gateway.port; # Serve setup on the same port as gateway
 
   # HTML setup wizard — served when no API key is configured
   setupHtml = pkgs.writeText "osmoda-setup.html" ''
@@ -507,7 +507,7 @@ in {
     };
 
     # Gateway should only start if API key exists
-    systemd.services.osmoda-gateway = mkIf cfg.openclaw.enable {
+    systemd.services.osmoda-gateway = mkIf cfg.gateway.enable {
       unitConfig = {
         ConditionPathExists = [ apiKeyFile ];
       };
