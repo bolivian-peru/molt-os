@@ -1015,7 +1015,7 @@ Wants=osmoda-agentd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env node $GATEWAY_DIR/dist/index.js
+ExecStart=$(which node) $GATEWAY_DIR/dist/index.js
 Restart=always
 RestartSec=5
 WorkingDirectory=/root
