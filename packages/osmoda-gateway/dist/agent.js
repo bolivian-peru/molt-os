@@ -1,22 +1,23 @@
 /**
  * Claude Code agent wrapper — spawns claude CLI in headless mode with MCP tools.
  *
- * Uses `claude --print --output-format stream-json` for programmatic access.
- * The CLI connects to the osmoda-mcp-bridge MCP server for all 91 system tools.
+ * Uses `claude -p --output-format text` for non-interactive agent calls.
+ * Auth: ANTHROPIC_API_KEY env var (Console API key, sk-ant-api03-...).
+ * Permissions: --allowedTools pre-approves MCP tools (works as root, unlike --dangerously-skip-permissions).
+ * MCP: osmoda-mcp-bridge provides 91 system management tools over stdio.
  */
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as readline from "node:readline";
+import { fileURLToPath } from "node:url";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Resolve claude binary path */
 function findClaude() {
     const candidates = [
-        "/usr/local/bin/claude",
-        "/root/.nix-profile/bin/claude",
-        // npm global
         process.env.CLAUDE_PATH,
-        // Local install in gateway
-        path.resolve(import.meta.dirname || __dirname, "../node_modules/.bin/claude"),
+        path.resolve(__dirname, "../node_modules/.bin/claude"),
+        "/usr/local/bin/claude",
+        "/run/current-system/sw/bin/claude",
     ].filter(Boolean);
     for (const p of candidates) {
         try {
@@ -29,7 +30,7 @@ function findClaude() {
 }
 /** Build MCP config JSON for Claude Code */
 function buildMcpConfig(mcpBridgePath) {
-    const config = {
+    return {
         mcpServers: {
             osmoda: {
                 command: "node",
@@ -47,41 +48,56 @@ function buildMcpConfig(mcpBridgePath) {
             },
         },
     };
-    return JSON.stringify(config);
+}
+// Persistent MCP config file (written once, reused across calls)
+let mcpConfigPath = null;
+function getMcpConfigPath(mcpBridgePath) {
+    if (!mcpConfigPath) {
+        mcpConfigPath = "/var/lib/osmoda/config/mcp-bridge.json";
+        try {
+            fs.mkdirSync(path.dirname(mcpConfigPath), { recursive: true });
+            fs.writeFileSync(mcpConfigPath, JSON.stringify(buildMcpConfig(mcpBridgePath), null, 2));
+        }
+        catch {
+            // Fallback: unique temp file per process
+            mcpConfigPath = `/tmp/osmoda-mcp-${process.pid}.json`;
+            fs.writeFileSync(mcpConfigPath, JSON.stringify(buildMcpConfig(mcpBridgePath), null, 2));
+        }
+    }
+    return mcpConfigPath;
 }
 /**
  * Call the Claude Code agent with a user message.
- * Spawns `claude --print --output-format stream-json` and yields streaming events.
+ * Spawns `claude -p` and yields events parsed from text output.
  */
 export async function* callAgent(opts) {
     const claude = findClaude();
     const cwd = opts.cwd || "/root";
-    // Write temporary MCP config
-    const mcpConfigPath = `/tmp/osmoda-mcp-${Date.now()}.json`;
-    fs.writeFileSync(mcpConfigPath, buildMcpConfig(opts.mcpBridgePath));
+    const configPath = getMcpConfigPath(opts.mcpBridgePath);
     const args = [
-        "--print",
-        "--output-format", "stream-json",
-        "--model", opts.model,
-        "--system-prompt", opts.systemPrompt,
-        "--dangerously-skip-permissions",
-        "--mcp-config", mcpConfigPath,
-        "--no-session-persistence",
-        "--max-turns", "30",
+        "-p", // Print mode (non-interactive)
+        "--output-format", "text", // Simple text output (most reliable)
+        "--model", opts.model, // Model selection (v2.1.97+)
+        "--system-prompt", opts.systemPrompt.slice(0, 10000), // System prompt (truncate if huge)
+        "--mcp-config", configPath, // MCP server config
+        "--allowedTools", "mcp__osmoda__*", // Pre-approve all osmoda MCP tools (works as root!)
+        "--max-turns", "10", // Limit agentic loops
+        "--no-session-persistence", // Don't save sessions to disk (we manage sessions ourselves)
+        "--bare", // Skip hooks, LSP, plugin sync, auto-memory, CLAUDE.md discovery
     ];
     // Resume session if we have one
     if (opts.sessionId) {
         args.push("--resume", opts.sessionId);
     }
     // The prompt goes at the end
-    args.push("--", opts.message);
+    args.push(opts.message);
     let proc;
     try {
         proc = spawn(claude, args, {
             cwd,
             env: {
                 ...process.env,
-                HOME: "/root",
+                HOME: process.env.HOME || "/root",
                 NODE_ENV: "production",
             },
             stdio: ["pipe", "pipe", "pipe"],
@@ -97,68 +113,41 @@ export async function* callAgent(opts) {
             proc.kill("SIGTERM");
         }, { once: true });
     }
-    // Parse streaming JSON output line by line
-    const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
-    let sessionId;
+    // Collect stdout (text output)
     let fullText = "";
-    try {
-        for await (const line of rl) {
-            if (!line.trim())
-                continue;
-            let event;
-            try {
-                event = JSON.parse(line);
-            }
-            catch {
-                continue; // skip non-JSON lines
-            }
-            // Extract session ID
-            if (event.session_id) {
-                sessionId = event.session_id;
-                yield { type: "session", sessionId };
-            }
-            // Process by message type
-            if (event.type === "assistant") {
-                const content = event.message?.content || event.content;
-                if (Array.isArray(content)) {
-                    for (const block of content) {
-                        if (block.type === "text" && block.text) {
-                            fullText += block.text;
-                            yield { type: "text", text: block.text };
-                        }
-                        else if (block.type === "tool_use" && block.name) {
-                            yield { type: "tool_use", name: block.name };
-                        }
-                    }
-                }
-            }
-            else if (event.type === "result") {
-                if (event.result && typeof event.result === "string" && !fullText) {
-                    yield { type: "text", text: event.result };
-                }
-                if (event.session_id) {
-                    sessionId = event.session_id;
-                }
-            }
-        }
-    }
-    catch (e) {
-        if (opts.abortSignal?.aborted) {
-            yield { type: "done", sessionId };
-            return;
-        }
-        yield { type: "error", text: e instanceof Error ? e.message : String(e) };
-    }
-    // Clean up temp config
-    try {
-        fs.unlinkSync(mcpConfigPath);
-    }
-    catch { /* ignore */ }
-    // Wait for process to exit
-    await new Promise((resolve) => {
-        proc.on("close", () => resolve());
-        // Timeout: if process doesn't exit in 5s, kill it
-        setTimeout(() => { proc.kill("SIGKILL"); resolve(); }, 5000);
+    const chunks = [];
+    proc.stdout?.on("data", (data) => {
+        const text = data.toString();
+        chunks.push(text);
+        fullText += text;
     });
-    yield { type: "done", sessionId };
+    // Collect stderr for errors
+    let stderrText = "";
+    proc.stderr?.on("data", (data) => {
+        stderrText += data.toString();
+    });
+    // Wait for process to finish
+    const exitCode = await new Promise((resolve) => {
+        proc.on("close", (code) => resolve(code ?? 1));
+        // Timeout: kill after 120s
+        setTimeout(() => {
+            proc.kill("SIGKILL");
+            resolve(124);
+        }, 120000);
+    });
+    if (opts.abortSignal?.aborted) {
+        yield { type: "done" };
+        return;
+    }
+    if (exitCode !== 0 && !fullText.trim()) {
+        // Process failed with no output
+        const errMsg = stderrText.trim() || `claude exited with code ${exitCode}`;
+        yield { type: "error", text: errMsg };
+        return;
+    }
+    // Emit the full response as text
+    if (fullText.trim()) {
+        yield { type: "text", text: fullText.trim() };
+    }
+    yield { type: "done" };
 }

@@ -243,7 +243,16 @@ async function handleTelegram(req: http.IncomingMessage, res: http.ServerRespons
   }
 
   let body = "";
-  for await (const chunk of req) body += chunk;
+  try {
+    for await (const chunk of req) {
+      body += chunk;
+      if (body.length > 1024 * 1024) { res.writeHead(413); res.end("Too large"); return; }
+    }
+  } catch {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
 
   let update: any;
   try {
@@ -318,7 +327,7 @@ async function sendTelegram(botToken: string, chatId: string, text: string): Pro
       path: `/bot${botToken}/sendMessage`,
       method: "POST",
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
-    }, () => resolve());
+    }, (res) => { res.on("data", () => {}); res.on("end", () => resolve()); });
     req.on("error", (e) => {
       console.error("[gateway] Telegram send error:", e.message);
       resolve();

@@ -81,8 +81,12 @@ in {
       mobileModel = mkOption { type = types.str; default = "anthropic/claude-sonnet-4-6"; description = "Mobile agent model"; };
       configFile = mkOption { type = types.nullOr types.path; default = null; description = "Gateway config file (JSON)"; };
     };
-    # Backward compat alias
-    openclaw = cfg.gateway;
+    # Backward compat: openclaw options mirror gateway options
+    openclaw = {
+      enable = mkOption { type = types.bool; default = cfg.gateway.enable; description = "Deprecated: use gateway.enable"; visible = false; };
+      port = mkOption { type = types.port; default = cfg.gateway.port; description = "Deprecated: use gateway.port"; visible = false; };
+      internalPort = mkOption { type = types.port; default = cfg.gateway.internalPort; visible = false; };
+    };
 
     # --- Agent Kernel Daemon ---
     agentd = {
