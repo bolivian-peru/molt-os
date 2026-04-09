@@ -1,0 +1,14 @@
+{
+  "name": "osmoda-mcp-bridge",
+  "version": "0.1.0",
+  "description": "osModa MCP Bridge — 91 system management tools over MCP stdio protocol",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "list-tools": "node dist/index.js --list-tools"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
