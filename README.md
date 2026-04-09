@@ -6,7 +6,7 @@
 
 **Your server has an AI brain. It monitors, fixes, deploys, and explains — without you SSH-ing in.**
 
-9 Rust daemons. 90 structured tools. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
+10 Rust daemons. 91 structured tools. Claude Code SDK runtime. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
 
 > **Public Beta** — This is a working system deployed on real servers, not a demo. Expect rough edges and rapid iteration. You're early.
 
@@ -15,7 +15,7 @@
 [![Rust](https://img.shields.io/badge/Rust-10%20crates-orange.svg)](https://www.rust-lang.org/)
 [![NixOS](https://img.shields.io/badge/NixOS-Atomic-5277C3.svg)](https://nixos.org/)
 [![Tests](https://img.shields.io/badge/Tests-205%20passing-brightgreen.svg)]()
-[![Tools](https://img.shields.io/badge/Agent%20Tools-90-blueviolet.svg)]()
+[![Tools](https://img.shields.io/badge/Agent%20Tools-91-blueviolet.svg)]()
 
 [Quickstart](#quickstart) · [Architecture](#architecture) · [What It Does](#what-it-does) · [Safety](#safety-model) · [API](#api-reference) · [Development](#development)
 
@@ -38,7 +38,7 @@
 
 Every AI agent framework assumes your infrastructure is someone else's problem. They give you an agent that can think — but nowhere for it to live. So you SSH into a VPS, install things manually, pray nothing breaks at 3am, and when it does, you're the one waking up.
 
-osModa is the other half: **the machine itself is AI-native.** 90 structured tools across 9 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
+osModa is the other half: **the machine itself is AI-native.** 91 structured tools across 10 Rust daemons give the AI typed, auditable access to the entire operating system. No shell parsing. No regex. `system_health` returns structured JSON. Every mutation is SHA-256 hash-chained to a tamper-proof ledger. If a deploy breaks something, NixOS rolls back the entire system state atomically. If a service dies at 3am, the watcher detects it, the agent diagnoses root cause, SafeSwitch deploys a fix — with automatic rollback if health checks fail.
 
 **Why NixOS?** Every system change is a transaction. Every state has a generation number. Rolling back is one command. This makes AI root access meaningfully safer than on any traditional Linux distribution. (NixOS rollback covers OS state — not data sent to external APIs or deleted user data. See [Safety Model](#safety-model).)
 
@@ -54,7 +54,7 @@ See the full [Getting Started Guide](docs/GETTING-STARTED.md) for a detailed wal
 
 ## System Requirements
 
-> **osModa is a full NixOS operating system, not an app.** It replaces your OS entirely — like installing Arch or Fedora, not like running `apt install`. It will NOT work inside Docker, LXC, or any container runtime. Containers lack systemd, NixOS package management, and the kernel-level access that osModa's 9 daemons require.
+> **osModa is a full NixOS operating system, not an app.** It replaces your OS entirely — like installing Arch or Fedora, not like running `apt install`. It will NOT work inside Docker, LXC, or any container runtime. Containers lack systemd, NixOS package management, and the kernel-level access that osModa's 10 daemons require.
 
 | Requirement | Details |
 |------------|---------|
@@ -93,7 +93,9 @@ This is the primary install path. NixOS flakes give you reproducible builds, ato
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
-Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs the AI gateway + 90 tools, starts everything. Takes ~10 minutes on a CX22.
+Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs the Claude Code SDK gateway + 91 MCP tools, starts everything. Takes ~10 minutes on a CX22.
+
+Supports OAuth tokens (Pro/Max subscription) or Console API keys (pay-per-token).
 
 **Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
 
@@ -118,16 +120,16 @@ agentctl verify-ledger
 
 ## Architecture
 
-9 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured tool calls, never raw shell. One gateway, multiple routed agents — Opus for deep work (web), Sonnet for quick status (mobile).
+10 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured MCP tool calls, never raw shell. One gateway (Claude Code SDK), multiple routed agents — Opus for deep work (web), Sonnet for quick status (mobile). Supports OAuth tokens (Pro/Max subscription) or Console API keys (pay-per-token).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│  AI Gateway (OpenClaw)          Multi-Agent Router                            │
-│  ├─ osmoda agent (Opus)         90 tools · 19 skills · full access · web      │
+│  AI Gateway (Claude Code SDK)    Multi-Agent Router                            │
+│  ├─ osmoda agent (Opus)         91 tools · 19 skills · full access · web      │
 │  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA    │
-│  osmoda-bridge                  90 typed tools (shared plugin)                 │
+│  osmoda-mcp-bridge              91 typed tools via MCP protocol                │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤
 │ agentd │ watch  │routine │ teachd   │ mesh   │ voice │ mcpd │ keyd  │egress │
@@ -143,7 +145,7 @@ agentctl verify-ledger
 ### Trust Model (3 tiers)
 
 ```
-TIER 0  OpenClaw + agentd       Root. Full system. This is the agent.
+TIER 0  Claude Code + agentd    Root. Full system. This is the agent.
 TIER 1  Approved apps           Sandboxed. Declared capabilities only.
 TIER 2  Untrusted tools         Max isolation. No network. Minimal filesystem.
 ```
@@ -165,7 +167,7 @@ The #1 question: "Why does the AI have root access?" Because it IS the system in
 | **SafeSwitch deploys** | Changes go through a probation period with health checks. If any check fails, automatic rollback to the previous generation. |
 | **Command blocklist** | 17 dangerous command patterns blocked in `shell_exec` (rm -rf, dd, mkfs, etc.). Expanded and pentest-verified. |
 | **Rate limiting** | All public endpoints enforce rate limits (shell_exec: 30/60s, mesh TCP: 5/60s). |
-| **Socket permissions** | All Unix sockets are 0600 (owner-only). All 9 daemons enforce `umask(0o077)` at startup. |
+| **Socket permissions** | All Unix sockets are 0600 (owner-only). All 10 daemons enforce `umask(0o077)` at startup. |
 | **Approval gates** | Destructive operations require explicit approval via `approval_request`/`approval_approve`. Time-limited with auto-expiry. |
 | **Fleet coordination** | Multi-server changes go through quorum voting via `fleet_propose`/`fleet_vote` before applying. |
 | **Safety commands** | `safety_rollback`, `safety_panic`, `safety_status`, `safety_restart` bypass the AI entirely — the user always has an escape hatch. |
@@ -450,7 +452,9 @@ crates/osmoda-voice/        Local voice (whisper.cpp + piper)
 crates/osmoda-mcpd/         MCP server lifecycle manager
 crates/osmoda-egress/       Domain-filtered egress proxy
 crates/osmoda-keyd/         Crypto wallet daemon (ETH + SOL, AES-256-GCM)
-packages/osmoda-bridge/     AI gateway plugin (90 tools, TypeScript)
+packages/osmoda-gateway/    Claude Code SDK gateway (HTTP+WS+Telegram)
+packages/osmoda-mcp-bridge/ MCP server (91 tools over stdio protocol)
+packages/osmoda-bridge/     Legacy OpenClaw plugin (91 tools, TypeScript)
 nix/modules/osmoda.nix      NixOS module (single source of truth)
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity + tools + heartbeat
@@ -468,7 +472,7 @@ skills/                     19 system skill definitions
 > **Public Beta.** osModa is deployed on real servers managing real workloads. It's not a mockup — it's a working operating system with 205 passing tests, pen-tested security, and months of development. That said, this is early. APIs may change, features are shipping fast, and you'll occasionally find rough edges. That's the price of being early to something new.
 
 **The numbers:**
-- 10 Rust crates (9 daemons + 1 CLI)
+- 10 Rust crates (10 daemons + 1 CLI)
 - 205 tests passing (all green)
 - 90 bridge tools registered
 - 19 system skills

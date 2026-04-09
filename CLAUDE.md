@@ -3,15 +3,15 @@
 ## What this is
 
 osModa: NixOS distribution with AI-native system management.
-The agent has full root-level access to the entire system via structured daemons.
+The agent runs via Claude Code SDK with full root-level access to the entire system via structured daemons.
 
-OpenClaw has FULL system access. Root. All files. All processes. All APIs.
-The sandbox exists for UNTRUSTED third-party tools, not for OpenClaw itself.
+The agent has FULL system access. Root. All files. All processes. All APIs.
+The sandbox exists for UNTRUSTED third-party tools, not for the agent itself.
 
 ## Architecture (3 trust tiers)
 
 ```
-TIER 0: OpenClaw + agentd (full system, root-equivalent)
+TIER 0: Claude Code + agentd (full system, root-equivalent)
   ↓ grants capabilities to ↓
 TIER 1: Approved apps (sandboxed, declared capabilities)
   ↓ even more restricted ↓
