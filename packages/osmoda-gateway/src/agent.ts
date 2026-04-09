@@ -99,6 +99,12 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
   const cwd = opts.cwd || "/root";
   const configPath = getMcpConfigPath(opts.mcpBridgePath);
 
+  // Auth strategy:
+  // - If ANTHROPIC_API_KEY is set (Console key): use --bare mode (fastest, no OAuth)
+  // - If CLAUDE_CODE_OAUTH_TOKEN is set: normal mode with OAuth (subscription credits)
+  // - If neither: normal mode, Claude Code uses its own stored credentials
+  const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+
   const args = [
     "-p",                          // Print mode (non-interactive)
     "--output-format", "text",     // Simple text output (most reliable)
@@ -107,9 +113,13 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
     "--mcp-config", configPath,    // MCP server config
     "--allowedTools", "mcp__osmoda__*",  // Pre-approve all osmoda MCP tools (works as root!)
     "--max-turns", "10",           // Limit agentic loops
-    "--no-session-persistence",    // Don't save sessions to disk (we manage sessions ourselves)
-    "--bare",                      // Skip hooks, LSP, plugin sync, auto-memory, CLAUDE.md discovery
   ];
+
+  // --bare disables OAuth (only reads ANTHROPIC_API_KEY). Use it only when API key is set.
+  // Without --bare, Claude Code reads OAuth from keychain/credentials (subscription credits).
+  if (hasApiKey) {
+    args.push("--bare");
+  }
 
   // Resume session if we have one
   if (opts.sessionId) {

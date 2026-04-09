@@ -688,7 +688,11 @@ if [ -n "$API_KEY" ]; then
 
   if [ "$EFFECTIVE_PROVIDER" = "openai" ]; then
     printf 'OPENAI_API_KEY=%s\n' "$DECODED_KEY" > "$STATE_DIR/config/env"
+  elif echo "$DECODED_KEY" | grep -q '^sk-ant-oat'; then
+    # OAuth token — use CLAUDE_CODE_OAUTH_TOKEN (subscription credits via Claude Code)
+    printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$DECODED_KEY" > "$STATE_DIR/config/env"
   else
+    # Console API key — use ANTHROPIC_API_KEY
     printf 'ANTHROPIC_API_KEY=%s\n' "$DECODED_KEY" > "$STATE_DIR/config/env"
   fi
   chmod 600 "$STATE_DIR/config/env"
@@ -2066,9 +2070,11 @@ DECEOF
         # Update stored API key
         printf '%s\n' "$AKEY" > "$STATE_DIR/config/api-key"
         chmod 600 "$STATE_DIR/config/api-key"
-        # Update env file
+        # Update env file (detect OAuth tokens vs Console API keys)
         if [ "$APROVIDER" = "openai" ]; then
           printf 'OPENAI_API_KEY=%s\n' "$AKEY" > "$STATE_DIR/config/env"
+        elif echo "$AKEY" | grep -q '^sk-ant-oat'; then
+          printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$AKEY" > "$STATE_DIR/config/env"
         else
           printf 'ANTHROPIC_API_KEY=%s\n' "$AKEY" > "$STATE_DIR/config/env"
         fi
