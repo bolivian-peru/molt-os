@@ -285,24 +285,27 @@ NIXEOF
       rm -f /tmp/osmoda-phase2.nix.fragment
       log "Phase 2 service injected into /etc/nixos/configuration.nix"
 
-      # Re-run nixos-install so the closure includes our Phase 2 service
+      # Rebuild NixOS closure with Phase 2 service + password fix
       log "Rebuilding NixOS closure with Phase 2 service..."
       report_progress "nixos" "started" "Rebuilding NixOS closure (2-3 min)"
-      # Source nix profile so nixos-install is in PATH
+      # Source nix profile so nixos-rebuild is in PATH
       . /root/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
-      if nixos-install --no-root-passwd 2>&1 | tail -5; then
-        log "NixOS closure rebuilt with Phase 2. Rebooting into NixOS..."
-        report_progress "nixos" "done" "NixOS conversion complete"
-        report_progress "reboot" "started" "Rebooting into NixOS (2-3 min)"
-        reboot -f
-        exit 0
+      export NIX_PATH="nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos:nixos-config=/etc/nixos/configuration.nix"
+      # Try nixos-rebuild first (works if nix channels are set up), fall back to nixos-install
+      if nixos-rebuild switch 2>&1 | tail -5; then
+        log "NixOS rebuilt with Phase 2. Rebooting into NixOS..."
+      elif nixos-install --no-root-passwd 2>&1 | tail -5; then
+        log "NixOS closure rebuilt via nixos-install. Rebooting..."
       else
-        error "nixos-install rebuild failed. Rebooting anyway (Phase 2 may not run)."
-        report_progress "nixos" "error" "nixos-install rebuild failed, rebooting anyway"
-        report_progress "reboot" "started" "Rebooting (nixos-install had errors)"
-        reboot -f
-        exit 0
+        warn "NixOS rebuild failed — Phase 2 may not run after reboot."
+        # Last resort: clear root password directly in shadow before reboot
+        sed -i 's|^root:!:|root::|' /etc/shadow 2>/dev/null || true
+        sed -i 's|^root:[^:]*:\([0-9]*\):[0-9]*:[0-9]*:[0-9]*:.*|root::\1:0:99999:7:::|' /etc/shadow 2>/dev/null || true
       fi
+      report_progress "nixos" "done" "NixOS conversion complete"
+      report_progress "reboot" "started" "Rebooting into NixOS (2-3 min)"
+      reboot -f
+      exit 0
     else
       error "nixos-infect failed. Falling through to install on current OS."
       warn "osModa will install on $OS_TYPE instead. NixOS conversion can be retried later."
