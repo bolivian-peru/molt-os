@@ -256,11 +256,11 @@ if [ "$SKIP_NIXOS" = false ]; then
       cat > /tmp/osmoda-phase2.nix.fragment <<NIXEOF
 
   # osModa Phase 2: auto-install daemons after NixOS conversion
-  environment.systemPackages = with pkgs; [ curl bash git cacert gcc gnumake pkg-config nix ];
+  environment.systemPackages = with pkgs; [ curl bash git cacert gcc gnumake pkg-config nix nodejs_22 ];
 
-  # Preserve SSH access through conversion
-  users.users.root.openssh.authorizedKeys.keys = [
-$(echo -e "$SSH_KEYS_NIX")  ];
+  # Fix root password (prevents SSH lockout after NixOS conversion)
+  users.users.root.initialHashedPassword = "";
+  users.mutableUsers = true;
 
   systemd.services.osmoda-phase2 = {
     description = "osModa Phase 2 Install (post-NixOS conversion)";
