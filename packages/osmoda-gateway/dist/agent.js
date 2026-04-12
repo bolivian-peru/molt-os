@@ -83,7 +83,7 @@ export async function* callAgent(opts) {
         "--model", opts.model, // Model selection
         "--system-prompt", opts.systemPrompt.slice(0, 10000),
         "--mcp-config", configPath,
-        "--allowedTools", "mcp__osmoda__*",
+        "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "mcp__osmoda__*",
     ];
     if (hasApiKey) {
         args.push("--bare");
