@@ -86,7 +86,7 @@ export async function* callAgent(opts) {
         "--system-prompt", opts.systemPrompt.slice(0, 10000), // System prompt (truncate if huge)
         "--mcp-config", configPath, // MCP server config
         "--allowedTools", "mcp__osmoda__*", // Pre-approve all osmoda MCP tools (works as root!)
-        "--max-turns", "10", // Limit agentic loops
+        "--max-turns", "50", // Allow complex multi-step tasks (building apps, scraping, etc.)
     ];
     // --bare disables OAuth (only reads ANTHROPIC_API_KEY). Use it only when API key is set.
     // Without --bare, Claude Code reads OAuth from keychain/credentials (subscription credits).
@@ -137,11 +137,11 @@ export async function* callAgent(opts) {
     // Wait for process to finish
     const exitCode = await new Promise((resolve) => {
         proc.on("close", (code) => resolve(code ?? 1));
-        // Timeout: kill after 120s
+        // Timeout: kill after 10 minutes (complex tasks like building apps need time)
         setTimeout(() => {
             proc.kill("SIGKILL");
             resolve(124);
-        }, 120000);
+        }, 600000);
     });
     if (opts.abortSignal?.aborted) {
         yield { type: "done" };
