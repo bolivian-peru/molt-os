@@ -107,7 +107,7 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
     "--model", opts.model,                // Model selection
     "--system-prompt", opts.systemPrompt.slice(0, 10000),
     "--mcp-config", configPath,
-    "--allowedTools", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "mcp__osmoda__*",
+    "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,mcp__osmoda__*",
   ];
 
   if (hasApiKey) {
@@ -118,7 +118,8 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
     args.push("--resume", opts.sessionId);
   }
 
-  args.push(opts.message);
+  // -- separates flags from the prompt (prevents prompt being parsed as flag value)
+  args.push("--", opts.message);
 
   let proc: ChildProcess;
   try {
