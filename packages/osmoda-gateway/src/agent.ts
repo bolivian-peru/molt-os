@@ -1,9 +1,9 @@
 /**
  * Claude Code agent wrapper — spawns claude CLI in headless mode with MCP tools.
  *
- * Uses `claude -p --output-format text` for non-interactive agent calls.
- * Auth: ANTHROPIC_API_KEY env var (Console API key, sk-ant-api03-...).
- * Permissions: --allowedTools pre-approves MCP tools (works as root, unlike --dangerously-skip-permissions).
+ * Uses `claude -p --output-format stream-json --verbose` for real-time streaming.
+ * Auth: ANTHROPIC_API_KEY env var (Console key) or CLAUDE_CODE_OAUTH_TOKEN (subscription).
+ * Permissions: --allowedTools pre-approves MCP tools (works as root).
  * MCP: osmoda-mcp-bridge provides 91 system management tools over stdio.
  */
 
@@ -12,7 +12,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as readline from "node:readline";
-import * as crypto from "node:crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +26,7 @@ export interface AgentCallOptions {
 }
 
 export interface AgentEvent {
-  type: "text" | "tool_use" | "done" | "error" | "session";
+  type: "text" | "tool_use" | "tool_result" | "done" | "error" | "session" | "thinking";
   text?: string;
   name?: string;
   sessionId?: string;
@@ -48,7 +47,7 @@ function findClaude(): string {
       return p;
     } catch { /* next */ }
   }
-  return "claude"; // hope it's on PATH
+  return "claude";
 }
 
 /** Build MCP config JSON for Claude Code */
@@ -73,7 +72,7 @@ function buildMcpConfig(mcpBridgePath: string): object {
   };
 }
 
-// Persistent MCP config file (written once, reused across calls)
+// Persistent MCP config file
 let mcpConfigPath: string | null = null;
 function getMcpConfigPath(mcpBridgePath: string): string {
   if (!mcpConfigPath) {
@@ -81,8 +80,8 @@ function getMcpConfigPath(mcpBridgePath: string): string {
     try {
       fs.mkdirSync(path.dirname(mcpConfigPath), { recursive: true });
       fs.writeFileSync(mcpConfigPath, JSON.stringify(buildMcpConfig(mcpBridgePath), null, 2));
+      fs.chmodSync(mcpConfigPath, 0o644);
     } catch {
-      // Fallback: unique temp file per process
       mcpConfigPath = `/tmp/osmoda-mcp-${process.pid}.json`;
       fs.writeFileSync(mcpConfigPath, JSON.stringify(buildMcpConfig(mcpBridgePath), null, 2));
     }
@@ -92,41 +91,34 @@ function getMcpConfigPath(mcpBridgePath: string): string {
 
 /**
  * Call the Claude Code agent with a user message.
- * Spawns `claude -p` and yields events parsed from text output.
+ * Spawns `claude -p --output-format stream-json --verbose` and yields real-time streaming events.
  */
 export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEvent> {
   const claude = findClaude();
   const cwd = opts.cwd || "/root";
   const configPath = getMcpConfigPath(opts.mcpBridgePath);
 
-  // Auth strategy:
-  // - If ANTHROPIC_API_KEY is set (Console key): use --bare mode (fastest, no OAuth)
-  // - If CLAUDE_CODE_OAUTH_TOKEN is set: normal mode with OAuth (subscription credits)
-  // - If neither: normal mode, Claude Code uses its own stored credentials
   const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
 
   const args = [
-    "-p",                          // Print mode (non-interactive)
-    "--output-format", "text",     // Simple text output (most reliable)
-    "--model", opts.model,         // Model selection (v2.1.97+)
-    "--system-prompt", opts.systemPrompt.slice(0, 10000), // System prompt (truncate if huge)
-    "--mcp-config", configPath,    // MCP server config
-    "--allowedTools", "mcp__osmoda__*",  // Pre-approve all osmoda MCP tools (works as root!)
-    "--max-turns", "50",           // Allow complex multi-step tasks (building apps, scraping, etc.)
+    "-p",                                 // Print mode (non-interactive)
+    "--output-format", "stream-json",     // Stream JSON events in real-time
+    "--verbose",                          // Required for stream-json
+    "--model", opts.model,                // Model selection
+    "--system-prompt", opts.systemPrompt.slice(0, 10000),
+    "--mcp-config", configPath,
+    "--allowedTools", "mcp__osmoda__*",
+    "--max-turns", "50",
   ];
 
-  // --bare disables OAuth (only reads ANTHROPIC_API_KEY). Use it only when API key is set.
-  // Without --bare, Claude Code reads OAuth from keychain/credentials (subscription credits).
   if (hasApiKey) {
     args.push("--bare");
   }
 
-  // Resume session if we have one
   if (opts.sessionId) {
     args.push("--resume", opts.sessionId);
   }
 
-  // The prompt goes at the end
   args.push(opts.message);
 
   let proc: ChildProcess;
@@ -145,55 +137,100 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
     return;
   }
 
-  // Handle abort
   if (opts.abortSignal) {
     opts.abortSignal.addEventListener("abort", () => {
       proc.kill("SIGTERM");
     }, { once: true });
   }
 
-  // Collect stdout (text output)
-  let fullText = "";
-  const chunks: string[] = [];
+  // Parse stream-json output line by line for real-time events
+  const rl = readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity });
 
-  proc.stdout?.on("data", (data: Buffer) => {
-    const text = data.toString();
-    chunks.push(text);
-    fullText += text;
-  });
+  let sessionId: string | undefined;
+  let lastTextLen = 0;
 
-  // Collect stderr for errors
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+
+      let event: any;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue; // skip non-JSON lines (warnings, etc.)
+      }
+
+      // Capture session ID
+      if (event.session_id) {
+        sessionId = event.session_id;
+        yield { type: "session", sessionId };
+      }
+
+      // Process by event type
+      const msg = event.message || event;
+      const msgType = msg.type || event.type;
+
+      if (msgType === "assistant") {
+        const content = msg.content || [];
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === "text" && block.text) {
+              // Stream text incrementally (delta from last seen)
+              const newText = block.text;
+              if (newText.length > lastTextLen) {
+                const delta = newText.slice(lastTextLen);
+                lastTextLen = newText.length;
+                yield { type: "text", text: delta };
+              }
+            } else if (block.type === "tool_use" && block.name) {
+              yield { type: "tool_use", name: block.name };
+            }
+          }
+        }
+      } else if (msgType === "tool_result" || msgType === "tool_output") {
+        // Tool execution completed
+        yield { type: "tool_result" };
+      } else if (msgType === "result") {
+        // Final result
+        if (msg.result && typeof msg.result === "string" && lastTextLen === 0) {
+          yield { type: "text", text: msg.result };
+        }
+        if (msg.session_id) sessionId = msg.session_id;
+      } else if (msgType === "system" && msg.subtype === "init") {
+        // Init event — session started
+        if (msg.session_id) {
+          sessionId = msg.session_id;
+          yield { type: "session", sessionId };
+        }
+      }
+    }
+  } catch (e: unknown) {
+    if (opts.abortSignal?.aborted) {
+      yield { type: "done", sessionId };
+      return;
+    }
+    // Don't yield error for readline close
+  }
+
+  // Collect stderr for error reporting
   let stderrText = "";
   proc.stderr?.on("data", (data: Buffer) => {
     stderrText += data.toString();
   });
 
-  // Wait for process to finish
+  // Wait for process to exit
   const exitCode = await new Promise<number>((resolve) => {
     proc.on("close", (code) => resolve(code ?? 1));
-    // Timeout: kill after 10 minutes (complex tasks like building apps need time)
     setTimeout(() => {
       proc.kill("SIGKILL");
       resolve(124);
-    }, 600000);
+    }, 600000); // 10 minute timeout
   });
 
-  if (opts.abortSignal?.aborted) {
-    yield { type: "done" };
-    return;
-  }
-
-  if (exitCode !== 0 && !fullText.trim()) {
-    // Process failed with no output
-    const errMsg = stderrText.trim() || `claude exited with code ${exitCode}`;
+  if (exitCode !== 0 && lastTextLen === 0 && !opts.abortSignal?.aborted) {
+    const errMsg = stderrText.trim().split("\n").pop() || `claude exited with code ${exitCode}`;
     yield { type: "error", text: errMsg };
-    return;
   }
 
-  // Emit the full response as text
-  if (fullText.trim()) {
-    yield { type: "text", text: fullText.trim() };
-  }
-
-  yield { type: "done" };
+  yield { type: "done", sessionId };
 }

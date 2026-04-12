@@ -1,9 +1,9 @@
 /**
  * Claude Code agent wrapper — spawns claude CLI in headless mode with MCP tools.
  *
- * Uses `claude -p --output-format text` for non-interactive agent calls.
- * Auth: ANTHROPIC_API_KEY env var (Console API key, sk-ant-api03-...).
- * Permissions: --allowedTools pre-approves MCP tools (works as root, unlike --dangerously-skip-permissions).
+ * Uses `claude -p --output-format stream-json --verbose` for real-time streaming.
+ * Auth: ANTHROPIC_API_KEY env var (Console key) or CLAUDE_CODE_OAUTH_TOKEN (subscription).
+ * Permissions: --allowedTools pre-approves MCP tools (works as root).
  * MCP: osmoda-mcp-bridge provides 91 system management tools over stdio.
  */
 export interface AgentCallOptions {
@@ -16,13 +16,13 @@ export interface AgentCallOptions {
     abortSignal?: AbortSignal;
 }
 export interface AgentEvent {
-    type: "text" | "tool_use" | "done" | "error" | "session";
+    type: "text" | "tool_use" | "tool_result" | "done" | "error" | "session" | "thinking";
     text?: string;
     name?: string;
     sessionId?: string;
 }
 /**
  * Call the Claude Code agent with a user message.
- * Spawns `claude -p` and yields events parsed from text output.
+ * Spawns `claude -p --output-format stream-json --verbose` and yields real-time streaming events.
  */
 export declare function callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEvent>;

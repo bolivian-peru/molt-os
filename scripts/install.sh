@@ -1439,8 +1439,11 @@ function connect() {
         if (!ccLifecycleStarted) { ccLifecycleStarted = true; upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "start" } } })); }
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "assistant", data: { delta: msg.text } } }));
       } else if (msg.type === "tool_use") {
-        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_use", data: { name: msg.name } } }));
+        if (!ccLifecycleStarted) { ccLifecycleStarted = true; upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "start" } } })); }
+        upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_use", data: { name: msg.name, type: "tool_use" } } }));
       } else if (msg.type === "done") {
+        if (ccLifecycleStarted) { upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "end" } } })); }
+        ccLifecycleStarted = false;
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "end" } }));
       } else if (msg.type === "error") {
         upstream.send(JSON.stringify({ type: "event", event: "error", payload: { message: msg.text } }));

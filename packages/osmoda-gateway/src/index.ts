@@ -201,6 +201,12 @@ wss.on("connection", (ws, req) => {
           case "tool_use":
             ws.send(JSON.stringify({ type: "tool_use", name: event.name }));
             break;
+          case "tool_result":
+            ws.send(JSON.stringify({ type: "tool_result" }));
+            break;
+          case "thinking":
+            ws.send(JSON.stringify({ type: "thinking", text: event.text }));
+            break;
           case "session":
             if (event.sessionId) {
               sessions.updateClaudeSession(sessionKey, "web", event.sessionId);
