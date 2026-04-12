@@ -508,8 +508,13 @@ if [ "$RUNTIME" = "claude-code" ]; then
   log "Installing Claude Code SDK gateway..."
 
   # Install @anthropic-ai/claude-code CLI (provides the 'claude' binary)
-  if ! command -v claude &>/dev/null; then
-    npm install -g @anthropic-ai/claude-code 2>&1 | tail -3 || warn "Claude Code CLI install failed (gateway will use PATH)"
+  # Always install latest in the gateway dir (not global — avoids NixOS /usr/local issues)
+  cd "$GATEWAY_DIR"
+  npm install @anthropic-ai/claude-code@latest 2>&1 | tail -3 || warn "Claude Code CLI install failed"
+  CLAUDE_BIN="$GATEWAY_DIR/node_modules/.bin/claude"
+  if [ -x "$CLAUDE_BIN" ]; then
+    ln -sf "$CLAUDE_BIN" /usr/local/bin/claude 2>/dev/null || true
+    log "Claude Code CLI $(${CLAUDE_BIN} --version 2>/dev/null | head -1) installed"
   fi
 
   # Build the osmoda-gateway (HTTP+WS server that spawns claude CLI with MCP tools)
