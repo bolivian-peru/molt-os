@@ -144,10 +144,19 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
   }
 
   // Parse stream-json output line by line for real-time events
+  // Format: each line is a JSON object with type: system|assistant|user|result
   const rl = readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity });
 
   let sessionId: string | undefined;
+  let sessionYielded = false;
   let lastTextLen = 0;
+  let hasOutput = false;
+
+  // Collect stderr in background
+  let stderrText = "";
+  proc.stderr?.on("data", (data: Buffer) => {
+    stderrText += data.toString();
+  });
 
   try {
     for await (const line of rl) {
@@ -157,77 +166,73 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
       try {
         event = JSON.parse(line);
       } catch {
-        continue; // skip non-JSON lines (warnings, etc.)
+        continue;
       }
 
-      // Capture session ID
-      if (event.session_id) {
+      // Capture session ID (once)
+      if (event.session_id && !sessionYielded) {
         sessionId = event.session_id;
+        sessionYielded = true;
         yield { type: "session", sessionId };
       }
 
-      // Process by event type
-      const msg = event.message || event;
-      const msgType = msg.type || event.type;
+      const eventType = event.type;
 
-      if (msgType === "assistant") {
-        const content = msg.content || [];
+      if (eventType === "system" && event.subtype === "init") {
+        // Session initialized — tools loaded
+        sessionId = event.session_id;
+
+      } else if (eventType === "assistant") {
+        // Assistant message — contains tool_use or text blocks
+        const content = event.message?.content || [];
         if (Array.isArray(content)) {
           for (const block of content) {
-            if (block.type === "text" && block.text) {
-              // Stream text incrementally (delta from last seen)
-              const newText = block.text;
-              if (newText.length > lastTextLen) {
-                const delta = newText.slice(lastTextLen);
-                lastTextLen = newText.length;
-                yield { type: "text", text: delta };
-              }
-            } else if (block.type === "tool_use" && block.name) {
+            if (block.type === "tool_use" && block.name) {
               yield { type: "tool_use", name: block.name };
+              hasOutput = true;
+            } else if (block.type === "text" && block.text) {
+              // Text is accumulated (full text so far), send delta
+              const fullText = block.text;
+              if (fullText.length > lastTextLen) {
+                const delta = fullText.slice(lastTextLen);
+                lastTextLen = fullText.length;
+                yield { type: "text", text: delta };
+                hasOutput = true;
+              }
             }
           }
         }
-      } else if (msgType === "tool_result" || msgType === "tool_output") {
-        // Tool execution completed
-        yield { type: "tool_result" };
-      } else if (msgType === "result") {
-        // Final result
-        if (msg.result && typeof msg.result === "string" && lastTextLen === 0) {
-          yield { type: "text", text: msg.result };
+
+      } else if (eventType === "user") {
+        // Tool result — agent received output from a tool
+        const content = event.message?.content || [];
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === "tool_result") {
+              yield { type: "tool_result" };
+            }
+          }
         }
-        if (msg.session_id) sessionId = msg.session_id;
-      } else if (msgType === "system" && msg.subtype === "init") {
-        // Init event — session started
-        if (msg.session_id) {
-          sessionId = msg.session_id;
-          yield { type: "session", sessionId };
+
+      } else if (eventType === "result") {
+        // Final result — task complete
+        if (event.result && typeof event.result === "string" && !hasOutput) {
+          yield { type: "text", text: event.result };
         }
+        sessionId = event.session_id || sessionId;
       }
     }
-  } catch (e: unknown) {
-    if (opts.abortSignal?.aborted) {
-      yield { type: "done", sessionId };
-      return;
-    }
-    // Don't yield error for readline close
+  } catch {
+    // Readline close or abort — not an error
   }
-
-  // Collect stderr for error reporting
-  let stderrText = "";
-  proc.stderr?.on("data", (data: Buffer) => {
-    stderrText += data.toString();
-  });
 
   // Wait for process to exit
   const exitCode = await new Promise<number>((resolve) => {
     proc.on("close", (code) => resolve(code ?? 1));
-    setTimeout(() => {
-      proc.kill("SIGKILL");
-      resolve(124);
-    }, 600000); // 10 minute timeout
+    setTimeout(() => { proc.kill("SIGKILL"); resolve(124); }, 600000);
   });
 
-  if (exitCode !== 0 && lastTextLen === 0 && !opts.abortSignal?.aborted) {
+  if (exitCode !== 0 && !hasOutput && !opts.abortSignal?.aborted) {
     const errMsg = stderrText.trim().split("\n").pop() || `claude exited with code ${exitCode}`;
     yield { type: "error", text: errMsg };
   }
