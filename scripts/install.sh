@@ -1417,6 +1417,7 @@ function connect() {
 
   // ─── Claude Code SDK: simple WS protocol ───
   function connectClaudeCode() {
+    let ccLifecycleStarted = false;
     const gwToken = readConfig("gateway-token");
     local = new WebSocket(`${OC_URL}/ws`, {
       headers: { "Authorization": `Bearer ${gwToken}` },
@@ -1434,6 +1435,8 @@ function connect() {
       // Forward gateway events to upstream (spawn dashboard)
       // Convert from gateway format to spawn-expected format
       if (msg.type === "text") {
+        // Send lifecycle start before first text (dashboard needs it to create stream container)
+        if (!ccLifecycleStarted) { ccLifecycleStarted = true; upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "lifecycle", data: { phase: "start" } } })); }
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "assistant", data: { delta: msg.text } } }));
       } else if (msg.type === "tool_use") {
         upstream.send(JSON.stringify({ type: "event", event: "agent", payload: { stream: "tool_use", data: { name: msg.name } } }));
