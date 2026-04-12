@@ -108,7 +108,6 @@ export async function* callAgent(opts: AgentCallOptions): AsyncGenerator<AgentEv
     "--system-prompt", opts.systemPrompt.slice(0, 10000),
     "--mcp-config", configPath,
     "--allowedTools", "mcp__osmoda__*",
-    "--max-turns", "50",
   ];
 
   if (hasApiKey) {
