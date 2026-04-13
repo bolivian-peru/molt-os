@@ -82,6 +82,7 @@ CALLBACK_URL=""
 HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
 RUNTIME="claude-code"  # claude-code (default) or openclaw (legacy)
+SNAPSHOT_MODE=false     # true when booting from pre-built NixOS snapshot
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -93,6 +94,7 @@ while [[ $# -gt 0 ]]; do
     --heartbeat-secret)  HEARTBEAT_SECRET="$2"; shift 2 ;;
     --provider)          PROVIDER_TYPE="$2"; shift 2 ;;
     --runtime)           RUNTIME="$2"; shift 2 ;;
+    --snapshot)          SNAPSHOT_MODE=true; shift ;;
     --help|-h)
       echo "osModa Installer v${VERSION}"
       echo ""
@@ -328,9 +330,45 @@ if [ "$OS_TYPE" = "nixos" ] && grep -q 'osmoda-phase2' /etc/nixos/configuration.
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: Install dependencies
+# Snapshot Mode Fast-Path: Skip Steps 2-4 (deps, clone, build already done)
 # ---------------------------------------------------------------------------
 report_progress "preflight" "done" "$OS_TYPE $ARCH"
+
+if [ "$SNAPSHOT_MODE" = true ] && [ -f "/opt/osmoda/target/release/agentd" ]; then
+  log "Snapshot mode: Pre-compiled binaries detected, skipping build"
+  INSTALL_DIR="/opt/osmoda"
+  cd "$INSTALL_DIR"
+
+  # Ensure bin symlinks exist
+  mkdir -p "$INSTALL_DIR/bin"
+  for binary in agentd agentctl osmoda-egress osmoda-keyd osmoda-watch osmoda-routines osmoda-voice osmoda-mesh osmoda-mcpd osmoda-teachd; do
+    [ -f "target/release/$binary" ] && ln -sf "$INSTALL_DIR/target/release/$binary" "$INSTALL_DIR/bin/$binary"
+  done
+  export PATH="$INSTALL_DIR/bin:$PATH"
+
+  # Pull latest source (templates, skills, install.sh changes)
+  report_progress "clone" "started" "Updating source from GitHub"
+  timeout 120 git fetch origin "${BRANCH:-main}" 2>/dev/null && git reset --hard "origin/${BRANCH:-main}" 2>/dev/null || true
+  report_progress "clone" "done" "Source updated"
+
+  # Check if Claude CLI needs update
+  GATEWAY_DIR="$INSTALL_DIR/packages/osmoda-gateway"
+  MCP_BRIDGE_DIR="$INSTALL_DIR/packages/osmoda-mcp-bridge"
+  CLAUDE_BIN="$GATEWAY_DIR/node_modules/.bin/claude"
+  if [ ! -x "$CLAUDE_BIN" ]; then
+    cd "$GATEWAY_DIR" && npm install @anthropic-ai/claude-code@latest 2>&1 | tail -3
+  fi
+
+  report_progress "build" "done" "Pre-compiled binaries (NixOS snapshot)"
+  report_progress "dependencies" "done" "Snapshot mode — all deps pre-installed"
+
+  # Jump directly to Step 5 (install agent runtime)
+  # Steps 2-4 are completely skipped
+else
+
+# ---------------------------------------------------------------------------
+# Step 2: Install dependencies (non-snapshot path)
+# ---------------------------------------------------------------------------
 report_progress "dependencies" "started" "Installing build tools + Node.js + Rust"
 log "Step 2: Installing dependencies..."
 
@@ -491,6 +529,8 @@ fi
 export PATH="$INSTALL_DIR/bin:$PATH"
 
 log "Build complete."
+
+fi  # end non-snapshot path (Steps 2-4)
 
 # ---------------------------------------------------------------------------
 # Step 5: Install agent runtime
