@@ -407,8 +407,14 @@ fi
 
 # Ensure Rust toolchain
 if ! command -v cargo &>/dev/null; then
-  log "Installing Rust toolchain via rustup..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>&1 | tail -3
+  if [ "$OS_TYPE" = "nixos" ]; then
+    log "NixOS: Rust available via nix-shell (used during cargo build step)"
+    # On NixOS, rustup doesn't work (dynamically linked). Use nix-shell instead.
+    USE_NIX_SHELL=true
+  else
+    log "Installing Rust toolchain via rustup..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>&1 | tail -3
+  fi
 fi
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -467,10 +473,12 @@ if [ "${USE_NIX_SHELL:-false}" = true ]; then
     if cargo build --release --workspace 2>&1 | tee "$BUILD_LOG"; then
       log "Build succeeded with system Rust."
     else
-      warn "System Rust too old for some deps, retrying with nix-shell (nixos-unstable)..."
+      warn "System Rust too old for some deps, retrying with nix-shell (nixpkgs-unstable)..."
+      nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs-unstable 2>/dev/null
+      nix-channel --update 2>&1 | tail -2
       rm -f "$BUILD_LOG"
       BUILD_LOG=$(mktemp /tmp/osmoda-build-XXXXXX.log)
-      if ! nix-shell -p cargo rustc gcc pkg-config gnumake openssl.dev --run "cargo build --release --workspace" 2>&1 | tee "$BUILD_LOG"; then
+      if ! nix-shell -I nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixpkgs-unstable -p cargo rustc gcc pkg-config gnumake openssl sqlite openssl.dev sqlite.dev --run "cargo build --release --workspace" 2>&1 | tee "$BUILD_LOG"; then
         error "Build failed. Full output:"
         cat "$BUILD_LOG"
         rm -f "$BUILD_LOG"
