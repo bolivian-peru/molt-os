@@ -37,7 +37,7 @@ sha2 = "0.10"
 # PQ transport layer (double-encrypt: Noise + ChaCha20-Poly1305 keyed by ML-KEM material)
 chacha20poly1305 = "0.10"
 # Key handling
-rand = "0.8"
+rand = "0.9"
 zeroize = { version = "1", features = ["derive"] }
 base64 = "0.22"
 socket2 = { version = "0.5", features = ["all"] }

@@ -29,7 +29,7 @@ bs58 = "0.5"
 # Key management
 aes-gcm = "0.10"
 argon2 = "0.5"
-rand = "0.8"
+rand = "0.9"
 sha2 = "0.10"
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
