@@ -562,15 +562,26 @@ Overview tab shows 4 new cards (conditional, only when data exists):
 Agent-to-agent spawning. Coinbase x402 protocol (USDC on Base or Solana).
 
 ```
-GET  /.well-known/agent-card.json     → A2A/ERC-8004 Agent Card (skills = plans, x402 pricing)
-GET  /api/v1/plans                    → Plan list with x402 info (free)
-POST /api/v1/spawn/:planId            → Spawn server (x402-gated), returns osk_ API token
-GET  /api/v1/status/:orderId          → Status (basic free, full with Bearer osk_)
-WS   /api/v1/chat/:orderId            → WebSocket chat (auth via ?token=osk_)
-GET  /api/v1/docs                     → OpenAPI 3.0 spec with x402 extensions
+GET    /.well-known/agent-card.json   → A2A/ERC-8004 Agent Card (skills = plans, x402 pricing)
+GET    /api/v1/plans                  → Plan list with x402 info (free)
+POST   /api/v1/spawn/:planId          → Spawn server (x402-gated), returns osk_ API token
+                                        Honors Idempotency-Key header (16–128 chars, 24h cache)
+GET    /api/v1/status/:orderId        → Status (basic free, full with Bearer osk_)
+GET    /api/v1/tokens/:token_id       → Token metadata (Bearer, own-token only)
+DELETE /api/v1/tokens/:token_id       → Revoke token (Bearer, own-token only)
+WS     /api/v1/chat/:orderId          → WebSocket chat (auth via ?token=osk_)
+                                        30s heartbeat, 10m idle close (4003),
+                                        max 3 sessions/token, backpressure pause/resume
+GET    /api/v1/docs                   → OpenAPI 3.0.3 spec (v1.1.0, full schemas + examples)
 ```
 
+Every response carries `X-Request-Id`. Errors use a uniform envelope:
+`{ code, message, detail?, request_id, error }` (the `error` field is a legacy alias for `code`).
+Rate-limited (429) responses include `Retry-After` in seconds. Per-token quotas: spawn 10/h,
+status 120/min — applied when a valid `Bearer osk_` token is present.
+
 Dependencies: `@x402/express`, `@x402/core`, `@x402/evm`. Graceful fallback if not installed.
+Token metadata persists in `apps/spawn/data/tokens.enc` (AES-256-GCM, same pattern as orders).
 
 ## Non-negotiables
 

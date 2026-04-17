@@ -369,17 +369,24 @@ Redesigned single-column layout with tabbed interface (Overview / Chat / Setting
 ### v1 Programmatic API
 
 Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
+**v1.1.0** (2026-04-17): production-readiness pass — see `apps/spawn/CHANGELOG.md`.
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|
-| Agent Card (`/.well-known/agent-card.json`) | **Functional** | A2A/ERC-8004 discovery with plans as skills, x402 pricing, input/output schemas |
-| `GET /api/v1/plans` | **Functional** | Plan list with x402 pricing, regions, network mode |
-| `POST /api/v1/spawn/:planId` | **Functional** | x402-gated server spawn, returns API token (`osk_...`), provisions Hetzner VM |
-| `GET /api/v1/status/:orderId` | **Functional** | Basic status free, full details require Bearer `osk_` token |
-| `WS /api/v1/chat/:orderId` | **Functional** | WebSocket chat with server AI, auth via `?token=osk_...` query param |
-| `GET /api/v1/docs` | **Functional** | OpenAPI 3.0 spec with x402 extensions |
+| Agent Card (`/.well-known/agent-card.json`) | **Solid** | A2A + ERC-8004 (protocols array, chainId per payment method, semver 1.1.0) |
+| `GET /api/v1/plans` | **Solid** | Plan list with x402 pricing, regions, network mode |
+| `POST /api/v1/spawn/:planId` | **Solid** | x402-gated spawn. **Idempotency-Key** pre-check runs BEFORE x402 middleware → retries never re-pay |
+| `GET /api/v1/status/:orderId` | **Solid** | Basic status free; full details require Bearer `osk_`; enforces token expiry/revoke |
+| `GET /api/v1/tokens/:token_id` | **Solid** | Token metadata (own-token only) |
+| `DELETE /api/v1/tokens/:token_id` | **Solid** | Token revoke (own-token only); `204` on success |
+| `WS /api/v1/chat/:orderId` | **Solid** | 30 s heartbeat, 10 min idle close (4003), enforced backpressure (drops paused), 3 sessions/token cap |
+| `GET /api/v1/docs` | **Solid** | OpenAPI 3.0.3 v1.1.0 — `securitySchemes.bearerAuth`, `Error` schema, `required` arrays, examples, `x-websocket` |
 | x402 payment middleware | **Functional** | `@x402/express` + `@x402/evm` + `@x402/svm` + `@x402/core`, USDC on Base (EVM) + Solana (SVM) |
-| API token auth | **Functional** | Cryptographically random `osk_` tokens, SHA-256 hashed storage, timing-safe comparison |
+| Structured error envelope | **Solid** | `{code, message, detail?, request_id, error}` on every /api/v1/* + agent-card error; legacy `error` kept one release |
+| Request IDs | **Solid** | `X-Request-Id: req_<ulid>` on every response, prefixed into `[req_…]` log lines |
+| Token lifecycle | **Solid** | `tokens.enc` AES-256-GCM store; 1-year default TTL; lazy metadata for legacy tokens |
+| Per-token rate limits | **Solid** | spawn 10/h, status 120/min, chat 3 concurrent — all with `Retry-After` on 429 |
+| `@osmoda/client` TypeScript SDK | **Functional** | `packages/osmoda-client/` — handwritten to match `/api/v1/docs`; typechecks clean |
 | Agent skill doc (`/SKILL.md`) | **Functional** | 369-line plain-text agent-readable doc with full API reference, x402 flow, all 90 tools |
 
 ### Heartbeat Pipeline

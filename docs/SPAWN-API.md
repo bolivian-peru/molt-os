@@ -1,8 +1,10 @@
 # Spawn API v1 — x402-Gated Public API
 
-Last updated: 2026-03-06
+Last updated: 2026-04-17 · API version: **1.1.0**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
+
+**Production-readiness pass (v1.1.0):** idempotent spawn, structured error envelope, request IDs, token expiry + revoke, per-token rate limits, hardened WebSocket (heartbeat / idle / backpressure / concurrency cap), complete OpenAPI 3.0.3 spec. See `apps/spawn/CHANGELOG.md`.
 
 ---
 
@@ -103,6 +105,30 @@ List available plans with pricing and x402 payment info.
   ],
   "network": "testnet"
 }
+```
+
+#### `GET /api/v1/tokens/:token_id`
+
+Read token metadata. **Bearer required; a token can only read its own metadata.**
+
+```json
+{
+  "token_id": "0123abcdef456789",
+  "order_id": "e5c49d30-1234-4abc-9def-0123456789ab",
+  "created_at": "2026-04-17T12:00:00.000Z",
+  "expires_at": "2027-04-17T12:00:00.000Z",
+  "revoked_at": null
+}
+```
+
+#### `DELETE /api/v1/tokens/:token_id`
+
+Revoke the token permanently. **Bearer required; a token can only revoke itself.** Returns `204` on success. Subsequent authenticated calls with that token return `401 token_revoked`.
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer osk_…" \
+  https://spawn.os.moda/api/v1/tokens/0123abcdef456789
 ```
 
 #### `GET /api/v1/status/:orderId`
@@ -213,19 +239,42 @@ All spawn endpoints require x402 USDC payment. Without a valid `PAYMENT` header,
 
 Real-time chat with the spawned server's AI agent.
 
-**Auth**: `token` query parameter with the `osk_` token from the spawn response.
+**Auth**: `token` query parameter with the `osk_` token from the spawn response. Tokens are validated pre-upgrade; expired or revoked tokens are rejected with `401` or `403` plus `X-Auth-Reason: token_expired|token_revoked|forbidden` on the response line.
+
+**Message size**: max 64 KB per frame.
+
+**Heartbeat**: the server pings every 30 s. Your client MUST respond with pong (the default `ws` / browser `WebSocket` behavior already does this). A missed pong terminates the connection.
+
+**Idle timeout**: the server closes with code `4003 idle_timeout` after 10 minutes of no client messages. Send any frame (even an empty ping-like message) to keep the connection alive.
+
+**Concurrency cap**: max 3 concurrent sessions per `osk_` token. A 4th connection is refused pre-upgrade with `429` and `X-Auth-Reason: too_many_connections`.
+
+**Backpressure**: if your client falls behind (server-side `bufferedAmount > 1 MB`), the server emits `{"type":"backpressure_pause"}` and stops relaying agent frames to you until the buffer drains below 256 KB, at which point it emits `{"type":"backpressure_resume"}`. Frames are dropped while paused (not queued).
 
 **Messages** (JSON):
 ```json
 // Send to agent
-{ "type": "message", "text": "What's the server status?" }
+{ "type": "chat", "text": "What's the server status?" }
+{ "type": "abort" }
 
 // Receive from agent
-{ "type": "message", "text": "All systems operational..." }
-
-// Status updates
-{ "type": "status", "agent_connected": true }
+{ "type": "status",  "agent_connected": true }
+{ "type": "text",    "text": "All systems …" }
+{ "type": "tool_use","name": "system_query" }
+{ "type": "tool_result" }
+{ "type": "done" }
+{ "type": "error",   "code": "…",  "text": "…" }
+{ "type": "backpressure_pause"  }
+{ "type": "backpressure_resume" }
 ```
+
+**Close codes**:
+| Code | Meaning |
+|---|---|
+| 1000 | Normal close |
+| 4001 | Unauthorized (missing / malformed token) |
+| 4003 | Idle timeout |
+| 4008 | (reserved for concurrency — today concurrency is rejected pre-upgrade via 429) |
 
 ---
 
@@ -235,35 +284,113 @@ The v1 API uses **two auth mechanisms**:
 
 1. **x402 payment** — for spawn endpoints. The `@x402/express` middleware handles this automatically. You pay once per spawn, and the facilitator settles on-chain.
 
-2. **Bearer token** — for post-spawn operations. The `osk_` token returned in the spawn response authenticates status checks and WebSocket connections.
+2. **Bearer token** — for post-spawn operations. The `osk_` token returned in the spawn response authenticates status checks, token management, and WebSocket connections.
 
 No API keys. No accounts. No sessions. No cookies. Pay and go.
+
+### Token lifecycle
+
+Every `osk_` token has metadata: `token_id`, `created_at`, `expires_at` (default 1 year), and `revoked_at`. The `token_id` is the first 16 hex chars of the token's SHA-256 hash — safe to log.
+
+- **Inspect**: `GET /api/v1/tokens/:token_id` with the token as Bearer. Returns metadata; only the token itself can read its own metadata.
+- **Revoke**: `DELETE /api/v1/tokens/:token_id` with the token as Bearer. Returns `204`; subsequent calls with the revoked token return `401 token_revoked`.
+- Expired tokens return `401 token_expired`.
+
+Legacy tokens issued before v1.1.0 are lazily assigned a 1-year expiry on first use — no action required.
+
+---
+
+## Idempotency
+
+`POST /api/v1/spawn/:planId` is safe to retry. Send a client-generated `Idempotency-Key` header (16–128 chars, `[A-Za-z0-9_-]`). The pre-check runs **before** x402 payment middleware, so a retry with a cached key short-circuits without being asked to pay again.
+
+- **Same key + same body** → replays the original response byte-for-byte, with header `Idempotent-Replayed: true`. TTL: 24 hours.
+- **Same key + different body** → `409 idempotency_key_reused`.
+- **No header** → behavior unchanged.
+
+Failed spawns are **not** cached, so you can safely retry after provisioning errors (with a new payment).
+
+```bash
+curl -X POST https://spawn.os.moda/api/v1/spawn/starter \
+  -H "Idempotency-Key: $(date +%Y-%m-%d)-myapp-$(openssl rand -hex 4)" \
+  -H "Content-Type: application/json" \
+  -d '{"region":"eu-central"}'
+```
+
+---
+
+## Request IDs
+
+Every response — success or error — carries `X-Request-Id: req_<ulid>`. The same ID appears in server logs for any given request. Include it when asking for support.
+
+You can also **send** `X-Request-Id` on a request; if it matches `[A-Za-z0-9_-]{8,64}` the server echoes it back instead of generating one.
 
 ---
 
 ## Rate limits
 
-| Endpoint type | Limit |
-|---------------|-------|
-| Free endpoints (`/plans`, `/status`, `/docs`, agent card) | 30 req/min per IP |
-| Spawn endpoints | 5 req/min per IP |
+| Bucket | Limit | Notes |
+|---|---|---|
+| Per-IP, free endpoints (`/plans`, `/status`, `/docs`, `/tokens`, agent card) | 30 req/min | Always on |
+| Per-IP, spawn | 5 req/min | Always on |
+| Per-token, spawn | 10 req/hour | Applies when `Authorization: Bearer osk_…` is present on spawn |
+| Per-token, status | 120 req/min | Applies on the Bearer-authenticated path only |
+| WebSocket chat, per-token | 3 concurrent sessions | 4th is rejected pre-upgrade with `429 + X-Auth-Reason: too_many_connections` |
+
+All `429` responses include a `Retry-After` header (seconds) and the structured `rate_limited` error code.
 
 ---
 
 ## Error responses
 
-All errors return JSON:
+Every error returns the same envelope:
 
 ```json
-{ "error": "Human-readable error message" }
+{
+  "code": "plan_not_found",
+  "message": "Unknown plan: foo.",
+  "detail": { "planId": "foo" },
+  "request_id": "req_01JAXYZABC...",
+  "error": "plan_not_found"
+}
 ```
+
+- `code` — machine-readable, stable. Match against this field.
+- `message` — human-readable, may change wording between releases.
+- `detail` — optional endpoint-specific diagnostic fields.
+- `request_id` — echoes the `X-Request-Id` response header.
+- `error` — **legacy alias for `code`**, kept for one release for older clients. New integrations should read `code`.
+
+### Canonical error codes
+
+| Code | HTTP | Where |
+|---|---|---|
+| `validation_failed` | 400 | bad order ID, bad token_id format |
+| `invalid_idempotency_key` | 400 | header fails 16–128 char / charset regex |
+| `idempotency_key_reused` | 409 | same key, different body |
+| `plan_not_found` | 404 | unknown planId |
+| `order_not_found` | 404 | no such orderId |
+| `unauthorized` | 401 | missing / malformed Bearer |
+| `token_expired` | 401 | `expires_at` in the past |
+| `token_revoked` | 401 | `revoked_at` set |
+| `forbidden` | 403 | valid token, wrong resource |
+| `rate_limited` | 429 | includes `Retry-After` |
+| `provisioning_failed` | 500 | Hetzner/cloud-init error (detail has reason) |
+| `internal_error` | 500 | anything unexpected |
+| `service_unavailable` | 503 | x402 middleware offline, HETZNER_TOKEN missing |
+| Payment-required envelope | 402 | x402 — `{x402Version, error, accepts[]}`, not the Error shape above |
+
+### HTTP status summary
 
 | Status | Meaning |
 |--------|---------|
-| 400 | Invalid input (bad order ID format, etc.) |
-| 402 | Payment required (x402 — includes payment details in headers) |
+| 400 | Validation failed |
+| 401 | Missing / expired / revoked token |
+| 402 | Payment required (x402 — payment requirements in body) |
+| 403 | Valid token, wrong resource |
 | 404 | Order or plan not found |
-| 429 | Rate limited |
+| 409 | Idempotency-Key reused with different body |
+| 429 | Rate limited — honor `Retry-After` |
 | 500 | Server error (provisioning failed, internal error) |
 | 503 | Service unavailable (payment system not active, provisioner offline) |
 
@@ -385,7 +512,8 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
   "name": "osModa Spawn",
   "description": "Spawn dedicated AI-managed NixOS servers...",
   "url": "https://spawn.os.moda",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "protocols": ["A2A/1.0", "ERC-8004"],
   "protocol": "A2A",
   "capabilities": { "x402": true, "streaming": true, "websocket": true },
   "skills": [
@@ -400,8 +528,8 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
         "currency": "USDC",
         "protocol": "x402",
         "accepts": [
-          { "network": "eip155:8453", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "payTo": "0x..." },
-          { "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "payTo": "DFbW..." }
+          { "network": "eip155:8453", "chainId": 8453,          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "payTo": "0x..." },
+          { "network": "solana:5eyk…", "chainId": "mainnet-beta", "asset": "EPjF…",                                      "payTo": "DFbW..." }
         ]
       },
       "inputSchema": { "..." },
@@ -411,15 +539,16 @@ The agent card at `/.well-known/agent-card.json` follows the A2A / ERC-8004 patt
   "payment": {
     "protocol": "x402",
     "accepts": [
-      { "network": "eip155:8453", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "payTo": "0x..." },
-      { "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "payTo": "DFbW..." }
+      { "network": "eip155:8453", "chainId": 8453,          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "payTo": "0x..." },
+      { "network": "solana:5eyk…", "chainId": "mainnet-beta", "asset": "EPjF…",                                      "payTo": "DFbW..." }
     ]
   },
   "endpoints": {
-    "plans": "https://spawn.os.moda/api/v1/plans",
-    "docs": "https://spawn.os.moda/api/v1/docs",
+    "plans":  "https://spawn.os.moda/api/v1/plans",
+    "docs":   "https://spawn.os.moda/api/v1/docs",
     "status": "https://spawn.os.moda/api/v1/status/{orderId}",
-    "chat": "wss://spawn.os.moda/api/v1/chat/{orderId}"
+    "tokens": "https://spawn.os.moda/api/v1/tokens/{token_id}",
+    "chat":   "wss://spawn.os.moda/api/v1/chat/{orderId}"
   }
 }
 ```
@@ -453,10 +582,14 @@ The agent card at the well-known URL enables automatic discovery by any Daydream
 
 ## Security notes
 
-- **API tokens**: Generated with `crypto.randomBytes(32)`. Stored as SHA-256 hash (never raw). Shown once at spawn time.
+- **API tokens**: Generated with `crypto.randomBytes(32)`. Stored as SHA-256 hash (never raw). Shown once at spawn time. 1-year default TTL (`TOKEN_DEFAULT_TTL_DAYS`). Revocable via `DELETE /api/v1/tokens/:token_id`.
+- **Token metadata store**: `apps/spawn/data/tokens.enc` — AES-256-GCM, same pattern as orders/sessions.
+- **Token ID**: first 16 hex chars of the SHA-256 token hash — safe to log, used as the public identifier in the `/tokens/:token_id` URL.
 - **Token comparison**: Timing-safe (`crypto.timingSafeEqual` on hashes).
-- **Rate limiting**: All endpoints rate-limited per IP.
+- **Rate limiting**: Per-IP floor on every endpoint; per-token quotas on spawn (10/h) and status (120/min) when `Bearer osk_…` is present.
+- **WebSocket hardening**: 30 s heartbeat, 10 min idle close, enforced backpressure (drops frames to paused clients), 3-session cap per token.
 - **Input validation**: SSH keys regex-checked, AI provider allowlisted, API keys max 256 chars, order IDs UUID-format validated.
+- **Idempotency**: `Idempotency-Key` pre-check runs **before** x402 payment middleware, so retries never re-pay.
 - **x402 guard**: If `@x402/express` middleware fails to initialize, spawn endpoints return 503 (no unpaid spawns possible).
 - **No email required**: API orders are anonymous. No user account created.
 - **API keys**: Passed to server via cloud-init, then deleted from order record.
