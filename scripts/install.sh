@@ -225,12 +225,13 @@ if [ "$SKIP_NIXOS" = false ]; then
     [ -n "$CALLBACK_URL" ] && PHASE2_ARGS="$PHASE2_ARGS --callback-url $CALLBACK_URL"
     [ -n "$HEARTBEAT_SECRET" ] && PHASE2_ARGS="$PHASE2_ARGS --heartbeat-secret $HEARTBEAT_SECRET"
     [ -n "$PROVIDER_TYPE" ] && PHASE2_ARGS="$PHASE2_ARGS --provider $PROVIDER_TYPE"
-    [ -n "$RUNTIME" ] && PHASE2_ARGS="$PHASE2_ARGS --runtime $RUNTIME"
-    [ -n "$DEFAULT_MODEL" ] && PHASE2_ARGS="$PHASE2_ARGS --default-model $DEFAULT_MODEL"
-    # Pass through every --credential in order. Values are base64-embedded so
-    # no shell-escaping worries across the Phase-1 → Phase-2 boundary.
+    [ -n "$RUNTIME" ] && PHASE2_ARGS="$PHASE2_ARGS --runtime $(printf %q "$RUNTIME")"
+    [ -n "$DEFAULT_MODEL" ] && PHASE2_ARGS="$PHASE2_ARGS --default-model $(printf %q "$DEFAULT_MODEL")"
+    # Pass through every --credential in order. printf %q quotes anything the
+    # downstream Phase-2 shell might split on (spaces, etc). Label sanitizer
+    # restricts the charset, but defense in depth is cheap.
     for cred in "${CREDENTIALS[@]}"; do
-      PHASE2_ARGS="$PHASE2_ARGS --credential $cred"
+      PHASE2_ARGS="$PHASE2_ARGS --credential $(printf %q "$cred")"
     done
     INSTALL_URL="https://raw.githubusercontent.com/bolivian-peru/os-moda/${BRANCH:-main}/scripts/install.sh"
 

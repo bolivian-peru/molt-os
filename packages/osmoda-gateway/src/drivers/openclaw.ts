@@ -38,13 +38,27 @@ function findOpenClawBinary(): string | null {
   return null;
 }
 
-function writeAuthProfile(agentId: string, cred: Credential): void {
-  const dir = path.join("/root/.openclaw/agents", agentId, "agent");
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const profile = cred.type === "oauth"
-    ? { type: "token", provider: cred.provider, token: cred.secret }
-    : { type: "api_key", provider: cred.provider, key: cred.secret };
-  fs.writeFileSync(path.join(dir, "auth-profiles.json"), JSON.stringify(profile), { mode: 0o600 });
+// Serialize auth-profile writes per agent — two concurrent sessions with
+// different credentials would otherwise race on the same file and a chat
+// could land on the other user's credential.
+const authWriteLocks = new Map<string, Promise<void>>();
+
+function writeAuthProfile(agentId: string, cred: Credential): Promise<void> {
+  const prev = authWriteLocks.get(agentId) || Promise.resolve();
+  const next = prev.then(async () => {
+    const dir = path.join("/root/.openclaw/agents", agentId, "agent");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const profile = cred.type === "oauth"
+      ? { type: "token", provider: cred.provider, token: cred.secret }
+      : { type: "api_key", provider: cred.provider, key: cred.secret };
+    const target = path.join(dir, "auth-profiles.json");
+    // Atomic write to avoid half-written file being read mid-launch.
+    const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(tmp, JSON.stringify(profile), { mode: 0o600 });
+    fs.renameSync(tmp, target);
+  }, () => { /* swallow previous error — each call retries its own write */ });
+  authWriteLocks.set(agentId, next);
+  return next;
 }
 
 export const openClawDriver: RuntimeDriver = {
@@ -87,8 +101,9 @@ export const openClawDriver: RuntimeDriver = {
       return;
     }
 
-    // OpenClaw reads auth from a file per agent id.
-    try { writeAuthProfile(opts.agent.id, opts.credential); }
+    // OpenClaw reads auth from a file per agent id. Serialized per-agent so
+    // concurrent sessions with different credentials don't collide.
+    try { await writeAuthProfile(opts.agent.id, opts.credential); }
     catch (e) {
       yield {
         type: "error",

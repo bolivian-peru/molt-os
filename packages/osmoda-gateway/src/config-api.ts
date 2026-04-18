@@ -7,6 +7,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import * as crypto from "node:crypto";
 import {
   loadCredentials, addCredential, removeCredential, setDefault,
   getCredential, updateCredentialMeta, redact,
@@ -40,10 +41,36 @@ async function readJson(req: IncomingMessage): Promise<any> {
   return JSON.parse(body);
 }
 
+// Profile paths must stay under the osModa state tree. An authed caller
+// with gateway-token could otherwise point system_prompt_file at arbitrary
+// system files and exfiltrate them via the LLM response.
+function isAllowedProfilePath(p: unknown): p is string {
+  if (typeof p !== "string") return false;
+  if (p.length === 0 || p.length > 512) return false;
+  if (p.includes("\0")) return false;
+  // Must be absolute and canonical (no .. segments). We don't resolve
+  // symlinks server-side — this is a syntactic, not semantic, check.
+  if (!p.startsWith("/var/lib/osmoda/")) return false;
+  if (p.split("/").some((seg) => seg === ".." )) return false;
+  return true;
+}
+
 function authed(req: IncomingMessage, token: string | null): boolean {
   if (!token) return false;
   const h = req.headers.authorization;
-  return typeof h === "string" && h === `Bearer ${token}`;
+  if (typeof h !== "string" || !h.startsWith("Bearer ")) return false;
+  const supplied = h.slice(7);
+  // Timing-safe: length-align, then constant-time compare. Prevents byte-at-
+  // a-time discovery of the bearer token via response-latency side channel.
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(token);
+  if (a.length !== b.length) {
+    // Still run a comparison against same-length padding so response time
+    // doesn't leak "wrong length" vs "wrong bytes".
+    crypto.timingSafeEqual(b, b);
+    return false;
+  }
+  try { return crypto.timingSafeEqual(a, b); } catch { return false; }
 }
 
 /**
@@ -92,10 +119,21 @@ export async function handleConfigRequest(
       if (!body.secret || typeof body.secret !== "string" || body.secret.length < 10) {
         return err(res, 400, "validation_failed", "secret required, min 10 chars"), true;
       }
+      if (body.secret.length > 4096) {
+        return err(res, 400, "validation_failed", "secret too long"), true;
+      }
       if (!body.provider) return err(res, 400, "validation_failed", "provider required"), true;
       if (!body.type) return err(res, 400, "validation_failed", "type required"), true;
+      // Bound the credential store: /v1 clients shouldn't be writing hundreds
+      // of credentials, and an authed attacker shouldn't be able to bloat the
+      // AES file into a DoS.
+      const MAX_CREDENTIALS = 64;
+      const existing = loadCredentials().credentials;
+      if (existing.length >= MAX_CREDENTIALS) {
+        return err(res, 409, "conflict", `credential limit reached (${MAX_CREDENTIALS}). Remove one first.`), true;
+      }
       const cred = addCredential({
-        label: body.label || `${body.provider} ${body.type}`,
+        label: (typeof body.label === "string" ? body.label : "").slice(0, 60) || `${body.provider} ${body.type}`,
         provider: body.provider,
         type: body.type,
         secret: body.secret,
@@ -179,6 +217,12 @@ export async function handleConfigRequest(
         if (!getDriver(a.runtime)) {
           return err(res, 400, "validation_failed", `unknown runtime ${a.runtime}`), true;
         }
+        if (a.profile_dir && !isAllowedProfilePath(a.profile_dir)) {
+          return err(res, 400, "validation_failed", `profile_dir must be under /var/lib/osmoda/ (agent ${a.id})`), true;
+        }
+        if (a.system_prompt_file && !isAllowedProfilePath(a.system_prompt_file)) {
+          return err(res, 400, "validation_failed", `system_prompt_file must be under /var/lib/osmoda/ (agent ${a.id})`), true;
+        }
       }
       const now = new Date().toISOString();
       const normalized: AgentProfile[] = body.agents.map((a: AgentProfile) => ({
@@ -202,6 +246,16 @@ export async function handleConfigRequest(
       const current = deps.cache.current();
       const agent = current.agents.find((a) => a.id === id);
       if (!agent) return err(res, 404, "not_found", "agent not found"), true;
+      // Path fields must live under /var/lib/osmoda/… to prevent an authed
+      // caller from pointing system_prompt_file at /etc/shadow and exfiltrating
+      // arbitrary files via the LLM response.
+      if ("profile_dir" in body && !isAllowedProfilePath(body.profile_dir)) {
+        return err(res, 400, "validation_failed", "profile_dir must be under /var/lib/osmoda/"), true;
+      }
+      if ("system_prompt_file" in body && body.system_prompt_file != null
+          && !isAllowedProfilePath(body.system_prompt_file)) {
+        return err(res, 400, "validation_failed", "system_prompt_file must be under /var/lib/osmoda/"), true;
+      }
       for (const k of ["runtime", "credential_id", "model", "display_name", "enabled", "channels", "profile_dir", "system_prompt_file"]) {
         if (k in body) (agent as any)[k] = body[k];
       }

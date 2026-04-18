@@ -191,6 +191,26 @@ export const claudeCodeDriver: RuntimeDriver = {
   },
 };
 
+function isSafeBaseUrl(raw: string): { ok: true; url: URL } | { ok: false; reason: string } {
+  let u: URL;
+  try { u = new URL(raw); } catch { return { ok: false, reason: "invalid_url" }; }
+  if (u.protocol !== "https:") return { ok: false, reason: "base_url must be https" };
+  const host = u.hostname;
+  // Reject literal loopback, link-local, and the AWS/GCP metadata endpoint.
+  // Prevents an authed attacker with /config/credentials access from using
+  // testCredential as an SSRF primitive against internal services.
+  if (/^(localhost|127\.|169\.254\.|0\.0\.0\.0|::1|\[::1\]|\[fc|\[fd|metadata\.google\.internal|169\.254\.169\.254)/i.test(host)) {
+    return { ok: false, reason: "base_url resolves to a restricted host" };
+  }
+  // Block RFC1918 by exact-prefix match on literal IPs. Hostnames that later
+  // resolve into RFC1918 would bypass this; for defense in depth we'd also
+  // want DNS pinning, but the blast radius is gateway-local only.
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) {
+    return { ok: false, reason: "base_url resolves to a private network" };
+  }
+  return { ok: true, url: u };
+}
+
 function probeAnthropic(cred: Credential): Promise<CredentialTestResult> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = {
@@ -201,10 +221,14 @@ function probeAnthropic(cred: Credential): Promise<CredentialTestResult> {
     } else {
       headers["x-api-key"] = cred.secret;
     }
-    const host = cred.base_url ? new URL(cred.base_url).host : "api.anthropic.com";
-    const pathname = cred.base_url
-      ? (new URL(cred.base_url).pathname.replace(/\/$/, "") + "/v1/models")
-      : "/v1/models";
+    let host = "api.anthropic.com";
+    let pathname = "/v1/models";
+    if (cred.base_url) {
+      const check = isSafeBaseUrl(cred.base_url);
+      if (!check.ok) return resolve({ ok: false, error: check.reason });
+      host = check.url.host;
+      pathname = check.url.pathname.replace(/\/$/, "") + "/v1/models";
+    }
     const req = https.request(
       { host, path: pathname, method: "GET", headers, timeout: 10000 },
       (res) => {

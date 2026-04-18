@@ -36,6 +36,11 @@ result-*
 secrets/
 .keys/
 credentials*
+# …but the module source files named credentials.ts/.js are CODE, not
+# secrets, and they live under packages/*/src or packages/*/dist.
+!packages/*/src/credentials.ts
+!packages/*/src/credentials.js
+!packages/*/dist/credentials.js
 server-audit.md
 
 # Runtime data
