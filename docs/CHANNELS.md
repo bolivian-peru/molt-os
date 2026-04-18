@@ -1,6 +1,58 @@
 # Messaging Channels
 
-Talk to your server from your phone. Telegram or WhatsApp.
+*Last updated: 2026-04-18. Reflects the v1.2 modular runtime.*
+
+Talk to your server from your phone. Telegram is live; WhatsApp is documented but the current MCP-based channel bridge for WA is minimal — expect rough edges there.
+
+---
+
+## How channels route to agents (v1.2)
+
+```
+Phone (Telegram / WhatsApp)
+  │
+  ▼
+osmoda-gateway (one systemd unit, modular — reads agents.json)
+  │
+  ├── Web UI          → agent bound to channel "web"      (default: osmoda, Opus)
+  ├── Telegram        → agent bound to channel "telegram" (default: mobile, Sonnet)
+  └── WhatsApp        → agent bound to channel "whatsapp" (default: mobile, Sonnet)
+  │
+  ▼  per-session driver lookup
+  ├── claude-code driver   → spawns `claude` CLI
+  └── openclaw driver      → spawns `openclaw` binary
+  │
+  ▼
+91 MCP tools over stdio → agentd / keyd / watch / routines / mesh / voice / mcpd / teachd
+  │
+  ▼
+Audit ledger (every message + every tool call logged with channel source)
+```
+
+Channel-to-agent routing lives in `/var/lib/osmoda/config/agents.json`:
+
+```json
+{
+  "bindings": [
+    { "channel": "telegram", "agent_id": "mobile" },
+    { "channel": "whatsapp", "agent_id": "mobile" }
+  ]
+}
+```
+
+Change the binding via the dashboard Engine tab, or with a PATCH:
+
+```bash
+TOKEN=$(cat /var/lib/osmoda/config/gateway-token)
+curl -X PUT http://127.0.0.1:18789/config/agents \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{ "agents": [...], "bindings": [
+    {"channel":"telegram", "agent_id":"my-custom-agent"},
+    {"channel":"whatsapp", "agent_id":"mobile"}
+  ]}'
+```
+
+Each agent independently picks its runtime (claude-code or openclaw), credential, and model — see [AUTH.md](AUTH.md) for how credentials work in v1.2.
 
 ---
 
@@ -22,48 +74,36 @@ Talk to your server from your phone. Telegram or WhatsApp.
 6. BotFather gives you a token like: `7123456789:AAF1x2y3z4-abcDEFghiJKLmnoPQRstu`
 7. Copy the token
 
-### Step 2: Get your Telegram user ID
+### Step 2: Get your Telegram username or user ID
 
-You need your numeric user ID to restrict access (so only you can control the bot).
+You need this to restrict access. Either works:
 
-1. Open Telegram
-2. Search for **@userinfobot** and start a chat
-3. Send any message — it replies with your user ID (a number like `123456789`)
-4. Copy the number
+- Your **username** (starting `@`) — easiest, but only if you set one
+- Your **numeric user ID** — message `@userinfobot` on Telegram; it replies with the number
 
 ### Step 3: Configure the server
 
-SSH into your server and run:
+SSH into your server and save the token + set allowed users via NixOS config:
 
 ```bash
-# Save the bot token
 echo 'YOUR_BOT_TOKEN' > /var/lib/osmoda/secrets/telegram-bot-token
 chmod 600 /var/lib/osmoda/secrets/telegram-bot-token
 ```
 
-Then add the Telegram channel to the gateway config:
+Edit `/etc/nixos/configuration.nix`:
 
-```bash
-node -e "
-  var fs = require('fs');
-  var config = JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json', 'utf8'));
-  config.channels = config.channels || {};
-  config.channels.telegram = {
-    enabled: true,
-    tokenFile: '/var/lib/osmoda/secrets/telegram-bot-token',
-    dmPolicy: 'allowlist',
-    allowFrom: ['YOUR_TELEGRAM_USER_ID']
-  };
-  fs.writeFileSync('/root/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
-"
+```nix
+services.osmoda.gateway.telegram = {
+  enable = true;
+  tokenFile = "/var/lib/osmoda/secrets/telegram-bot-token";
+  allowedUsers = [ "YOUR_TELEGRAM_USERNAME" ];  # or ["123456789"] for numeric IDs
+};
 ```
 
-Replace `YOUR_TELEGRAM_USER_ID` with the number from Step 2.
-
-Restart the gateway:
+Rebuild:
 
 ```bash
-systemctl restart osmoda-gateway
+nixos-rebuild switch
 ```
 
 ### Step 4: Test it
@@ -77,75 +117,29 @@ That's it. Your server is now in your pocket.
 
 ### Security note
 
-The `dmPolicy: 'allowlist'` + `allowFrom` setting means **only your Telegram account** can talk to the bot. Without this, anyone who discovers the bot can control your server. Always set it.
+The `allowedUsers` list is an **allowlist**. If empty, the bot ignores every update. Without this, anyone who discovers the bot can control your server. Always set it.
 
-To add more users, add their numeric IDs to the `allowFrom` array:
+To add more users, extend the list:
 
-```json
-"allowFrom": ["123456789", "987654321"]
+```nix
+allowedUsers = [ "alice_username" "987654321" ];
 ```
+
+Usernames and numeric IDs both work.
 
 ---
 
 ## WhatsApp Setup
 
-1. Open the osModa web chat
-2. Say: **"Set up WhatsApp"**
-3. The AI enables the channel and shows you a QR code from the gateway logs
-4. Scan the QR with WhatsApp (Settings > Linked Devices)
-5. Send a message to the linked number
+WhatsApp integration today requires the `whatsapp-mcp` MCP server (or equivalent) — managed via `osmoda-mcpd`. The channel routes the same way as Telegram (bound to the `mobile` agent by default), but the bridge is less mature than Telegram and has fewer tests.
 
-WhatsApp uses device-pairing (like WhatsApp Web), so no bot token is needed.
+If you want to use it:
 
----
+1. Install a WhatsApp MCP server via `mcp_servers` config (see [MCP-ECOSYSTEM.md](MCP-ECOSYSTEM.md))
+2. Bind the `whatsapp` channel to your preferred agent in `agents.json`
+3. Follow the MCP server's device-pairing flow (usually a QR scan in Telegram logs)
 
-## How channels work
-
-```
-Phone (Telegram / WhatsApp)
-  │
-  ▼
-OpenClaw Gateway
-  │
-  ├── Web UI         → osmoda agent  (Claude Opus, full detail)
-  ├── Telegram       → mobile agent  (Claude Sonnet, concise)
-  └── WhatsApp       → mobile agent  (Claude Sonnet, concise)
-  │
-  ▼
-osmoda-bridge → agentd / keyd / watch / routines / mesh / ...
-  │
-  ▼
-Audit ledger (every message logged with channel source)
-```
-
-- **Web chat** uses the `osmoda` agent (Claude Opus) — detailed, thorough responses
-- **Telegram/WhatsApp** route to the `mobile` agent (Claude Sonnet) — concise, phone-friendly responses
-- Both agents have the same 90 tools and full system access
-- All channels share one audit trail
-
----
-
-## NixOS module (declarative config)
-
-If you prefer NixOS config over manual setup:
-
-```nix
-# configuration.nix
-services.osmoda.channels.telegram = {
-  enable = true;
-  botTokenFile = "/var/lib/osmoda/secrets/telegram-bot-token";
-  allowedUsers = [ "yourusername" ];
-};
-
-services.osmoda.channels.whatsapp = {
-  enable = true;
-  allowedNumbers = [ "+1234567890" ];
-};
-```
-
-```bash
-sudo nixos-rebuild switch
-```
+Treat this as beta. If it breaks, fall back to Telegram.
 
 ---
 
@@ -153,24 +147,28 @@ sudo nixos-rebuild switch
 
 **Bot doesn't respond?**
 ```bash
-# Check gateway logs for channel connection
-journalctl -u osmoda-gateway --since '5 min ago' | grep -i telegram
+# Gateway logs for the Telegram dispatch
+journalctl -u osmoda-gateway --since '5 min ago' | grep -iE 'telegram|webhook|channel'
 ```
 
-**"Unauthorized" or bot ignores messages?**
-- Verify your user ID is in the `allowFrom` list
-- Check: `cat /root/.openclaw/openclaw.json | jq '.channels.telegram'`
+**"Telegram agent's credential is missing."**
+The agent bound to `telegram` has no `credential_id`, or the credential was deleted. Open the dashboard → Engine tab → Agents → re-select a credential on the mobile agent → Save.
+
+**"Telegram agent not configured."**
+No agent is bound to the `telegram` channel. Add a binding — see the channels routing section above.
+
+**Unauthorized / bot ignores your messages**
+Your username/ID isn't in `allowedUsers`. Check with:
+```bash
+systemctl show osmoda-gateway --property=Environment | grep TELEGRAM_ALLOWED_USERS
+```
 
 **Wrong bot token?**
 ```bash
-# Overwrite with the correct one
 echo 'CORRECT_TOKEN' > /var/lib/osmoda/secrets/telegram-bot-token
 chmod 600 /var/lib/osmoda/secrets/telegram-bot-token
 systemctl restart osmoda-gateway
 ```
 
-**WhatsApp QR expired?**
-```bash
-systemctl restart osmoda-gateway
-journalctl -u osmoda-gateway -f  # watch for new QR code
-```
+**Agent replies are too long for a Telegram message**
+The gateway chunks replies at 4000 chars to respect Telegram's 4096-char limit. If the agent's outputs are consistently truncated, switch that agent's model to Sonnet or Haiku (shorter responses by temperament) via the Engine tab.

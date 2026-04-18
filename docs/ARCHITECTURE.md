@@ -87,9 +87,10 @@ agents.json. In-flight sessions keep their original driver + credential snapshot
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ OpenClaw Gateway (:18789)                                    │
-│   AI reasoning → builds prompt → calls Claude API            │
-│   osmoda-bridge plugin → 90 tools registered                 │
+│ osmoda-gateway (:18789) — modular, TypeScript                 │
+│   reads agents.json → routes per-agent to a driver            │
+│   drivers: claude-code (default) · openclaw (legacy)          │
+│   osmoda-mcp-bridge → 91 MCP tools                            │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -256,51 +257,59 @@ See [SKILL-LEARNING.md](SKILL-LEARNING.md) for the full skill auto-teaching pipe
 
 ## Multi-Agent Routing
 
-One OpenClaw gateway, multiple routed agents. Each agent is an isolated brain with its own workspace, session store, model, and tool permissions.
+One `osmoda-gateway`, multiple routed agents. Each agent is an isolated config entry in
+`/var/lib/osmoda/config/agents.json` with its own runtime, credential, model, workspace,
+session store, and channel bindings. Agents can share or diverge on any of those axes
+independently.
 
 ```
                     ┌─────────────────────────────────┐
-                    │     OpenClaw Gateway (:18789)     │
-                    │     Multi-Agent Router            │
+                    │   osmoda-gateway (:18789)        │
+                    │   reads agents.json → routes     │
                     └──────┬──────────────┬────────────┘
                            │              │
               ┌────────────▼──┐    ┌──────▼────────────┐
               │  osmoda agent  │    │   mobile agent     │
-              │  (default)     │    │                    │
-              │  Opus 4.6      │    │  Sonnet 4.6        │
-              │  90 tools      │    │  90 tools          │
-              │  19 skills     │    │  19 skills         │
-              │  Full access   │    │  Full access       │
-              │                │    │  Concise responses  │
-              │  ← Web chat    │    │  ← Telegram         │
-              │                │    │  ← WhatsApp         │
+              │  runtime:      │    │   runtime:         │
+              │   claude-code  │    │    claude-code     │
+              │  Opus 4.6      │    │   Sonnet 4.6       │
+              │  91 tools      │    │   91 tools         │
+              │  19 skills     │    │   19 skills        │
+              │  Full access   │    │   Full access      │
+              │                │    │   Concise replies  │
+              │  ← Web chat    │    │   ← Telegram       │
+              │                │    │   ← WhatsApp       │
               └────────────────┘    └────────────────────┘
 ```
 
-**Agents:**
+**Default agents** (install.sh writes both; they point to the same credential by default):
 
 | Agent | Model | Tools | Skills | Channels |
 |-------|-------|-------|--------|----------|
-| `osmoda` (default) | claude-opus-4-6 | All 89 | All 17 | Web chat (default) |
-| `mobile` | claude-sonnet-4-6 | All 89 | All 17 | Telegram, WhatsApp |
+| `osmoda` (default) | claude-opus-4-6 | All 91 | All 19 | Web chat (default) |
+| `mobile` | claude-sonnet-4-6 | All 91 | All 19 | Telegram, WhatsApp |
+
+Any agent's `runtime` can be flipped to `openclaw` from the dashboard Engine tab or via
+`PATCH /config/agents/:id`. The systemd unit does not change — `osmoda-gateway` simply picks
+the `openclaw` driver instead of the `claude-code` driver for that agent's next session.
 
 **Routing rules:** Bindings route Telegram and WhatsApp to `mobile`. Everything else (web chat) falls through to `osmoda` (marked as `default: true`).
 
 **Per-agent workspaces:**
-- `~/.openclaw/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
-- `~/.openclaw/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
+- `/var/lib/osmoda/workspace-osmoda/` — Full AGENTS.md, SOUL.md, TOOLS.md, HEARTBEAT.md, all skills
+- `/var/lib/osmoda/workspace-mobile/` — Mobile-optimized AGENTS.md + SOUL.md (concise style), all skills
 
 **Tool access:** Both agents have full access to all 90 tools. The mobile agent differs only in response style (concise, phone-optimized) and model (Sonnet for faster responses on mobile).
 
 ## Data Flow
 
-1. **User sends message** via web chat, Telegram, or WhatsApp → OpenClaw Gateway
+1. **User sends message** via web chat, Telegram, or WhatsApp → osmoda-gateway
 2. **Gateway routes to agent** — bindings match channel → agent (mobile for Telegram/WhatsApp, osmoda for web)
 3. **Agent workspace loaded** — per-agent AGENTS.md, SOUL.md, skills
 4. **Prompt assembled** with agent-specific system context
-5. **Claude API call** via per-agent auth profile and model selection
-6. **Claude responds** with text + tool calls
-7. **Tool execution** → osmoda-bridge → daemon over Unix socket → structured JSON
+5. **Driver invoked** — claude-code or openclaw, per the agent's `runtime` field
+6. **LLM call** via the agent's `credential` (Anthropic OAuth, API key, or OpenAI/OpenRouter)
+7. **Tool execution** → MCP bridge (or osmoda-bridge for the openclaw driver) → daemon over Unix socket → structured JSON
 8. **Results sent back** to Claude for synthesis
 9. **Ledger event** created for any system mutation
 10. **Response delivered** to originating channel
@@ -311,7 +320,7 @@ One OS instance = one conversation. Multiple channels are windows into the same 
 
 ```
          Web UI (WebSocket)  ──┐
-         Telegram (Bot API)  ──┤──→ OpenClaw Gateway ──→ Single Conversation
+         Telegram (Bot API)  ──┤──→ osmoda-gateway ──→ Single Conversation
          WhatsApp (Baileys)  ──┘         │
                                          ▼
                                    agentd ledger
@@ -320,7 +329,7 @@ One OS instance = one conversation. Multiple channels are windows into the same 
 ```
 
 **How sync works:**
-- OpenClaw gateway maintains one persistent conversation
+- osmoda-gateway maintains one persistent conversation
 - Incoming message from any channel → processed by the AI
 - Response → delivered back to the channel that sent the message
 - All channels see the full conversation history
@@ -332,7 +341,10 @@ One OS instance = one conversation. Multiple channels are windows into the same 
 - Web chat → full detail, code blocks, verbose explanations
 
 **Setup via conversation:**
-Users don't edit config files. They tell the AI "connect Telegram" and the AI does it using its existing tools (`file_write` + `shell_exec`). The AI saves credentials, configures OpenClaw, restarts the gateway.
+Users don't edit config files directly. They tell the agent "connect Telegram" and it does the
+work using `file_write` + `shell_exec`: saves the bot token, edits NixOS config, runs
+`nixos-rebuild switch`. The modern way is to use the dashboard's **Engine** tab — no SSH and no
+nixos-rebuild needed for credential/runtime/model changes, only for new channel setup.
 
 ## Event Ledger
 
@@ -361,7 +373,7 @@ Genesis event has `prev_hash` = all zeros. Chain is verifiable with `agentctl ve
 osModa is a NixOS module (`services.osmoda`). One `enable = true` activates:
 
 - agentd systemd service (root, watchdog)
-- OpenClaw Gateway systemd service (depends on agentd)
+- osmoda-gateway systemd service (depends on agentd)
 - osmoda-keyd service (PrivateNetwork, RestrictAddressFamilies)
 - osmoda-watch service (root, for nixos-rebuild access)
 - osmoda-routines service (systemd hardening)
@@ -378,15 +390,14 @@ NixOS provides atomic, rollbackable system changes — the safest OS for an AI t
 
 ## Messaging Channels
 
-OpenClaw supports Telegram and WhatsApp as messaging channels. osModa surfaces these as NixOS options that generate an OpenClaw config file.
+`osmoda-gateway` has first-class Telegram support (webhook at `POST /telegram`). WhatsApp
+is available via an MCP server managed by `osmoda-mcpd`. Channels route to agents through
+`agents.json` bindings — see [CHANNELS.md](CHANNELS.md).
 
 ```nix
-services.osmoda.channels.telegram.enable = true;
-services.osmoda.channels.telegram.botTokenFile = "/var/lib/osmoda/secrets/telegram-bot-token";
-services.osmoda.channels.telegram.allowedUsers = [ "admin" ];
-
-services.osmoda.channels.whatsapp.enable = true;
-services.osmoda.channels.whatsapp.allowedNumbers = [ "+1234567890" ];
+services.osmoda.gateway.telegram.enable = true;
+services.osmoda.gateway.telegram.tokenFile = "/var/lib/osmoda/secrets/telegram-bot-token";
+services.osmoda.gateway.telegram.allowedUsers = [ "admin_username" ];
 ```
 
 ## Remote Access
@@ -412,13 +423,14 @@ services.osmoda.remoteAccess.tailscale.authKeyFile = "/var/lib/osmoda/secrets/ta
 ```
 
 **How it works:**
-1. NixOS module generates an OpenClaw config JSON from channel options
-2. Config file is passed to the gateway via `--config`
-3. OpenClaw reads the config and initializes its channel adapters
-4. Telegram: bot token read from file, connects via Telegram Bot API
-5. WhatsApp: uses Baileys for Web API, auth state stored in credential directory
+1. NixOS module writes `/var/lib/osmoda/config/agents.json` with bindings `[{channel, agent_id}]`
+2. `osmoda-gateway` reads that on startup and on `SIGHUP`
+3. Telegram: bot token read from `tokenFile`, webhook at `POST /telegram` consumes updates
+4. WhatsApp: MCP server managed by `osmoda-mcpd` handles the Baileys device-pairing flow
+5. Each inbound message → gateway looks up the bound agent → loads its credential → invokes its driver → replies
 
-**Important:** The actual channel implementation lives in OpenClaw, not in osModa. osModa provides the NixOS config surface and credential management. If OpenClaw's config format changes, the generated config file may need updating.
+**Important:** Channel implementation lives in `osmoda-gateway` (for Telegram) and in MCP
+servers (for WhatsApp). osModa provides the NixOS config surface + `agents.json` routing.
 
 **Security:**
 - Bot tokens stored in files with 0600 permissions, never in Nix config
@@ -430,7 +442,7 @@ services.osmoda.remoteAccess.tailscale.authKeyFile = "/var/lib/osmoda/secrets/ta
 M0 uses ledger-based storage with FTS5 full-text search. Semantic vector search (via usearch + fastembed) is designed but deferred to M1.
 
 ```
-User message → OpenClaw → Memory Backend search()
+User message → osmoda-gateway → Memory Backend search()
                               │
                               ├─ SQLite FTS5 BM25 keyword search           [LIVE]
                               │   Porter stemming, unicode tokenization

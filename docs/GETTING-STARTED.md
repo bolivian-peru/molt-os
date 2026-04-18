@@ -1,112 +1,150 @@
 # Getting Started with osModa
 
+*Last updated: 2026-04-18. Reflects the v1.2 modular runtime.*
+
 Your first 10 minutes with an AI-managed server.
 
 ## Prerequisites
 
 - A fresh VPS (Ubuntu 22.04/24.04 or Debian 12) — Hetzner, DigitalOcean, etc.
-- An Anthropic API key or OAuth token (see [Auth](AUTH.md))
+- One of:
+  - A **Claude Pro / Max OAuth token** (`sk-ant-oat01-…`) — cheapest for heavy agent use
+  - An **Anthropic Console API key** (`sk-ant-api03-…`) — pay-per-token
+  - Or you can defer this and add credentials after install
 - SSH access to the server
+
+See [AUTH.md](AUTH.md) for a breakdown of the trade-offs.
 
 ---
 
 ## Step 1: Install
 
-SSH into your server and run:
+SSH into your server and run the installer. The simplest form takes no flags:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
-This will:
-1. Convert Ubuntu/Debian to NixOS (server reboots — SSH back in after ~3 min)
-2. Build all 9 osModa daemons from source (~5 min on first build)
-3. Install the OpenClaw AI gateway
-4. Start all daemons
+This:
+
+1. Converts Ubuntu/Debian to NixOS (server reboots — SSH back in after ~3 min)
+2. Builds all 10 Rust daemons from source (~5 min on first build)
+3. Installs `osmoda-gateway` (TypeScript, always the systemd unit) + the Claude Code CLI
+4. Starts every daemon
 
 > **Warning:** This replaces your OS with NixOS. Use on fresh/disposable servers only.
 
-### With API key at install time (recommended)
+### Pre-configure credentials at install time (recommended)
 
-If you have your key ready, pass it during install — the gateway starts immediately:
+You can pass everything on the install command. The agent is ready the moment the gateway boots:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh \
-  | bash -s -- --api-key sk-ant-api03-YOUR-KEY
+# Claude Pro OAuth — cheapest for heavy use
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
+  --default-model claude-opus-4-6 \
+  --credential "My Claude Pro|anthropic|oauth|$(printf 'sk-ant-oat01-…' | base64)"
+
+# Or: Console API key (pay-per-token)
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
+  --default-model claude-opus-4-6 \
+  --credential "Anthropic Console|anthropic|api_key|$(printf 'sk-ant-api03-…' | base64)"
+
+# Or the legacy one-liner (auto-promotes to a credential):
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
+  --api-key sk-ant-api03-YOUR-KEY
 ```
 
-### Verify installation
+Available flags:
 
-After install, all 9 daemons should be running:
+| Flag | Values | Notes |
+|---|---|---|
+| `--credential` | `label\|provider\|type\|base64-secret` | Repeatable. `provider` ∈ {`anthropic`, `openai`, `openrouter`}. `type` ∈ {`oauth`, `api_key`}. |
+| `--default-model` | e.g. `claude-opus-4-6`, `claude-sonnet-4-6` | Seeds the `osmoda` agent's default model. |
+| `--runtime` | `claude-code` (default) or `openclaw` | Picks the initial per-agent runtime. Changeable later without re-running install. |
+| `--api-key` | raw or base64 | Legacy single-credential shortcut. |
+
+### Verify
+
+After the reboot, every daemon should be active:
 
 ```bash
+for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines \
+           osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice \
+           osmoda-egress osmoda-gateway; do
+  printf '%-22s %s\n' "$svc" "$(systemctl is-active "$svc")"
+done
 curl -s --unix-socket /run/osmoda/agentd.sock http://localhost/health | jq
 ```
 
 ---
 
-## Step 2: Set your API key (if you didn't pass it during install)
+## Step 2: Add a credential (if you didn't pass one at install)
 
-If you installed without `--api-key`, the gateway is enabled but not running yet. Set it up:
+Three ways to do this — all produce the same result (an encrypted record in `/var/lib/osmoda/config/credentials.json.enc`).
 
-```bash
-# 1. Write the environment file
-echo 'ANTHROPIC_API_KEY=sk-ant-api03-YOUR_KEY' > /var/lib/osmoda/config/env
-chmod 600 /var/lib/osmoda/config/env
+### Option A: From the dashboard
 
-# 2. Write auth profiles for both agents
-KEY=sk-ant-api03-YOUR_KEY
-for agent in osmoda mobile; do
-  printf '{"type":"api_key","provider":"anthropic","key":"%s"}' "$KEY" \
-    > /root/.openclaw/agents/$agent/agent/auth-profiles.json
-done
+Open the web UI (see Step 3 for how to access it) → **Engine** tab → **Credentials** → **+ Add credential** → paste your `sk-ant-oat01-…` or `sk-ant-api03-…` → **Add + test**.
 
-# 3. Start the gateway
-systemctl start osmoda-gateway
-```
-
-**Using an OAuth token** (`sk-ant-oat01-...`) instead? Change the auth profile format:
+### Option B: From the REST API
 
 ```bash
-KEY=sk-ant-oat01-YOUR_TOKEN
-for agent in osmoda mobile; do
-  printf '{"type":"token","provider":"anthropic","token":"%s"}' "$KEY" \
-    > /root/.openclaw/agents/$agent/agent/auth-profiles.json
-done
+TOKEN=$(cat /var/lib/osmoda/config/gateway-token)
+curl -X POST http://127.0.0.1:18789/config/credentials \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "label":    "My Claude Pro",
+    "provider": "anthropic",
+    "type":     "oauth",
+    "secret":   "sk-ant-oat01-…"
+  }'
+# → { "credential": { "id": "cred_…", "secret_preview": "sk-ant-oat0…abcd" } }
+
+# Then assign it to the osmoda agent:
+curl -X PATCH http://127.0.0.1:18789/config/agents/osmoda \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"credential_id":"cred_…","model":"claude-opus-4-6"}'
+
+# Test it:
+curl -X POST http://127.0.0.1:18789/config/credentials/cred_…/test \
+  -H "Authorization: Bearer $TOKEN"
+# → { "ok": true, "model_list": ["claude-opus-4-6", …] }
 ```
 
-See [Auth](AUTH.md) for details on API keys vs OAuth tokens.
+### Option C: CLI one-liner
+
+```bash
+# Absorbs legacy api-key files on next gateway boot
+echo 'sk-ant-api03-…' > /var/lib/osmoda/config/api-key
+chmod 600 /var/lib/osmoda/config/api-key
+systemctl restart osmoda-gateway
+```
 
 ---
 
 ## Step 3: Access the web chat
 
-The gateway runs on `localhost:18789`. It's not exposed to the internet — you access it through an SSH tunnel.
-
-### Open the tunnel
-
-From your local machine (keep this terminal open):
+The gateway binds to `127.0.0.1:18789` — it's not exposed to the internet. You reach it through an SSH tunnel.
 
 ```bash
-ssh -N -L 18789:localhost:18789 root@YOUR-SERVER-IP
+# On your local machine (keep this terminal open):
+ssh -N -L 18789:127.0.0.1:18789 root@YOUR-SERVER-IP
 ```
 
-### Open in browser
-
-Your gateway token was generated during install. Get it:
+Get the gateway token:
 
 ```bash
-# Run on the server
+# On the server
 cat /var/lib/osmoda/config/gateway-token
 ```
 
-Then open:
+Open in your browser:
 
 ```
 http://localhost:18789?token=YOUR_GATEWAY_TOKEN
 ```
 
-You're now talking to your server. The AI has full system access — 90 tools, 9 daemons, root-level control.
+You're now talking to your server. The agent has full system access — 91 MCP tools across 10 daemons, with root-level control mediated by structured tool calls (not raw shell).
 
 ---
 
@@ -115,56 +153,63 @@ You're now talking to your server. The AI has full system access — 90 tools, 9
 Try these:
 
 | You say | What happens |
-|---------|-------------|
+|---|---|
 | "How's my server doing?" | Runs `system_health` + `system_discover`, shows CPU/RAM/disk/services |
 | "What's using the most CPU?" | Queries processes sorted by CPU usage |
 | "Show me nginx logs from the last hour" | Reads journal logs filtered by unit |
 | "Set up a watcher for nginx" | Creates an autopilot health check with auto-restart |
 | "What can you do?" | Lists capabilities based on what's actually running |
 
-Every query is logged to the hash-chained audit ledger:
+Every query routes through `agentd` and logs to the hash-chained audit ledger:
 
 ```bash
 agentctl verify-ledger --state-dir /var/lib/osmoda
+agentctl events --state-dir /var/lib/osmoda --limit 20
 ```
 
 ---
 
-## Step 5: Connect Telegram (optional)
+## Step 5: Switch the agent engine (optional)
 
-Manage your server from your phone. See [Channels](CHANNELS.md) for the full guide.
+osModa ships with two drivers — `claude-code` (Anthropic's official CLI, supports OAuth + API key) and `openclaw` (legacy, API key only). Default is `claude-code`. You can swap at runtime, no SSH or rebuild:
+
+- **Dashboard:** Engine tab → Agents section → `osmoda` card → Runtime dropdown → pick `OpenClaw (legacy)` → Save.
+- **REST API:**
+  ```bash
+  curl -X PATCH http://127.0.0.1:18789/config/agents/osmoda \
+    -H "Authorization: Bearer $(cat /var/lib/osmoda/config/gateway-token)" \
+    -H "Content-Type: application/json" \
+    -d '{"runtime":"openclaw"}'
+  ```
+
+Save fires `SIGHUP`; in-flight sessions keep running on their original driver; the next message uses the new one. Zero downtime.
+
+OpenClaw only accepts API-key credentials (Anthropic disabled OAuth for it). If your current credential is OAuth-only, add a second credential with `type: api_key` first.
+
+---
+
+## Step 6: Connect Telegram (optional)
+
+Manage your server from your phone. See [CHANNELS.md](CHANNELS.md) for the full guide.
 
 Quick version:
 
-1. Open Telegram, search `@BotFather`, send `/newbot`
-2. Pick a name, copy the bot token
-3. On your server:
+1. Open Telegram, search `@BotFather`, send `/newbot`. Pick a name, copy the bot token.
+2. Get your Telegram user ID — message `@userinfobot` on Telegram.
+3. On the server:
+   ```bash
+   echo 'YOUR_BOT_TOKEN' > /var/lib/osmoda/secrets/telegram-bot-token
+   chmod 600 /var/lib/osmoda/secrets/telegram-bot-token
 
-```bash
-# Save the token
-echo 'YOUR_BOT_TOKEN' > /var/lib/osmoda/secrets/telegram-bot-token
-chmod 600 /var/lib/osmoda/secrets/telegram-bot-token
-
-# Get your Telegram user ID (message @userinfobot on Telegram)
-# Then update the gateway config:
-node -e "
-  var fs = require('fs');
-  var config = JSON.parse(fs.readFileSync('/root/.openclaw/openclaw.json', 'utf8'));
-  config.channels = config.channels || {};
-  config.channels.telegram = {
-    enabled: true,
-    tokenFile: '/var/lib/osmoda/secrets/telegram-bot-token',
-    dmPolicy: 'allowlist',
-    allowFrom: ['YOUR_TELEGRAM_USER_ID']
-  };
-  fs.writeFileSync('/root/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
-"
-
-# Restart gateway
-systemctl restart osmoda-gateway
-```
-
-4. Find your bot on Telegram, send it a message. Your server responds.
+   # Add the allowed user to /etc/nixos/configuration.nix:
+   #   services.osmoda.gateway.telegram = {
+   #     enable = true;
+   #     tokenFile = "/var/lib/osmoda/secrets/telegram-bot-token";
+   #     allowedUsers = [ "YOUR_TELEGRAM_USERNAME" ];
+   #   };
+   nixos-rebuild switch
+   ```
+4. Message your bot on Telegram. The `mobile` agent responds with Sonnet (concise, phone-optimized).
 
 ---
 
@@ -172,9 +217,10 @@ systemctl restart osmoda-gateway
 
 - **Deploy an app** — "Deploy my Node.js API on port 3000"
 - **Set up monitoring** — "Watch nginx and restart it if it goes down"
-- **Connect another server** — "Create a mesh invite"
+- **Connect another server** — "Create a mesh invite" ([mesh p2p](ARCHITECTURE.md#agent-gateway--modular-runtime-v02))
 - **Check the audit trail** — "Show me everything that changed today"
 - **Security hardening** — "Run a security audit"
+- **Read the security model** — [SECURITY.md](SECURITY.md) explains the four trust boundaries and what they protect
 
 ---
 
@@ -184,21 +230,26 @@ systemctl restart osmoda-gateway
 # System health
 curl -s --unix-socket /run/osmoda/agentd.sock http://localhost/health | jq
 
-# Check all daemons
-for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice osmoda-egress; do
-  printf '%-20s %s\n' $svc $(systemctl is-active $svc)
+# All daemons at once
+for svc in osmoda-agentd osmoda-keyd osmoda-watch osmoda-routines \
+           osmoda-mesh osmoda-mcpd osmoda-teachd osmoda-voice \
+           osmoda-egress osmoda-gateway; do
+  printf '%-22s %s\n' "$svc" "$(systemctl is-active "$svc")"
 done
 
-# Gateway logs
+# Gateway live logs
 journalctl -u osmoda-gateway -f
+
+# Reload agents.json without dropping WS sessions
+systemctl reload osmoda-gateway
 
 # Verify audit ledger integrity
 agentctl verify-ledger --state-dir /var/lib/osmoda
 
-# View recent events
+# Recent events
 agentctl events --state-dir /var/lib/osmoda --limit 20
 
-# Emergency rollback (bypasses AI)
+# Emergency rollback (bypasses agent)
 sudo nixos-rebuild --rollback switch
 ```
 
@@ -209,20 +260,19 @@ sudo nixos-rebuild --rollback switch
 **Gateway won't start?**
 ```bash
 journalctl -u osmoda-gateway --since '5 min ago'
-# Common: missing auth-profiles.json or empty API key
+# Common: agents.json missing credential_id, or credential was removed
 ```
 
-**"Connection refused" on localhost:18789?**
-- Make sure your SSH tunnel is running (`ssh -N -L 18789:localhost:18789 ...`)
-- Check gateway is active: `systemctl is-active osmoda-gateway`
+**`Agent <id> has no credential configured`**
+Open the dashboard → Engine tab → Agents → re-select a credential, save. Or via REST as shown in Step 2.
 
-**Daemons not starting?**
-```bash
-systemctl status osmoda-agentd
-journalctl -u osmoda-agentd --since '5 min ago'
-```
+**`Credential cred_… not found`**
+The credential was deleted but an agent still references it. Same fix — reassign.
 
-**Need to start over?** NixOS rollback is always available:
+**Credential test returns `HTTP 401`**
+The secret is wrong, revoked upstream, or truncated on paste. Verify in the provider's dashboard (Anthropic Console, OpenAI) and re-add.
+
+**Need to start over?** NixOS rollback:
 ```bash
 sudo nixos-rebuild --rollback switch
 ```

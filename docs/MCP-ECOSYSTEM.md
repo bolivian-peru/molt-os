@@ -2,15 +2,20 @@
 
 ## The core is done. This is the expansion layer.
 
-Last updated: 2026-03-06
+Last updated: 2026-04-18
 
-Nine daemons are built. 90 tools are registered. The OS works. osmoda-mcpd is live — it manages MCP server lifecycle from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an OS capability without writing another line of bridge code.
+Nine daemons + the modular `osmoda-gateway` are built. **91 MCP tools** are registered via
+`osmoda-mcp-bridge`. The OS works. `osmoda-mcpd` is live — it manages MCP server lifecycle
+from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an
+OS capability without writing another line of bridge code.
 
 ---
 
 ## What MCP gives us
 
-OpenClaw already speaks MCP natively. Any MCP server becomes a set of tools available to the AI — no custom TypeScript, no new bridge code, no new Rust daemon. This changes the expansion model completely:
+Both runtime drivers (`claude-code` and `openclaw`) speak MCP natively. Any MCP server becomes
+a set of tools available to the agent — no custom TypeScript, no new bridge code, no new Rust
+daemon. This changes the expansion model completely:
 
 **Before (what we've been doing):**
 ```
@@ -31,24 +36,31 @@ osmoda-bridge stays exactly what it is: the OS tools layer (system, ledger, memo
 ## Architecture
 
 ```
-OpenClaw Gateway (:18789)
+osmoda-gateway (:18789)   — modular, TypeScript, one systemd unit
   │
-  ├── osmoda-bridge (Kind: "tools") ← THE OS
-  │     90 tools: agentd, keyd, watch, routines, mesh, voice, mcpd, teachd, apps
-  │     Unix sockets, root access, NixOS mutations
-  │
-  └── MCP Servers (managed by osmoda-mcpd)
-        ├── scrapling-mcp      → adaptive web scraping
-        ├── postgres-mcp       → database access
-        ├── github-mcp         → repos, issues, PRs
-        ├── filesystem-mcp     → enhanced file ops
-        ├── slack-mcp          → notifications
-        └── any-mcp-server     → whatever you need
+  ├── drivers/claude-code  spawns `claude` CLI per session
+  └── drivers/openclaw     spawns `openclaw` binary per session
+        │
+        └──► MCP servers (any runtime consumes the same tool set)
               │
-              └── All outbound traffic → osmoda-egress (domain allowlist)
+              ├── osmoda-mcp-bridge (built in) ← THE OS
+              │     91 tools: agentd, keyd, watch, routines, mesh, voice, mcpd, teachd, apps, memory, approvals
+              │     Unix sockets, root access, NixOS mutations
+              │
+              └── Managed MCP servers (osmoda-mcpd)
+                    ├── scrapling-mcp      → adaptive web scraping
+                    ├── postgres-mcp       → database access
+                    ├── github-mcp         → repos, issues, PRs
+                    ├── filesystem-mcp     → enhanced file ops
+                    ├── slack-mcp          → notifications
+                    └── any-mcp-server     → whatever you need
+                          │
+                          └── Outbound traffic → osmoda-egress (domain allowlist)
 ```
 
-The OS tools are always there. MCP servers are opt-in capabilities. The AI sees all of them as tools in the same namespace.
+The OS tools are always there. External MCP servers are opt-in capabilities. Both runtime
+drivers see all of them as tools in the same namespace — switching runtimes (e.g. claude-code
+→ openclaw via dashboard) doesn't change what the agent can do, only *how* it's driven.
 
 ---
 

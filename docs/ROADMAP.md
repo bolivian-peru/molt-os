@@ -1,9 +1,13 @@
 # osModa — Feature Roadmap
 
-Last updated: 2026-03-06
+Last updated: 2026-04-18
 
-Current state: 205 tests passing, 10 Rust crates (9 daemons + 1 CLI), 90 bridge tools, 19 skills.
-This document covers what shipped and what's next, in priority order.
+Current state: 10 Rust crates (9 daemons + 1 CLI), **91 MCP tools**, 19 skills, **modular
+runtime** (claude-code + openclaw drivers, v0.2 of the gateway), Spawn API **v1.2.0** with
+idempotency + structured errors + encrypted credential store + per-server dashboard config.
+
+This document covers what shipped and what's next, in priority order. See [SECURITY.md](SECURITY.md)
+for the trust model and [STATUS.md](STATUS.md) for detailed per-component maturity.
 
 ---
 
@@ -11,23 +15,27 @@ This document covers what shipped and what's next, in priority order.
 
 | Feature | Where | Maturity |
 |---------|-------|----------|
-| Full system access (processes, files, services, sysctl) | agentd + bridge | **Solid** |
+| Full system access (processes, files, services, sysctl) | agentd + 91 MCP tools | **Solid** |
+| **Modular agent runtime** — swap claude-code ⇄ openclaw via dashboard, no rebuild | osmoda-gateway v0.2 + drivers/ | **Solid** (v1.2, April 2026) |
+| **Encrypted credential store** — AES-256-GCM, REST CRUD + test-per-provider | osmoda-gateway | **Solid** (v1.2) |
+| **Hot-reload via SIGHUP** — in-flight WS sessions keep their driver | osmoda-gateway | **Solid** (v1.2) |
+| **Per-server dashboard Engine tab** — Credentials + Agents + Engines | spawn.os.moda dashboard | **Functional** (v1.2) |
 | SafeSwitch deploys with auto-rollback | osmoda-watch | **Functional** |
 | Background automation (cron, interval, event) | osmoda-routines | **Functional** |
-| Hash-chained audit ledger | agentd ledger | **Solid** |
-| Telegram + WhatsApp channel config | osmoda.nix | **Functional** |
-| Web chat UI | osmoda-ui | **Functional** |
-| P2P encrypted agent-to-agent mesh | osmoda-mesh | **Functional** (44 tests) |
-| MCP server lifecycle management | osmoda-mcpd | **Functional** (8 tests) |
-| System learning, self-optimization & skill auto-teaching | osmoda-teachd | **Functional** (22 tests) |
-| Skill auto-teaching (SKILLGEN loop) | osmoda-teachd | **Functional** (7 tests) |
-| One-command installer + Hetzner deploy | scripts/ | **Functional** |
-| App process management (deploy, manage, resource-limit) | osmoda-bridge + systemd-run | **Functional** |
+| Hash-chained audit ledger (321+ events verified live) | agentd ledger | **Solid** |
+| Telegram + WhatsApp channel routing per-agent | osmoda.nix + agents.json bindings | **Functional** |
+| Web chat UI | osmoda-gateway WebSocket `/ws` | **Functional** |
+| P2P encrypted agent-to-agent mesh | osmoda-mesh (Noise_XX + ML-KEM-768) | **Functional** |
+| MCP server lifecycle management | osmoda-mcpd | **Functional** |
+| System learning + self-optimization + skill auto-teaching | osmoda-teachd | **Functional** |
+| One-command installer w/ `--runtime`, `--credential`, `--default-model` | scripts/install.sh | **Functional** |
+| App process management (deploy, manage, resource-limit) | MCP bridge + systemd-run | **Functional** |
 | Voice — 100% local STT + TTS, no cloud | osmoda-voice | **Functional** |
-| Crypto wallets — ETH + SOL, AES-256-GCM, policy-gated | osmoda-keyd (optional) | **Solid** (35 tests) |
-| One-command server provisioning with USDC payments | spawn.os.moda (private) | **Functional** |
-| Public spawn API with x402 payment gating | spawn.os.moda v1 API | **Functional** |
-| A2A agent discovery (ERC-8004 Agent Card) | spawn.os.moda /.well-known/ | **Functional** |
+| Crypto wallets — ETH + SOL, AES-256-GCM, policy-gated | osmoda-keyd (optional) | **Solid** |
+| Public spawn API v1.2.0 — idempotency, structured errors, token lifecycle | spawn.os.moda v1 API | **Solid** |
+| Spawn-time runtime + credentials — `POST /api/v1/spawn/:planId` `{runtime, credentials[]}` | spawn.os.moda + install.sh | **Functional** (v1.2) |
+| A2A agent discovery (ERC-8004 Agent Card, protocols array, chainId) | spawn.os.moda `/.well-known/` | **Functional** |
+| First-party TypeScript SDK `@osmoda/client` | packages/osmoda-client | **Functional** |
 
 Maturity levels: **Solid** = has tests, handles edge cases. **Functional** = works but has known limitations. See [STATUS.md](STATUS.md) for full details.
 

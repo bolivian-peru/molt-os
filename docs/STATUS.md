@@ -2,7 +2,7 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-03-08
+Last updated: 2026-04-18 (v1.2 modular runtime shipped)
 
 ## Maturity Levels
 
@@ -18,10 +18,12 @@ Last updated: 2026-03-08
 | Metric | Count |
 |--------|-------|
 | Rust crates | 10 (9 daemons + 1 CLI) |
-| Tests passing | 205 |
-| Bridge tools registered | 90 |
+| MCP tools (via osmoda-mcp-bridge) | 91 |
+| Runtime drivers | 2 (claude-code, openclaw) |
 | System skills | 19 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
+| Spawn API version | 1.2.0 |
+| osmoda-gateway version | 0.2.0 |
 
 ---
 

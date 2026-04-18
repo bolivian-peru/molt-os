@@ -1,145 +1,186 @@
 # Authentication
 
-osModa uses the Anthropic API (via OpenClaw) for AI reasoning. You need credentials.
+*Last updated: 2026-04-18. Reflects the v1.2 modular runtime.*
+
+osModa's agent needs a credential to talk to an LLM provider. Starting in v1.2 (April 2026) credentials are a **first-class object** with a lifecycle (create → test → use → rotate → revoke), stored encrypted on disk, and manageable from the dashboard without SSH.
+
+The underlying providers haven't changed — Anthropic's Console API keys and Claude Pro/Max OAuth tokens are the main options, with OpenAI and OpenRouter also supported. What changed is how they're stored and how you switch between them.
 
 ---
 
-## Two types of Anthropic credentials
+## The three ways to add a credential
 
-| Type | Prefix | Source | Billing |
-|------|--------|--------|---------|
-| **API Key** | `sk-ant-api03-` | [console.anthropic.com](https://console.anthropic.com) | Pay-per-token |
-| **OAuth Token** | `sk-ant-oat01-` | `claude setup-token` CLI | Claude Pro/Max subscription |
-
-Both work. The deploy scripts auto-detect which type you have.
-
----
-
-## API Key (recommended for servers)
-
-Standard pay-per-token key from the Anthropic Console.
-
-1. Go to [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
-2. Create a new key
-3. Copy the key (starts with `sk-ant-api03-`)
-
-**Pros:** No expiry, no refresh needed, no subscription restrictions.
-
-**Cons:** Pay-per-token billing. Requires an Anthropic Console account with billing set up.
-
----
-
-## OAuth Token (subscription-based)
-
-Token from a Claude Pro or Max subscription.
-
-1. Install Claude CLI: `npm install -g @anthropic-ai/claude-code`
-2. Run: `claude setup-token`
-3. Complete the OAuth flow in your browser
-4. Copy the token (starts with `sk-ant-oat01-`)
-
-**Pros:** Uses your existing Claude subscription. No separate billing.
-
-**Cons:** May expire (needs refresh). Some endpoints may reject it with "OAuth authentication is currently not supported" if the service doesn't accept subscription-scoped tokens.
-
----
-
-## Configuring credentials
-
-### During install
+**1. At install time (`--credential` flag, repeatable):**
 
 ```bash
-# install.sh
+# Bring a Claude Pro subscription (flat $20/mo, near-unlimited for heavy use)
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh \
-  | bash -s -- --api-key sk-ant-api03-YOUR-KEY-HERE
+  | sudo bash -s -- \
+    --credential "My Claude Pro|anthropic|oauth|$(printf 'sk-ant-oat01-…' | base64)" \
+    --default-model claude-opus-4-6
+
+# Pay-per-token API key
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh \
+  | sudo bash -s -- \
+    --credential "Anthropic Console|anthropic|api_key|$(printf 'sk-ant-api03-…' | base64)"
 ```
 
-### During deploy
+Format: `label|provider|type|base64-secret`. Labels allow spaces and dashes. `provider` ∈ {`anthropic`, `openai`, `openrouter`}. `type` ∈ {`oauth`, `api_key`}.
+
+The legacy `--api-key` flag still works and auto-migrates to a credential on first boot.
+
+**2. From the dashboard (spawn.os.moda or local web UI):**
+
+Open a server → **Engine** tab → Credentials section → **+ Add credential** → fill in label / provider / type / secret → **Add + test**. The probe hits the provider with a 1-token request; status shows `✓ valid` or `✗` with the provider's exact rejection reason.
+
+**3. Via the REST API on the gateway (bearer-authed):**
 
 ```bash
-# Pre-stage the key on the server
-printf 'sk-ant-api03-...' > /var/lib/osmoda/config/api-key
-chmod 600 /var/lib/osmoda/config/api-key
-
-# Then deploy
-./scripts/deploy-hetzner.sh 1.2.3.4 ~/.ssh/key
-```
-
-### After install
-
-Three things need to match: the env file, the auth profiles, and the gateway service.
-
-```bash
-# 1. Write env file (gateway reads this via EnvironmentFile=)
-KEY=sk-ant-api03-YOUR_KEY
-echo "ANTHROPIC_API_KEY=$KEY" > /var/lib/osmoda/config/env
-chmod 600 /var/lib/osmoda/config/env
-
-# 2. Write auth profiles for both agents
-for agent in osmoda mobile; do
-  printf '{"type":"api_key","provider":"anthropic","key":"%s"}' "$KEY" \
-    > /root/.openclaw/agents/$agent/agent/auth-profiles.json
-done
-
-# 3. Start (or restart) the gateway
-systemctl start osmoda-gateway
-```
-
-For OAuth tokens (`sk-ant-oat01-...`), use `"type":"token"` and `"token"` instead of `"type":"api_key"` and `"key"`:
-
-```bash
-KEY=sk-ant-oat01-YOUR_TOKEN
-echo "ANTHROPIC_API_KEY=$KEY" > /var/lib/osmoda/config/env
-chmod 600 /var/lib/osmoda/config/env
-
-for agent in osmoda mobile; do
-  printf '{"type":"token","provider":"anthropic","token":"%s"}' "$KEY" \
-    > /root/.openclaw/agents/$agent/agent/auth-profiles.json
-done
-
-systemctl start osmoda-gateway
+TOKEN=$(cat /var/lib/osmoda/config/gateway-token)
+curl -X POST http://127.0.0.1:18789/config/credentials \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label":    "My Claude Pro",
+    "provider": "anthropic",
+    "type":     "oauth",
+    "secret":   "sk-ant-oat01-..."
+  }'
+# → { "credential": { "id": "cred_...", "secret_preview": "sk-ant-oat01…abcd", … } }
 ```
 
 ---
 
-## How it works internally
+## Credential types osModa supports today
 
-The deploy scripts auto-detect your token type and write the correct format to OpenClaw's auth-profiles.json:
+| Provider | Type | Prefix | Where to get it | Notes |
+|---|---|---|---|---|
+| `anthropic` | `oauth` | `sk-ant-oat01-` | `npx @anthropic-ai/claude-code setup-token` | Uses your Claude Pro/Max subscription. **Much cheaper for heavy agent use**. Only works through the `claude-code` runtime driver. |
+| `anthropic` | `api_key` | `sk-ant-api03-` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) | Pay-per-token. Works with both `claude-code` and `openclaw` drivers. |
+| `openai` | `api_key` | `sk-` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | Works with `openclaw` driver today. |
+| `openrouter` | `api_key` | `sk-or-` | [openrouter.ai/keys](https://openrouter.ai/keys) | Routes to many models; works with `openclaw` driver. |
 
-**API Key** (`sk-ant-api03-`):
-```json
-{
-  "type": "api_key",
-  "provider": "anthropic",
-  "key": "sk-ant-api03-..."
-}
+Adding a new provider is a config change — no code required — as long as it's compatible with an existing driver. A new driver (Codex, Bedrock, Vertex) lives as a single file under `packages/osmoda-gateway/src/drivers/`.
+
+---
+
+## OAuth vs API key — which one should you use?
+
+Short version: **OAuth if you have a Claude subscription**, API key otherwise.
+
+Every osModa server that runs a busy agent will comfortably burn $50–200/month in pay-per-token billing. A Claude Pro OAuth token is ~$20/month flat, near-unlimited for sustained agent workloads. That's usually the biggest recurring cost delta in the entire stack.
+
+OAuth caveats:
+- Only the `claude-code` runtime driver accepts OAuth. OpenClaw legacy uses API keys only (Anthropic disabled OAuth for OpenClaw).
+- Tokens can expire and need refresh via `claude setup-token`.
+- Anthropic treats subscription tokens with some API endpoints as restricted. If you see `"OAuth authentication is currently not supported"`, switch the credential type to `api_key` for that agent.
+
+---
+
+## Storage and encryption
+
+Credentials live in two places on disk:
+
+| Path | Contents | Mode | Owner |
+|---|---|---|---|
+| `/var/lib/osmoda/config/credentials.json.enc` | AES-256-GCM ciphertext of every credential + metadata | `0600` | root |
+| `/var/lib/osmoda/config/.credstore-key` | 32-byte master key used to decrypt the above | `0600` | root |
+
+Secrets never leave the gateway. The REST API returns metadata + a 12-char `secret_preview` only. The encryption envelope validates IV + auth tag lengths on read — a corrupted store refuses to load rather than returning garbage.
+
+Legacy files from pre-v1.2 installs are absorbed into the encrypted store on first boot and the old files are deleted:
+- `/var/lib/osmoda/config/api-key` → one credential labeled "Migrated Claude Code key"
+- `/root/.openclaw/agents/*/agent/auth-profiles.json` → one credential per agent labeled "Migrated OpenClaw (…)"
+
+---
+
+## Assigning a credential to an agent
+
+Each agent has its own credential. The `osmoda` agent (web, full access, Opus) and the `mobile` agent (Telegram/WhatsApp, concise, Sonnet) can use the same credential or different ones.
+
+From the dashboard: **Engine** tab → Agents section → pick the agent → Credential dropdown → select → Save.
+
+From the REST API:
+```bash
+curl -X PATCH http://127.0.0.1:18789/config/agents/osmoda \
+  -H "Authorization: Bearer $(cat /var/lib/osmoda/config/gateway-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"credential_id":"cred_abc123…", "model":"claude-opus-4-6"}'
 ```
 
-**OAuth Token** (`sk-ant-oat01-`):
-```json
-{
-  "type": "token",
-  "provider": "anthropic",
-  "token": "sk-ant-oat01-..."
-}
+Saving fires `SIGHUP` on the gateway. In-flight chat sessions keep their original credential snapshot; new sessions pick up the change. Zero WebSocket drops.
+
+---
+
+## Setting a default credential
+
+If you configure multiple credentials, mark one as default so new agents inherit it:
+
+```bash
+curl -X POST http://127.0.0.1:18789/config/credentials/cred_abc123…/default \
+  -H "Authorization: Bearer $(cat /var/lib/osmoda/config/gateway-token)"
 ```
 
-Each agent has its own auth file at `~/.openclaw/agents/<agentId>/agent/auth-profiles.json` (e.g. `agents/osmoda/agent/auth-profiles.json`).
+Dashboard: Engine tab → Credentials section → **Set as default** button on any credential card.
+
+---
+
+## Testing a credential
+
+Before assigning, verify it actually works:
+
+```bash
+curl -X POST http://127.0.0.1:18789/config/credentials/cred_abc123…/test \
+  -H "Authorization: Bearer $(cat /var/lib/osmoda/config/gateway-token)"
+# → { "ok": true, "model_list": ["claude-opus-4-6", "claude-sonnet-4-6", …] }
+# or
+# → { "ok": false, "error": "HTTP 401 — invalid credential" }
+```
+
+The test hits the provider's `/v1/models` endpoint with a 1-token probe. For Anthropic this returns the list of models your account has access to, which is also how you discover which `model` values are legal for the `agents.json` entry.
+
+---
+
+## Revoking a credential
+
+Removal deletes the encrypted record; agents pointing at the removed credential fail with `"Credential cred_… not found"` until reassigned.
+
+```bash
+curl -X DELETE http://127.0.0.1:18789/config/credentials/cred_abc123… \
+  -H "Authorization: Bearer $(cat /var/lib/osmoda/config/gateway-token)"
+# → 204 No Content
+```
+
+Or: dashboard → Engine tab → Credentials → **Remove** button.
+
+The osModa revocation only removes the credential from this server. **You must also revoke the secret at the provider** (Anthropic Console, OpenAI dashboard) if it was exposed.
 
 ---
 
 ## Troubleshooting
 
-**"No API key found for provider anthropic"**
-- Check that `/var/lib/osmoda/config/api-key` exists and is non-empty
-- Check that `~/.openclaw/agents/osmoda/agent/auth-profiles.json` exists
-- Verify the format matches the examples above
+**Agent replies with `"Agent <id> has no credential configured"`**
+The agent's `credential_id` is empty or references a credential that was deleted. Open Engine tab → Agents, re-select a credential, save.
 
-**"OAuth authentication is currently not supported"**
-- Anthropic's `sk-ant-oat01-` tokens carry restrictions — they may only work with Claude Code
-- Switch to an API key (`sk-ant-api03-`) from [console.anthropic.com](https://console.anthropic.com)
+**Agent replies with `"Credential cred_… not found"`**
+Same root cause — the referenced credential no longer exists. Reassign.
 
-**Token expired**
-- OAuth tokens from `claude setup-token` can expire
-- Re-run `claude setup-token` and update the key file
-- API keys don't expire
+**Test returns `"HTTP 401 — invalid credential"`**
+The secret is wrong, revoked at the provider, or was truncated on paste. For Anthropic keys, check that the full `sk-ant-*` string was copied (they're long).
+
+**Test returns `"secret prefix doesn't match type=oauth"`**
+Someone configured a Console key (`sk-ant-api03-`) with `type: oauth`, or vice versa. Update the credential and re-test.
+
+**Test returns `"base_url must be https"` or `"resolves to a restricted host"`**
+The `base_url` field was set to a private/loopback/metadata address. SSRF defense — set it to a public HTTPS endpoint or leave it blank for the default provider.
+
+**Legacy server hasn't been migrated and still uses `/var/lib/osmoda/config/api-key`**
+The migration runs automatically on first boot of the v1.2+ gateway. If you're stuck on v1.1 or earlier, the old file still works. Upgrade via the dashboard → Rebuild (or `nixos-rebuild switch` if self-hosted).
+
+---
+
+## Related docs
+
+- [SECURITY.md](SECURITY.md) — full trust-boundary analysis, including the credential store master key
+- [SPAWN-API.md](SPAWN-API.md) — `POST /api/v1/spawn/:planId` `credentials[]` body field for pre-configuring servers at spawn time
+- [ARCHITECTURE.md](ARCHITECTURE.md) — driver interface + config layout diagram
