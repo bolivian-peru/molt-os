@@ -6,7 +6,7 @@
 
 **Your server has an AI brain. It monitors, fixes, deploys, and explains — without you SSH-ing in.**
 
-10 Rust daemons. 91 structured tools. Claude Code SDK runtime. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
+10 Rust daemons. 91 structured tools. **Modular agent runtime** — swap between Claude Code (default) and OpenClaw without SSH or rebuilds. Tamper-proof audit ledger. Atomic rollback on every change. Post-quantum encrypted mesh between servers. Self-teaching skill engine that learns from agent behavior. All running on NixOS — the only Linux distro where every system state is a transaction.
 
 > **Public Beta** — This is a working system deployed on real servers, not a demo. Expect rough edges and rapid iteration. You're early.
 
@@ -44,11 +44,17 @@ osModa is the other half: **the machine itself is AI-native.** 91 structured too
 
 ## What Happens in the First 5 Minutes
 
-1. **Install** — add the flake to your NixOS config and `nixos-rebuild switch`
-2. **Open the web chat** — the AI greets you and runs a health check on your server
-3. **Ask "How's my server doing?"** — the AI calls `system_health` and `system_discover`, shows you what's running
-4. **Say "Set up Telegram"** — it walks you through creating a bot and connecting it, so you can message your server from your phone
-5. **Try something real** — "Install nginx and set up a reverse proxy for port 3000" — the AI edits NixOS config, rebuilds via SafeSwitch with auto-rollback if anything breaks
+1. **Install** — `curl | bash` the installer (or add the flake to NixOS). The installer converts to NixOS, builds the 10 Rust daemons, installs `osmoda-gateway` + `claude` CLI + 91 MCP tools, starts everything.
+2. **First boot of the gateway** — `agents.json` + encrypted `credentials.json.enc` are created in `/var/lib/osmoda/config/`. If you passed `--credential` or `--api-key` at install, they're already loaded; if not, the agent is disabled until you add one.
+3. **Open the dashboard** (`https://spawn.os.moda/#/servers/<your-id>/engine` if hosted, or the local web UI) → **Engine** tab:
+   - **Credentials** section — Add one. Paste your `sk-ant-oat01-…` (Claude Pro — cheapest for heavy use), `sk-ant-api03-…` (Console, pay-per-token), or any OpenAI/OpenRouter key. Click **Test** to verify with a 1-token ping.
+   - **Agents** section — Pick runtime (Claude Code or OpenClaw), credential, and model for each agent (`osmoda` for web / full access, `mobile` for Telegram / concise). Save.
+4. **Switch to the Chat tab** — start a conversation. The agent has all 91 tools, already knows your system, and will do an initial `system_health` check if you ask.
+5. **Try something real** — *"Install nginx and reverse-proxy port 3000"* — it edits NixOS config, rebuilds via SafeSwitch with auto-rollback if health checks fail.
+
+**Want to switch runtimes later?** Engine tab → change the Runtime dropdown → Save. SIGHUP fires; in-flight sessions keep running on their old driver; the next message uses the new one. Zero downtime.
+
+**Want to bring a new provider?** Add a credential with the new `provider`/`type`; pick it on any agent. The installer doesn't need to re-run.
 
 See the full [Getting Started Guide](docs/GETTING-STARTED.md) for a detailed walkthrough with expected output at each step.
 
@@ -93,9 +99,42 @@ This is the primary install path. NixOS flakes give you reproducible builds, ato
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
-Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs the Claude Code SDK gateway + 91 MCP tools, starts everything. Takes ~10 minutes on a CX22.
+Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs **osmoda-gateway** (the TypeScript gateway that drives both Claude Code and OpenClaw), installs the Claude Code CLI + 91 MCP tools, starts everything. Takes ~10 minutes on a CX22.
 
-Supports OAuth tokens (Pro/Max subscription) or Console API keys (pay-per-token).
+Supports OAuth tokens (Claude Pro / Max subscription) or Console API keys (pay-per-token). OpenAI, OpenRouter, and future providers plug in the same way.
+
+#### Pre-configure the agent at install time
+
+Instead of logging in and adding a credential afterwards, you can pass everything on the install command:
+
+```bash
+# Bring your Claude Pro subscription — flat $20/mo, near-unlimited usage
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
+  --runtime claude-code \
+  --default-model claude-opus-4-6 \
+  --credential "My Claude Pro|anthropic|oauth|$(printf 'sk-ant-oat01-…' | base64)"
+
+# Or a pay-per-token API key
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
+  --runtime claude-code \
+  --credential "Anthropic Console|anthropic|api_key|$(printf 'sk-ant-api03-…' | base64)"
+
+# OpenClaw (legacy engine, API key only)
+curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash -s -- \
+  --runtime openclaw \
+  --credential "Anthropic|anthropic|api_key|$(printf 'sk-ant-api03-…' | base64)"
+```
+
+Flags:
+
+| Flag | Values | Notes |
+|---|---|---|
+| `--runtime` | `claude-code` (default) / `openclaw` | Initial per-agent runtime. Changeable later from the dashboard without re-running this. |
+| `--default-model` | e.g. `claude-opus-4-6`, `claude-sonnet-4-6` | Initial default for the osmoda agent. |
+| `--credential` | `label\|provider\|type\|base64-secret` | Repeatable. `provider` ∈ {anthropic, openai, openrouter, deepseek}; `type` ∈ {oauth, api_key}. |
+| `--api-key` | raw or base64 key | Legacy one-liner; auto-promotes to a credential. |
+
+Every flag is optional — you can set all of this up from the dashboard afterwards.
 
 **Supported:** Ubuntu 22.04+, Debian 12+, existing NixOS. x86_64 and aarch64.
 
@@ -120,16 +159,21 @@ agentctl verify-ledger
 
 ## Architecture
 
-10 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured MCP tool calls, never raw shell. One gateway (Claude Code SDK), multiple routed agents — Opus for deep work (web), Sonnet for quick status (mobile). Supports OAuth tokens (Pro/Max subscription) or Console API keys (pay-per-token).
+10 Rust daemons communicating over Unix sockets. No daemon exposes TCP to the internet (except mesh peer port 18800, encrypted). The AI reaches the system exclusively through structured MCP tool calls, never raw shell. One modular gateway (`osmoda-gateway`, TypeScript) drives pluggable runtime drivers: `claude-code` (default, supports OAuth subscriptions or API keys) and `openclaw` (legacy, API-key only). Each agent picks its own runtime + credential + model; switch at runtime via the dashboard — no rebuilds.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  User — Terminal / Web / Telegram / WhatsApp                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│  AI Gateway (Claude Code SDK)    Multi-Agent Router                            │
+│  osmoda-gateway (modular, TypeScript) — ONE systemd unit                      │
+│  ├─ claude-code driver    spawns `claude` CLI per session                     │
+│  ├─ openclaw driver       spawns `openclaw` binary per session                │
+│  └─ future drivers        drop-in files under src/drivers/                    │
+│                                                                               │
+│  Multi-Agent Router (hot-reloadable via agents.json)                          │
 │  ├─ osmoda agent (Opus)         91 tools · 19 skills · full access · web      │
-│  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA    │
-│  osmoda-mcp-bridge              91 typed tools via MCP protocol                │
+│  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA   │
+│  osmoda-mcp-bridge              91 typed tools via MCP protocol               │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤
 │ agentd │ watch  │routine │ teachd   │ mesh   │ voice │ mcpd │ keyd  │egress │
@@ -145,10 +189,26 @@ agentctl verify-ledger
 ### Trust Model (3 tiers)
 
 ```
-TIER 0  Claude Code + agentd    Root. Full system. This is the agent.
-TIER 1  Approved apps           Sandboxed. Declared capabilities only.
-TIER 2  Untrusted tools         Max isolation. No network. Minimal filesystem.
+TIER 0  osmoda-gateway + agentd  Root. Full system. This is the agent.
+TIER 1  Approved apps            Sandboxed. Declared capabilities only.
+TIER 2  Untrusted tools          Max isolation. No network. Minimal filesystem.
 ```
+
+### Modular runtime — switch engines without rebuilds
+
+The gateway reads `/var/lib/osmoda/config/agents.json` at startup and on `SIGHUP`. Every chat session looks up its agent in that file, fetches the credential, and hands off to the right driver. Switching runtimes is a single PATCH:
+
+```bash
+curl -X PATCH -H "Authorization: Bearer $(cat /var/lib/osmoda/config/gateway-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"runtime":"openclaw","model":"claude-opus-4-6"}' \
+  http://127.0.0.1:18789/config/agents/osmoda
+systemctl reload osmoda-gateway   # SIGHUP — in-flight sessions keep running
+```
+
+Or, from the spawn.os.moda dashboard, open a server → **Engine** tab → pick runtime / credential / model from dropdowns → Save. Same result; no SSH.
+
+Credentials are encrypted at rest in `credentials.json.enc` (AES-256-GCM). Secrets never leave the gateway; the REST API returns a preview prefix only. `POST /config/credentials/:id/test` does a 1-token probe against the provider so you can validate before assigning.
 
 The agent is tier 0 by design. It's not a chatbot with sudo — it's a system service with structured access to everything, constrained by NixOS atomicity and its own audit ledger, not by permission denials. Lower tiers cannot escalate privileges upward by design. Tier 0 remains the trusted computing base and must be governed by approval policies, spending limits, and audit review.
 
@@ -452,9 +512,11 @@ crates/osmoda-voice/        Local voice (whisper.cpp + piper)
 crates/osmoda-mcpd/         MCP server lifecycle manager
 crates/osmoda-egress/       Domain-filtered egress proxy
 crates/osmoda-keyd/         Crypto wallet daemon (ETH + SOL, AES-256-GCM)
-packages/osmoda-gateway/    Claude Code SDK gateway (HTTP+WS+Telegram)
+packages/osmoda-gateway/    Modular gateway (drivers + agents.json + credentials, HTTP+WS+Telegram)
+  └── src/drivers/          { claude-code, openclaw } — pluggable runtime drivers
 packages/osmoda-mcp-bridge/ MCP server (91 tools over stdio protocol)
-packages/osmoda-bridge/     Legacy OpenClaw plugin (91 tools, TypeScript)
+packages/osmoda-bridge/     OpenClaw plugin (91 tools, used by openclaw driver)
+packages/osmoda-client/     First-party TypeScript SDK for the spawn.os.moda v1 API
 nix/modules/osmoda.nix      NixOS module (single source of truth)
 nix/hosts/                  VM, server, ISO configs
 templates/                  Agent identity + tools + heartbeat

@@ -27,10 +27,16 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    Agent Card (EIP-8004) identity + capability discovery.
    Structured receipts + incident workspaces for auditable troubleshooting.
 
-2. **osmoda-gateway** (TypeScript) — Agent gateway. HTTP+WS server on port 18789.
-   Spawns Claude Code CLI with MCP bridge for 91 tools. WebSocket for dashboard chat,
-   Telegram webhook, multi-agent routing (osmoda=Opus, mobile=Sonnet).
-   Config at `/var/lib/osmoda/config/gateway.json`.
+2. **osmoda-gateway** (TypeScript) — **Modular agent gateway** (v0.2+). HTTP+WS server on port 18789.
+   Always the systemd unit. Routes per-agent to a pluggable runtime driver:
+   - `claude-code` driver — wraps `claude` CLI (OAuth or API key)
+   - `openclaw` driver — spawns `openclaw` binary as child process per session
+   - Adding a driver = one file under `src/drivers/` (Codex, Bedrock, …)
+   Hot-reloadable config via `agents.json` (SIGHUP re-reads, in-flight sessions keep
+   their snapshot — zero WS drops). Encrypted credential store at
+   `/var/lib/osmoda/config/credentials.json.enc` (AES-256-GCM). REST `/config/*`
+   endpoints (Bearer-authed) let the dashboard edit runtime/credentials/model per
+   agent with no SSH or rebuild. Telegram webhook, WebSocket chat, 91 MCP tools.
 
 2b. **osmoda-bridge** (TypeScript) — Legacy OpenClaw plugin. Registers tools via
    `api.registerTool()` factory pattern (91 tools): system_health, system_query,
@@ -582,6 +588,54 @@ status 120/min — applied when a valid `Bearer osk_` token is present.
 
 Dependencies: `@x402/express`, `@x402/core`, `@x402/evm`. Graceful fallback if not installed.
 Token metadata persists in `apps/spawn/data/tokens.enc` (AES-256-GCM, same pattern as orders).
+
+### Spawn-time runtime + credentials
+
+`POST /api/v1/spawn/:planId` (and every spawn endpoint) accepts optional fields
+that pre-configure the server's agent engine:
+
+```json
+{
+  "region": "eu-central",
+  "runtime": "claude-code",                 // or "openclaw"
+  "default_model": "claude-opus-4-6",
+  "credentials": [
+    { "label": "My Claude Pro", "provider": "anthropic", "type": "oauth",
+      "secret": "sk-ant-oat01-…" }
+  ]
+}
+```
+
+Values are passed to cloud-init as `--runtime`, `--default-model`, and one
+`--credential` flag per credential. The new server boots with agents.json +
+credentials.json already populated — no SSH needed. Legacy `api_key` + `ai_provider`
+fields still work (auto-migrated into a credential).
+
+### Per-server modular config (SSH-free runtime switching)
+
+The spawn-app proxies `/config/*` to the customer server's gateway:
+
+```
+GET    /api/dashboard/servers/:id/config/drivers
+GET    /api/dashboard/servers/:id/config/agents
+PATCH  /api/dashboard/servers/:id/config/agents/:agentId
+PUT    /api/dashboard/servers/:id/config/agents
+DELETE /api/dashboard/servers/:id/config/agents/:agentId
+GET    /api/dashboard/servers/:id/config/credentials
+POST   /api/dashboard/servers/:id/config/credentials
+POST   /api/dashboard/servers/:id/config/credentials/:credId/test
+POST   /api/dashboard/servers/:id/config/credentials/:credId/default
+DELETE /api/dashboard/servers/:id/config/credentials/:credId
+```
+
+Proxy tunnels over SSH with `spawn_mgmt_ed25519` and curl's the customer
+server's `127.0.0.1:18789/config/*` using that server's gateway-token.
+
+Dashboard exposes this as the **Engine** tab on each server detail page:
+three sections — Credentials, Agents, Available engines — with add / test /
+set-default / runtime dropdown / credential dropdown / model dropdown. Save
+triggers SIGHUP on the customer gateway; in-flight chat sessions are
+unaffected.
 
 ## Non-negotiables
 

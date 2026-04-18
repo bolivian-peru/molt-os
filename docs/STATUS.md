@@ -369,7 +369,15 @@ Redesigned single-column layout with tabbed interface (Overview / Chat / Setting
 ### v1 Programmatic API
 
 Agent-to-agent spawning API with x402 payment gating (Coinbase standard).
-**v1.1.0** (2026-04-17): production-readiness pass — see `apps/spawn/CHANGELOG.md`.
+**v1.2.0** (2026-04-18): modular runtime + per-server credentials/agents management —
+see `apps/spawn/CHANGELOG.md`. **v1.1.0** (2026-04-17): idempotency, structured errors,
+token lifecycle, WS hardening.
+
+| Component | Maturity | Notes |
+|-----------|----------|-------|
+| Spawn runtime/credentials at request time | **Functional** | `POST /api/v1/spawn/:planId` accepts `{runtime, credentials[], default_model}`; cloud-init passes them to install.sh. |
+| Per-server Engine tab (dashboard) | **Functional** | Lists drivers / credentials / agents; CRUD + test via spawn-app proxy → SSH → customer gateway. |
+| Proxy endpoints `/api/dashboard/servers/:id/config/*` | **Functional** | GET/PUT/PATCH/DELETE for agents + credentials + drivers. |
 
 | Component | Maturity | Notes |
 |-----------|----------|-------|

@@ -11,9 +11,10 @@ Local inter-daemon communication happens over Unix sockets. osmoda-mesh adds TCP
 ## Trust Tiers
 
 ```
-TIER 0: OpenClaw + agentd + keyd + watch + routines + mesh + voice + mcpd + teachd
+TIER 0: osmoda-gateway + agentd + keyd + watch + routines + mesh + voice + mcpd + teachd
   Full system access. Root-equivalent. See and control everything.
-  Components: OpenClaw Gateway, osmoda-bridge, agentd, keyd, watch, routines, mesh, voice, mcpd, teachd
+  Components: osmoda-gateway (modular), driver-of-choice (claude-code or openclaw),
+  osmoda-bridge OR osmoda-mcp-bridge (91 tools), plus all Rust daemons above.
 
 TIER 1: Approved Apps
   Sandboxed with declared capabilities. No root, no arbitrary filesystem.
@@ -24,6 +25,58 @@ TIER 2: Untrusted Execution
   Maximum isolation. Working directory + /tmp only. No network.
   User scripts, pip packages, npm installs, third-party binaries.
 ```
+
+## Agent gateway — modular runtime (v0.2+)
+
+```
+                      ┌─────────────────────────┐
+                      │   osmoda-gateway        │
+                      │   (TypeScript)          │
+                      │   systemd: always this  │
+                      └────────────┬────────────┘
+                                   │ reads
+                                   ▼
+                ┌──────────────────────────────────────┐
+                │ /var/lib/osmoda/config/agents.json   │
+                │   { agents: [{ id, runtime, cred, …}]}│
+                │ /var/lib/osmoda/config/credentials.*  │
+                │   AES-256-GCM encrypted store         │
+                └──────┬──────────────────┬────────────┘
+                       │                  │
+              route per-agent       decrypt on use
+                       │                  │
+              ┌────────┴──────┐    ┌──────┴───────┐
+              ▼               ▼    ▼              ▼
+      ┌──────────────┐  ┌──────────────┐  ┌────────────────┐
+      │ claude-code  │  │ openclaw     │  │ codex (future) │
+      │ driver       │  │ driver       │  │ driver         │
+      ├──────────────┤  ├──────────────┤  ├────────────────┤
+      │ spawns       │  │ spawns       │  │ …              │
+      │ `claude` CLI │  │ `openclaw`   │  │                │
+      │ --bare OR    │  │ binary as    │  │                │
+      │ OAuth env    │  │ child proc   │  │                │
+      └──────┬───────┘  └──────┬───────┘  └────────────────┘
+             │                 │
+             └────────┬────────┘
+                      ▼
+              ┌───────────────┐
+              │ MCP bridge    │   91 tools, runtime-neutral
+              │ (91 tools)    │
+              └───────┬───────┘
+                      ▼
+        (all osModa daemons via Unix sockets)
+```
+
+**Per-session routing:** WS `/ws` or POST `/telegram` → gateway looks up agent
+for channel → fetches credential → invokes driver → streams `AgentEvent` back.
+
+**Hot-reload:** `kill -HUP <pid>` (or `systemctl reload osmoda-gateway`) re-reads
+agents.json. In-flight sessions keep their original driver + credential snapshot.
+
+**REST config API** (Bearer-authed): `/config/drivers`, `/config/agents`,
+`/config/credentials`, `/config/credentials/:id/test`, `/config/reload`,
+`/config/health`. Used by the dashboard to switch runtime / swap credentials
+/ test validity without SSH.
 
 ## Component Architecture
 

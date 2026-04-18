@@ -1,6 +1,6 @@
 # Spawn API v1 — x402-Gated Public API
 
-Last updated: 2026-04-17 · API version: **1.1.0**
+Last updated: 2026-04-18 · API version: **1.2.0**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
 

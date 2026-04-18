@@ -38,8 +38,23 @@ export interface PlanList {
 export interface SpawnRequest {
   region?: string;
   ssh_key?: string;
+  /** Legacy single-credential shortcut. Auto-promoted to a credential entry at install. */
   ai_provider?: "anthropic" | "openai";
   api_key?: string;
+  // v1.2+ modular fields (all optional):
+  /** Default agent runtime for the spawned server. */
+  runtime?: "claude-code" | "openclaw";
+  /** Initial default model for the osmoda agent. */
+  default_model?: string;
+  /** Credentials to pre-seed. Max 8; secrets must be ≥10 chars. */
+  credentials?: SpawnCredentialInput[];
+}
+
+export interface SpawnCredentialInput {
+  label: string;
+  provider: "anthropic" | "openai" | "openrouter" | "deepseek" | string;
+  type: "oauth" | "api_key";
+  secret: string;
 }
 
 export interface SpawnResponse {

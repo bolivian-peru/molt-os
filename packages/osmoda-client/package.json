@@ -1,6 +1,6 @@
 {
   "name": "@osmoda/client",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "First-party TypeScript client for the osModa Spawn API (spawn.os.moda).",
   "type": "module",
   "main": "dist/index.js",
