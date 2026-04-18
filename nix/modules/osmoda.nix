@@ -388,25 +388,24 @@ in {
     };
 
     # ===== AGENT GATEWAY =====
+    # v1.2+: the gateway is ALWAYS osmoda-gateway (TypeScript, modular).
+    # `cfg.gateway.runtime` now controls which DRIVER each agent uses by
+    # default (written into agents.json by install.sh); it no longer swaps
+    # the systemd unit. OpenClaw becomes a child process spawned by the
+    # openclaw driver, so users can flip between claude-code and openclaw
+    # at runtime via SIGHUP instead of a nixos-rebuild.
     systemd.services.osmoda-gateway = mkIf cfg.gateway.enable {
-      description = "osModa Gateway (${cfg.gateway.runtime})";
+      description = "osModa Gateway (modular, default-driver=${cfg.gateway.runtime})";
       wantedBy = [ "multi-user.target" ];
       after = [ "osmoda-agentd.service" ];
       requires = [ "osmoda-agentd.service" ];
+      reloadTriggers = [ effectiveConfigFile ];
 
       serviceConfig = {
         Type = "simple";
-        ExecStart =
-          if cfg.gateway.runtime == "claude-code" then
-            "${pkgs.nodejs}/bin/node ${cfg.stateDir}/packages/osmoda-gateway/dist/index.js --config ${effectiveConfigFile}"
-          else
-            concatStringsSep " " [
-              "${pkgs.openclaw or pkgs.nodejs}/bin/openclaw"
-              "gateway"
-              "--port ${toString gatewayPort}"
-              "--verbose"
-              "--config ${effectiveConfigFile}"
-            ];
+        ExecStart = "${pkgs.nodejs}/bin/node ${cfg.stateDir}/packages/osmoda-gateway/dist/index.js --config ${effectiveConfigFile}";
+        # SIGHUP triggers in-memory config reload without dropping WS clients.
+        ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
         Restart = "always";
         RestartSec = 5;
         StateDirectory = "osmoda";
@@ -416,6 +415,7 @@ in {
       environment = {
         NODE_ENV = "production";
         OSMODA_GATEWAY_CONFIG = "${effectiveConfigFile}";
+        OSMODA_CONFIG_DIR = "${cfg.stateDir}/config";
         OSMODA_SOCKET = cfg.agentd.socketPath;
         OSMODA_KEYD_SOCKET = cfg.keyd.socketPath;
         OSMODA_WATCH_SOCKET = cfg.watch.socketPath;

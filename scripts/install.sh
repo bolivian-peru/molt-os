@@ -83,6 +83,9 @@ HEARTBEAT_SECRET=""
 PROVIDER_TYPE=""
 RUNTIME="claude-code"  # claude-code (default) or openclaw (legacy)
 SNAPSHOT_MODE=false     # true when booting from pre-built NixOS snapshot
+DEFAULT_MODEL=""       # initial default model for the osmoda agent
+# Repeatable --credential flag. Each value: `label|provider|type|base64-secret`
+CREDENTIALS=()
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -95,6 +98,8 @@ while [[ $# -gt 0 ]]; do
     --provider)          PROVIDER_TYPE="$2"; shift 2 ;;
     --runtime)           RUNTIME="$2"; shift 2 ;;
     --snapshot)          SNAPSHOT_MODE=true; shift ;;
+    --default-model)     DEFAULT_MODEL="$2"; shift 2 ;;
+    --credential)        CREDENTIALS+=("$2"); shift 2 ;;
     --help|-h)
       echo "osModa Installer v${VERSION}"
       echo ""
@@ -102,12 +107,18 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --skip-nixos          Skip NixOS conversion (already on NixOS or Phase 2 post-reboot)"
-      echo "  --api-key KEY         Set API key (base64-encoded or raw)"
+      echo "  --api-key KEY         Set API key (base64-encoded or raw). Legacy; auto-migrates to a credential."
+      echo "  --credential SPEC     Add a credential. Repeatable. Format:"
+      echo "                          label|provider|type|base64-secret"
+      echo "                        provider ∈ {anthropic, openai, openrouter}"
+      echo "                        type     ∈ {oauth, api_key}"
+      echo "  --default-model NAME  Initial default model (e.g. claude-opus-4-6)"
+      echo "  --runtime NAME        Agent runtime: claude-code (default) or openclaw"
       echo "  --branch NAME         Git branch to install (default: main)"
       echo "  --order-id UUID       Spawn order ID (set by spawn.os.moda)"
       echo "  --callback-url URL    Heartbeat callback URL (set by spawn.os.moda)"
       echo "  --heartbeat-secret S  HMAC secret for heartbeat authentication"
-      echo "  --provider TYPE       AI provider: anthropic or openai (default: anthropic)"
+      echo "  --provider TYPE       AI provider for --api-key fallback: anthropic or openai"
       echo "  --help                Show this help"
       exit 0
       ;;
@@ -214,6 +225,13 @@ if [ "$SKIP_NIXOS" = false ]; then
     [ -n "$CALLBACK_URL" ] && PHASE2_ARGS="$PHASE2_ARGS --callback-url $CALLBACK_URL"
     [ -n "$HEARTBEAT_SECRET" ] && PHASE2_ARGS="$PHASE2_ARGS --heartbeat-secret $HEARTBEAT_SECRET"
     [ -n "$PROVIDER_TYPE" ] && PHASE2_ARGS="$PHASE2_ARGS --provider $PROVIDER_TYPE"
+    [ -n "$RUNTIME" ] && PHASE2_ARGS="$PHASE2_ARGS --runtime $RUNTIME"
+    [ -n "$DEFAULT_MODEL" ] && PHASE2_ARGS="$PHASE2_ARGS --default-model $DEFAULT_MODEL"
+    # Pass through every --credential in order. Values are base64-embedded so
+    # no shell-escaping worries across the Phase-1 → Phase-2 boundary.
+    for cred in "${CREDENTIALS[@]}"; do
+      PHASE2_ARGS="$PHASE2_ARGS --credential $cred"
+    done
     INSTALL_URL="https://raw.githubusercontent.com/bolivian-peru/os-moda/${BRANCH:-main}/scripts/install.sh"
 
     # Download nixos-infect and patch out its reboot so we can inject Phase 2 config
@@ -551,53 +569,55 @@ if ! command -v npm &>/dev/null; then
   die "npm is required but not found. Install Node.js (>= 18) and retry."
 fi
 
-if [ "$RUNTIME" = "claude-code" ]; then
-  # ─── CLAUDE CODE SDK RUNTIME ───
-  log "Installing Claude Code SDK gateway..."
+# v1.2+: osmoda-gateway is ALWAYS installed — it is the systemd unit, and
+# it drives claude-code + openclaw as pluggable drivers (child processes).
+# RUNTIME only determines what goes into agents.json as the default per-agent
+# runtime AND whether we ALSO install the openclaw binary for that driver.
 
-  # Install @anthropic-ai/claude-code CLI (provides the 'claude' binary)
-  # Always install latest in the gateway dir (not global — avoids NixOS /usr/local issues)
-  cd "$GATEWAY_DIR"
-  npm install @anthropic-ai/claude-code@latest 2>&1 | tail -3 || warn "Claude Code CLI install failed"
-  CLAUDE_BIN="$GATEWAY_DIR/node_modules/.bin/claude"
-  if [ -x "$CLAUDE_BIN" ]; then
-    ln -sf "$CLAUDE_BIN" /usr/local/bin/claude 2>/dev/null || true
-    log "Claude Code CLI $(${CLAUDE_BIN} --version 2>/dev/null | head -1) installed"
-  fi
+log "Installing Claude Code CLI (used by the claude-code driver)..."
+cd "$GATEWAY_DIR"
+npm install @anthropic-ai/claude-code@latest 2>&1 | tail -3 || warn "Claude Code CLI install failed"
+CLAUDE_BIN="$GATEWAY_DIR/node_modules/.bin/claude"
+if [ -x "$CLAUDE_BIN" ]; then
+  ln -sf "$CLAUDE_BIN" /usr/local/bin/claude 2>/dev/null || true
+  log "Claude Code CLI $(${CLAUDE_BIN} --version 2>/dev/null | head -1) installed"
+fi
 
-  # Build the osmoda-gateway (HTTP+WS server that spawns claude CLI with MCP tools)
-  cd "$GATEWAY_DIR"
-  if [ ! -d node_modules ]; then
-    npm install 2>&1 | tail -3 || die "Failed to install gateway dependencies"
-  fi
-  if [ ! -f dist/index.js ]; then
-    npx tsc 2>/dev/null || true  # dist/ should already be in repo, but compile if needed
-  fi
+log "Building osmoda-gateway (modular, drivers: claude-code + openclaw)..."
+cd "$GATEWAY_DIR"
+if [ ! -d node_modules ]; then
+  npm install 2>&1 | tail -3 || die "Failed to install gateway dependencies"
+fi
+if [ ! -f dist/index.js ] || [ "$(find src -newer dist/index.js 2>/dev/null | head -1)" ]; then
+  npx tsc 2>/dev/null || die "Gateway TypeScript build failed"
+fi
 
-  # Install MCP bridge dependencies (provides 91 tools via MCP protocol)
-  cd "$MCP_BRIDGE_DIR"
-  if [ ! -d node_modules ]; then
-    npm install 2>&1 | tail -3 || die "Failed to install MCP bridge dependencies"
-  fi
+log "Installing MCP bridge (91 tools via MCP)..."
+cd "$MCP_BRIDGE_DIR"
+if [ ! -d node_modules ]; then
+  npm install 2>&1 | tail -3 || die "Failed to install MCP bridge dependencies"
+fi
 
-  log "Claude Code SDK gateway installed."
-else
-  # ─── OPENCLAW RUNTIME (legacy) ───
-  log "Installing OpenClaw AI gateway..."
-
+# OpenClaw is optional — install it when the user explicitly chose runtime=openclaw
+# so the openclaw driver has a binary to spawn. Users can switch runtime later
+# via the dashboard without re-running install.sh; installing OpenClaw now just
+# makes it available from day one.
+if [ "$RUNTIME" = "openclaw" ]; then
+  log "Installing OpenClaw binary (for the openclaw driver)..."
   if ! command -v openclaw &>/dev/null; then
     mkdir -p "$OPENCLAW_DIR"
     cd "$OPENCLAW_DIR"
     if [ ! -f package.json ]; then
       npm init -y >/dev/null 2>&1
     fi
-    npm install openclaw 2>&1 | tail -3 || die "Failed to install OpenClaw via npm. Check network and npm permissions."
-    ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
-    echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
-    export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
+    npm install openclaw 2>&1 | tail -3 || warn "Failed to install OpenClaw via npm — openclaw driver will be unavailable until resolved"
+    if [ -x "$OPENCLAW_DIR/node_modules/.bin/openclaw" ]; then
+      ln -sf "$OPENCLAW_DIR/node_modules/.bin/openclaw" /usr/local/bin/openclaw 2>/dev/null || true
+      echo "export PATH=\"$OPENCLAW_DIR/node_modules/.bin:\$PATH\"" >> /etc/profile.d/osmoda.sh
+      export PATH="$OPENCLAW_DIR/node_modules/.bin:$PATH"
+      log "OpenClaw installed (version $(${OPENCLAW_DIR}/node_modules/.bin/openclaw --version 2>/dev/null | head -1 || echo '?'))"
+    fi
   fi
-
-  log "OpenClaw installed."
 fi
 
 # ---------------------------------------------------------------------------
@@ -607,18 +627,21 @@ report_progress "openclaw" "done" "$RUNTIME runtime installed"
 report_progress "bridge" "started" "Setting up tool bridge (91 tools)"
 log "Step 6: Setting up tool bridge..."
 
-if [ "$RUNTIME" = "claude-code" ]; then
-  # Claude Code uses MCP bridge (installed in Step 5)
-  log "MCP bridge ready with 91 tools (via osmoda-mcp-bridge)."
-else
-  # OpenClaw uses osmoda-bridge plugin
+# MCP bridge is ALWAYS installed (both drivers route tools through it).
+log "MCP bridge ready with 91 tools (via osmoda-mcp-bridge)."
+
+# ALSO install the OpenClaw plugin flavor when OpenClaw is present, so the
+# openclaw driver exposes the same 91 tools via OpenClaw's plugin system.
+if [ "$RUNTIME" = "openclaw" ] || command -v openclaw &>/dev/null; then
   PLUGIN_SRC="$INSTALL_DIR/packages/osmoda-bridge"
   PLUGIN_DST="/root/.openclaw/extensions/osmoda-bridge"
-  mkdir -p /root/.openclaw/extensions
-  rm -rf "$PLUGIN_DST"
-  cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
-  chown -R root:root "$PLUGIN_DST"
-  log "Bridge plugin installed with 91 system tools."
+  if [ -d "$PLUGIN_SRC" ]; then
+    mkdir -p /root/.openclaw/extensions
+    rm -rf "$PLUGIN_DST"
+    cp -r "$PLUGIN_SRC" "$PLUGIN_DST"
+    chown -R root:root "$PLUGIN_DST"
+    log "OpenClaw plugin installed with 91 system tools."
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -820,6 +843,125 @@ AUTHEOF
   chmod 600 "$STATE_DIR/config/gateway-token"
   log "Generated gateway token for relay auth"
   fi  # end gateway-token generation
+
+  # ------------------------------------------------------------------
+  # Modular bootstrap: agents.json + bootstrap-credentials.json
+  # ------------------------------------------------------------------
+  # The gateway (v1.2+) reads these on first boot. bootstrap-credentials.json
+  # is plaintext JSON that the gateway imports into its encrypted store and
+  # then deletes. agents.json is the durable per-server config that users
+  # can edit from the dashboard.
+  #
+  # This block runs regardless of runtime choice — the gateway treats them
+  # the same way; only the runtime field differs.
+  if command -v node &>/dev/null; then
+    export OSMODA_INSTALL_API_KEY="$DECODED_KEY"
+    export OSMODA_INSTALL_PROVIDER="$EFFECTIVE_PROVIDER"
+    export OSMODA_INSTALL_RUNTIME="$RUNTIME"
+    export OSMODA_INSTALL_DEFAULT_MODEL="$DEFAULT_MODEL"
+    # Stash --credential specs as JSON array (base64 to survive shell boundaries)
+    CREDS_JSON="[]"
+    if [ "${#CREDENTIALS[@]}" -gt 0 ]; then
+      # Build a JSON array of raw strings — gateway bootstrap parses each "label|provider|type|b64secret"
+      CREDS_JSON=$(printf '%s\n' "${CREDENTIALS[@]}" | node -e '
+        let buf = "";
+        process.stdin.on("data", c => buf += c);
+        process.stdin.on("end", () => {
+          const arr = buf.split("\n").filter(Boolean);
+          process.stdout.write(JSON.stringify(arr));
+        });
+      ')
+    fi
+    export OSMODA_INSTALL_CREDENTIALS="$CREDS_JSON"
+
+    node <<'BOOTSTRAPEOF'
+const fs = require("fs");
+const path = require("path");
+const CFG = "/var/lib/osmoda/config";
+fs.mkdirSync(CFG, { recursive: true, mode: 0o700 });
+
+const apiKey = process.env.OSMODA_INSTALL_API_KEY || "";
+const provider = process.env.OSMODA_INSTALL_PROVIDER || "anthropic";
+const runtime = process.env.OSMODA_INSTALL_RUNTIME || "claude-code";
+const defaultModel = process.env.OSMODA_INSTALL_DEFAULT_MODEL || "claude-opus-4-6";
+const credSpecs = JSON.parse(process.env.OSMODA_INSTALL_CREDENTIALS || "[]");
+
+const creds = [];
+let defaultCredId = null;
+
+function pushCred({ label, provider, type, secret }) {
+  if (!secret || secret.length < 10) return null;
+  const id = "cred_" + require("crypto").randomBytes(12).toString("hex");
+  const now = new Date().toISOString();
+  creds.push({ id, label, provider, type, secret, created_at: now });
+  if (!defaultCredId) defaultCredId = id;
+  return id;
+}
+
+// Legacy --api-key → credential
+if (apiKey) {
+  const type = apiKey.startsWith("sk-ant-oat") ? "oauth" : "api_key";
+  pushCred({
+    label: provider === "openai" ? "OpenAI API key" : (type === "oauth" ? "Claude OAuth" : "Anthropic API key"),
+    provider,
+    type,
+    secret: apiKey,
+  });
+}
+
+// --credential label|provider|type|base64-secret (repeatable, wins in order)
+for (const spec of credSpecs) {
+  const parts = spec.split("|");
+  if (parts.length < 4) { console.warn("[bootstrap] skipping malformed credential spec"); continue; }
+  const [label, cprovider, ctype, b64] = parts;
+  let secret;
+  try { secret = Buffer.from(b64, "base64").toString("utf8"); }
+  catch { console.warn("[bootstrap] skipping credential with bad base64"); continue; }
+  pushCred({ label, provider: cprovider, type: ctype, secret });
+}
+
+// Write bootstrap file for gateway to absorb on first boot.
+if (creds.length > 0) {
+  fs.writeFileSync(
+    path.join(CFG, "bootstrap-credentials.json"),
+    JSON.stringify({ version: 1, default_credential_id: defaultCredId, credentials: creds }, null, 2),
+    { mode: 0o600 },
+  );
+}
+
+// Write agents.json pointing to the default credential.
+const now = new Date().toISOString();
+const mkAgent = (id, displayName, model, channels) => ({
+  id,
+  display_name: displayName,
+  runtime,
+  credential_id: defaultCredId || "",
+  model,
+  channels,
+  profile_dir: "/var/lib/osmoda/workspace-" + id,
+  enabled: Boolean(defaultCredId),
+  updated_at: now,
+});
+
+const agents = [
+  mkAgent("osmoda", "osModa (full access)", defaultModel || "claude-opus-4-6", ["web", "api"]),
+  mkAgent("mobile", "osModa mobile", "claude-sonnet-4-6", ["telegram", "whatsapp"]),
+];
+
+const agentsFile = {
+  version: 1,
+  agents,
+  bindings: [
+    { channel: "telegram", agent_id: "mobile" },
+    { channel: "whatsapp", agent_id: "mobile" },
+  ],
+};
+fs.writeFileSync(path.join(CFG, "agents.json"), JSON.stringify(agentsFile, null, 2), { mode: 0o640 });
+console.log("[bootstrap] wrote agents.json (" + agents.length + " agents, runtime=" + runtime + ", default_cred=" + (defaultCredId || "<none>") + ")");
+BOOTSTRAPEOF
+    unset OSMODA_INSTALL_API_KEY OSMODA_INSTALL_PROVIDER OSMODA_INSTALL_RUNTIME OSMODA_INSTALL_DEFAULT_MODEL OSMODA_INSTALL_CREDENTIALS
+  fi
+  # end modular bootstrap
 
   # Generate multi-agent OpenClaw config with env block + compaction (openclaw only)
   if [ "$RUNTIME" = "openclaw" ] && command -v node &>/dev/null; then
