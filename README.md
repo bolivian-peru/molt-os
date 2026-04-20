@@ -583,14 +583,21 @@ curl https://spawn.os.moda/SKILL.md
 Plans: `test` (Solo $14.99), `starter` (Pro $34.99), `developer` (Team $62.99), `production` (Scale $125.99).
 Payment via Coinbase x402 protocol (USDC on Base or Solana). Full API docs at [`/api/v1/docs`](https://spawn.os.moda/api/v1/docs). Agent skill doc at [`/SKILL.md`](https://spawn.os.moda/SKILL.md).
 
+## In the wild
+
+- **[spawn.os.moda](https://spawn.os.moda)** — hosted provisioning. Public x402-payable API, live ERC-8004 agent card, v1.2 modular runtime.
+- *Your deployment here →* open a PR adding a one-line description + link.
+
 ## Contributing
 
 Public beta. Feedback, bug reports, and PRs welcome.
 
-- **Bug reports** — open an issue, include logs
+- **Good first issues** — see the [good-first-issue label](https://github.com/bolivian-peru/os-moda/labels/good%20first%20issue) for scoped 30-90 min tasks
+- **Bug reports** — open an issue, include logs (`journalctl -u osmoda-gateway --since '10 min ago'`)
 - **New skills** — add `skills/<name>/SKILL.md`, open a PR
+- **New runtime driver** — add a single file under `packages/osmoda-gateway/src/drivers/` implementing `RuntimeDriver`; Codex, Bedrock, Vertex all welcome
 - **NixOS module** — `nix/modules/osmoda.nix` is the core
-- **Bridge tools** — `packages/osmoda-bridge/index.ts`
+- **MCP tools** — `packages/osmoda-mcp-bridge/`
 - **Rust daemons** — each daemon is a standalone crate in `crates/`
 
 **Community:** [Telegram](https://t.me/osmodasystems) · [Discord](https://discord.gg/G7bwet8B)
