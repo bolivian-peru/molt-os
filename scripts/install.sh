@@ -141,17 +141,63 @@ echo ""
 # ---------------------------------------------------------------------------
 report_progress() {
   local step="$1" step_status="$2" detail="${3:-}"
+  # Track the most-recently-started phase so the EXIT trap can report where
+  # we died. Each new phase overwrites CURRENT_PHASE when status=started.
+  if [ "$step_status" = "started" ]; then CURRENT_PHASE="$step"; fi
   if [ -z "${ORDER_ID:-}" ] || [ -z "${CALLBACK_URL:-}" ]; then return 0; fi
   local BASE_URL="${CALLBACK_URL%/api/heartbeat}"
+  # Escape JSON string content: backslash, double-quote, newlines, tabs.
+  # Without this, a literal `"` in a detail message (e.g. an error including a
+  # command) breaks the JSON and the callback silently fails → dashboard
+  # never shows the error. Replace order matters — backslashes first.
+  local esc_step esc_status esc_detail
+  esc_step=$(printf '%s' "$step" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+  esc_status=$(printf '%s' "$step_status" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+  esc_detail=$(printf '%s' "$detail" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g' -e 's/\t/\\t/g')
   curl -sf --max-time 10 -X POST "$BASE_URL/api/provision-progress" \
     -H "Content-Type: application/json" \
     -H "X-Heartbeat-Secret: ${HEARTBEAT_SECRET:-}" \
-    -d "{\"order_id\":\"$ORDER_ID\",\"step\":\"$step\",\"status\":\"$step_status\",\"detail\":\"$detail\"}" \
+    -d "{\"order_id\":\"$ORDER_ID\",\"step\":\"$esc_step\",\"status\":\"$esc_status\",\"detail\":\"$esc_detail\"}" \
     >/dev/null 2>&1 &
 }
 
-# Report errors on exit so dashboard shows failure
-trap 'if [ $? -ne 0 ]; then report_progress "error" "error" "Install failed at line $LINENO (exit $?)"; wait; fi' EXIT
+# Report a FATAL failure with context. Ships last 200 lines of the install log
+# so the dashboard can render something actionable without an SSH round-trip.
+report_failed() {
+  local step="$1" reason="$2"
+  if [ -z "${ORDER_ID:-}" ] || [ -z "${CALLBACK_URL:-}" ]; then return 0; fi
+  local BASE_URL="${CALLBACK_URL%/api/heartbeat}"
+  local log_file="/var/log/osmoda-cloud-init.log"
+  local log_tail=""
+  if [ -f "$log_file" ]; then
+    log_tail=$(tail -n 200 "$log_file" 2>/dev/null | tr '\n' '\n' || true)
+  fi
+  # JSON-escape all three fields (same rules as report_progress).
+  local esc_step esc_reason esc_tail
+  esc_step=$(printf '%s' "$step" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+  esc_reason=$(printf '%s' "$reason" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g')
+  esc_tail=$(printf '%s' "$log_tail" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g' -e 's/\t/\\t/g')
+  curl -sf --max-time 15 -X POST "$BASE_URL/api/provision-failed" \
+    -H "Content-Type: application/json" \
+    -H "X-Heartbeat-Secret: ${HEARTBEAT_SECRET:-}" \
+    -d "{\"order_id\":\"$ORDER_ID\",\"step\":\"$esc_step\",\"reason\":\"$esc_reason\",\"log_tail\":\"$esc_tail\"}" \
+    >/dev/null 2>&1 || true
+}
+
+# Report errors on exit so dashboard shows failure. This fires on any non-zero
+# exit path the trap sees — EXCEPT when the kernel reboots during nixos-infect
+# or similar (SIGKILL → trap doesn't run). That's why the spawn watchdog flags
+# stuck orders separately even when we send no callback here.
+CURRENT_PHASE="preflight"
+on_exit() {
+  local rc=$?
+  if [ $rc -ne 0 ]; then
+    report_progress "$CURRENT_PHASE" "error" "Install exited with code $rc (phase: $CURRENT_PHASE, line $LINENO)"
+    report_failed "$CURRENT_PHASE" "Install exited with code $rc at phase $CURRENT_PHASE"
+    wait
+  fi
+}
+trap on_exit EXIT
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks
@@ -370,12 +416,14 @@ if [ "$SNAPSHOT_MODE" = true ] && [ -f "/opt/osmoda/target/release/agentd" ]; th
   timeout 120 git fetch origin "${BRANCH:-main}" 2>/dev/null && git reset --hard "origin/${BRANCH:-main}" 2>/dev/null || true
   report_progress "clone" "done" "Source updated"
 
-  # Check if Claude CLI needs update
+  # Check if Claude CLI needs update. Install from the gateway's pinned range
+  # (see packages/osmoda-gateway/package.json) rather than @latest, so we don't
+  # silently upgrade past the version the driver was tested against.
   GATEWAY_DIR="$INSTALL_DIR/packages/osmoda-gateway"
   MCP_BRIDGE_DIR="$INSTALL_DIR/packages/osmoda-mcp-bridge"
   CLAUDE_BIN="$GATEWAY_DIR/node_modules/.bin/claude"
   if [ ! -x "$CLAUDE_BIN" ]; then
-    cd "$GATEWAY_DIR" && npm install @anthropic-ai/claude-code@latest 2>&1 | tail -3
+    cd "$GATEWAY_DIR" && npm install --no-audit --no-fund 2>&1 | tail -3
   fi
 
   report_progress "build" "done" "Pre-compiled binaries (NixOS snapshot)"
@@ -575,20 +623,28 @@ fi
 # RUNTIME only determines what goes into agents.json as the default per-agent
 # runtime AND whether we ALSO install the openclaw binary for that driver.
 
-log "Installing Claude Code CLI (used by the claude-code driver)..."
+log "Installing gateway deps (includes Claude Code CLI pinned in package.json)..."
 cd "$GATEWAY_DIR"
-npm install @anthropic-ai/claude-code@latest 2>&1 | tail -3 || warn "Claude Code CLI install failed"
+# Use plain `npm install` (respects package.json's pinned range — see
+# @anthropic-ai/claude-code in optionalDependencies) rather than @latest, so
+# the driver never gets a silently-upgraded CLI it wasn't tested against.
+npm install --no-audit --no-fund 2>&1 | tail -3 || die "Failed to install gateway dependencies"
 CLAUDE_BIN="$GATEWAY_DIR/node_modules/.bin/claude"
+if [ ! -x "$CLAUDE_BIN" ]; then
+  # optionalDependencies may skip on platform-incompatible installs; force-install
+  # explicitly within the same pinned range rather than @latest.
+  warn "Claude Code CLI missing after npm install — forcing install within pinned range"
+  npm install --no-audit --no-fund --no-save '@anthropic-ai/claude-code@^2.1.75' 2>&1 | tail -3 || warn "Claude Code CLI install failed"
+fi
 if [ -x "$CLAUDE_BIN" ]; then
   ln -sf "$CLAUDE_BIN" /usr/local/bin/claude 2>/dev/null || true
   log "Claude Code CLI $(${CLAUDE_BIN} --version 2>/dev/null | head -1) installed"
+else
+  warn "Claude Code CLI not found at $CLAUDE_BIN — the claude-code driver will fail at spawn time"
 fi
 
 log "Building osmoda-gateway (modular, drivers: claude-code + openclaw)..."
 cd "$GATEWAY_DIR"
-if [ ! -d node_modules ]; then
-  npm install 2>&1 | tail -3 || die "Failed to install gateway dependencies"
-fi
 if [ ! -f dist/index.js ] || [ "$(find src -newer dist/index.js 2>/dev/null | head -1)" ]; then
   npx tsc 2>/dev/null || die "Gateway TypeScript build failed"
 fi
