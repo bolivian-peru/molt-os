@@ -209,15 +209,24 @@ if [ "$(id -u)" -ne 0 ]; then
   die "This installer must be run as root. Try: sudo bash"
 fi
 
-# Detect OS
-if [ -f /etc/NIXOS ]; then
+# Detect OS.
+# /etc/NIXOS alone is unreliable: a failed nixos-infect leaves the marker
+# behind even after the host reboots back to Ubuntu (we hit this on the
+# CX22 test box on 2026-04-24). Require /run/current-system too — that
+# symlink is created by the NixOS init and is only present when we're
+# *actually* booted into NixOS.
+if [ -f /etc/NIXOS ] && [ -L /run/current-system ]; then
   OS_TYPE="nixos"
-  log "Detected: NixOS"
+  log "Detected: NixOS (running)"
   SKIP_NIXOS=true
 elif [ -f /etc/os-release ]; then
   . /etc/os-release
   OS_TYPE="${ID:-unknown}"
-  log "Detected: ${PRETTY_NAME:-$OS_TYPE}"
+  if [ -f /etc/NIXOS ] && [ ! -L /run/current-system ]; then
+    warn "Stale /etc/NIXOS marker on $OS_TYPE host (failed nixos-infect?). Treating as ${PRETTY_NAME:-$OS_TYPE}."
+  else
+    log "Detected: ${PRETTY_NAME:-$OS_TYPE}"
+  fi
 else
   OS_TYPE="unknown"
   warn "Unknown OS. Proceeding anyway..."
