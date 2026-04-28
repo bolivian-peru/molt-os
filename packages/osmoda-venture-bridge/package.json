@@ -1,0 +1,21 @@
+{
+  "name": "osmoda-venture-bridge",
+  "version": "0.1.0",
+  "description": "MCP bridge — 8 Venture-tier tools the Business Agent uses to run a local-SEO lead-gen site (domain, scaffold, publish, content, SEO, citations, leads). Reports phase events back to spawn /api/v1/swarms/.../events.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "osmoda-venture-bridge": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
