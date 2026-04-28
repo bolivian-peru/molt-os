@@ -3,7 +3,14 @@
  *
  * Credential handling:
  *  - type=oauth      → CLAUDE_CODE_OAUTH_TOKEN env var (subscription)
- *  - type=api_key    → ANTHROPIC_API_KEY env var + CLI --bare flag
+ *  - type=api_key    → ANTHROPIC_API_KEY env var
+ *
+ * Auth precedence in the CLI is: ANTHROPIC_AUTH_TOKEN → ANTHROPIC_API_KEY →
+ * apiKeyHelper → CLAUDE_CODE_OAUTH_TOKEN → interactive login. We scrub the
+ * unused env var before spawning so only one path is active.
+ *
+ * Isolation: --strict-mcp-config locks the MCP server set to just our bridge
+ * (ignoring any ~/.claude or project-level MCP configs). Works across all 2.x.
  *
  * The `claude` CLI supports resumable sessions; we pass `--resume <id>` when
  * the caller provides a sessionId.
@@ -97,9 +104,9 @@ export const claudeCodeDriver: RuntimeDriver = {
       "--model", opts.model,
       "--system-prompt", opts.systemPrompt.slice(0, 10000),
       "--mcp-config", opts.mcpConfigPath,
+      "--strict-mcp-config",
       "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,mcp__osmoda__*",
     ];
-    if (opts.credential.type === "api_key") args.push("--bare");
     if (opts.sessionId) args.push("--resume", opts.sessionId);
     args.push("--", opts.message);
 
@@ -114,6 +121,10 @@ export const claudeCodeDriver: RuntimeDriver = {
       };
       return;
     }
+    // Close stdin immediately — 2.x CLI waits 3s for stdin data before falling
+    // back to the positional message, which adds latency to every call. We
+    // always pass the prompt via argv, never via stdin.
+    proc.stdin?.end();
 
     if (opts.abortSignal) {
       opts.abortSignal.addEventListener("abort", () => { proc.kill("SIGTERM"); }, { once: true });
@@ -167,7 +178,24 @@ export const claudeCodeDriver: RuntimeDriver = {
             }
           }
         } else if (t === "result") {
-          if (event.result && typeof event.result === "string" && !hasOutput) {
+          // 2.x adds `is_error` + `api_error_status` to the terminal result
+          // event (e.g. 401 bad creds, 429 rate limit). Surface these as a
+          // proper error so consumers can distinguish CLI failures from model
+          // output. The error text is usually also echoed as assistant text
+          // earlier in the stream; that's fine — consumers filter by event
+          // type, and having both means structured + rendered variants both
+          // reach the UI.
+          if (event.is_error === true) {
+            const status = event.api_error_status;
+            const msg = typeof event.result === "string" && event.result
+              ? event.result
+              : `claude-code error${status ? ` (HTTP ${status})` : ""}`;
+            yield {
+              type: "error",
+              code: status ? `http_${status}` : "cli_error",
+              text: msg,
+            };
+          } else if (event.result && typeof event.result === "string" && !hasOutput) {
             yield { type: "text", text: event.result };
           }
           sessionId = event.session_id || sessionId;
