@@ -2,7 +2,19 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-04-18 (v1.2 modular runtime shipped)
+Last updated: 2026-04-24
+
+## Recent operational changes (2026-04-24)
+
+| Area | Change | Why |
+|---|---|---|
+| Provisioning | Cloud-init hard-pinned to `--skip-nixos` (Ubuntu only path) | nixos-infect path is known-broken (3 unfixable failure modes); was bricking spawned servers |
+| Claude Code | Bumped `@anthropic-ai/claude-code` from `^0.2.0` (resolved to 0.2.126) to `^2.1.75` | 2 majors behind; flag set partly broken on customer servers |
+| Driver flags | Removed `--bare` (flaky across 2.1.x patches), added `--strict-mcp-config` (stable) | Deterministic MCP isolation regardless of which 2.1.x patch lands |
+| install.sh | Phase tracking + `report_failed()` callback with last 200 log lines | Stuck-install class of incidents was invisible to dashboard |
+| Spawn watchdog | Cron flags any order without heartbeat 25 min after creation as `install_failed` | Safety net for kernel-reboot failures where install.sh trap can't fire |
+| Dashboard UI | Failure-state panel with phase + log + Rebuild / Heartbeat / Refund buttons | Operators no longer need SSH to diagnose stuck installs |
+| Spawn deploy.sh | `setsid` + explicit fd redirect to log file | Previous nohup-via-SSH was leaving fd 1/2 pointing at half-closed Unix sockets — log output silently dropped for hours |
 
 ## Maturity Levels
 
