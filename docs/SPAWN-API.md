@@ -1,10 +1,21 @@
 # Spawn API v1 — x402-Gated Public API
 
-Last updated: 2026-04-18 · API version: **1.2.0**
+Last updated: 2026-04-29 · API version: **1.2.1**
 
 Programmatic API for spawning osModa servers. Any AI agent pays USDC (on Base or Solana) via x402 and gets a running server with its own AI agent. Agents spawning agents.
 
-**Production-readiness pass (v1.1.0):** idempotent spawn, structured error envelope, request IDs, token expiry + revoke, per-token rate limits, hardened WebSocket (heartbeat / idle / backpressure / concurrency cap), complete OpenAPI 3.0.3 spec. See `apps/spawn/CHANGELOG.md`.
+**v1.2.1 (2026-04-29) — install-failure visibility pass:**
+- New order statuses: `install_failed` (watchdog or explicit callback) and `deleted`.
+- New `install_error` field on full status response when `status=install_failed`. Carries `step`, `reason`, optional `log_tail` (200 lines), `at`, and `watchdog` boolean.
+- New `provision_steps[]` field surfaces every install phase transition.
+- Server-side callbacks `/api/heartbeat`, `/api/provision-progress`, `/api/provision-failed` documented in OpenAPI for self-hosted operators (NOT for API integrators — the spawned server posts these to its own callback URL).
+- Swarms (alpha) family at `/api/v1/swarms/*` — autonomous Venture orchestrator. Documented but explicitly **outside** the stable v1 contract.
+
+**v1.2.0 (2026-04-18):** modular runtime — `runtime`, `default_model`, `credentials[]` fields on spawn requests; per-server dashboard config endpoints.
+
+**v1.1.0 (2026-04-17) — production readiness:** idempotent spawn, structured error envelope, request IDs, token expiry + revoke, per-token rate limits, hardened WebSocket (heartbeat / idle / backpressure / concurrency cap), complete OpenAPI 3.0.3 spec.
+
+**Live, interactive reference**: <https://spawn.os.moda/docs> (Swagger UI bound to `/api/v1/docs` — auto-current with the deployed server).
 
 ---
 
@@ -275,6 +286,59 @@ Real-time chat with the spawned server's AI agent.
 | 4001 | Unauthorized (missing / malformed token) |
 | 4003 | Idle timeout |
 | 4008 | (reserved for concurrency — today concurrency is rejected pre-upgrade via 429) |
+
+---
+
+## Order status enum
+
+Every status response carries `status`. Possible values:
+
+| `status` | Meaning | Set by |
+|---|---|---|
+| `pending` | Order created but server not yet provisioned (e.g. payment in flight) | spawn endpoint pre-Hetzner |
+| `provisioning` | Hetzner returned the box; cloud-init + install.sh running | spawn endpoint post-Hetzner |
+| `running` | Server up + at least one heartbeat received → setup complete | first heartbeat from spawned server |
+| `install_failed` | Install died OR no heartbeat in 25 min | `/api/provision-failed` callback OR install-watchdog cron |
+| `failed` | Pre-Hetzner failure (e.g. quota, regional outage) | spawn endpoint on Hetzner error |
+| `deleted` | Server deleted (operator action OR Hetzner-side gone OR refunded order) | DELETE `/api/dashboard/servers/:id` OR cleanup script |
+
+**When `status=install_failed`**, the full status response also carries an `install_error` object:
+
+```json
+{
+  "step": "build",
+  "reason": "Install exited with code 137 at phase build",
+  "log_tail": "...last 200 lines of /var/log/osmoda-cloud-init.log...",
+  "at": "2026-04-29T01:46:25Z",
+  "watchdog": false
+}
+```
+
+`watchdog: true` means the spawn-side install-timeout cron flagged it (no callback received in 25 min). `watchdog: false` means install.sh's EXIT trap explicitly posted `/api/provision-failed`. `log_tail` is only populated for the explicit-callback case.
+
+---
+
+## Server-side callbacks (NOT for API integrators)
+
+These three endpoints are called BY the spawned server (`install.sh` / `agentd` running inside the customer's box), NOT by external API integrators. Documented here so self-hosted operators understand the contract; you do not need to implement these unless you are building your own callback receiver.
+
+| Endpoint | Caller | Auth | Purpose |
+|---|---|---|---|
+| `POST /api/heartbeat` | `agentd` on the spawned server, every 60s | `X-Heartbeat-Secret` header (per-order secret minted at spawn) | Health + agent count + daemon state. Triggers status flip from `provisioning` → `running` on first call. |
+| `POST /api/provision-progress` | `install.sh` at every phase transition | same | Records into `provision_steps[]` for the dashboard install-progress UI. `status="error"` flips order to `install_failed`. |
+| `POST /api/provision-failed` | `install.sh`'s EXIT trap on fatal failure | same | Carries `step` + `reason` + `log_tail` (200 lines). Order flips to `install_failed` with full diagnostic context. Won't fire on kernel-SIGKILL failures (e.g. nixos-infect mid-reboot) — for that class, the spawn-side install-watchdog cron flags the order at the 25-min mark instead. |
+
+**Watchdog**: an internal cron on spawn flags any order where `status=running, no heartbeat ever, age > 25 min` as `install_failed` with `install_error.watchdog=true, step=no_callback`. This ensures customers never sit in eternal "Installing..." even if both `install.sh` callbacks fail.
+
+Full schemas in the [OpenAPI spec](https://spawn.os.moda/api/v1/docs).
+
+---
+
+## Swarms (alpha) — autonomous Venture orchestrator
+
+The `/api/v1/swarms/*` family is **alpha** and explicitly **outside the v1 contract**. It powers the `/swarms` dashboard page (autonomous lead-gen factory). May change in any release. Listed in OpenAPI for discovery; do not depend on stability.
+
+If you want stability, build against the 6 v1 endpoints documented above (`/plans`, `/spawn/:planId`, `/status/:orderId`, `/tokens/:token_id`, `/docs`, `/.well-known/agent-card.json`) plus the WebSocket chat. Those carry the v1.x contract guarantee.
 
 ---
 
