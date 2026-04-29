@@ -91,7 +91,13 @@ CREDENTIALS=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     --skip-nixos)        SKIP_NIXOS=true; shift ;;
-    --nixos)             WANT_NIXOS=true; SKIP_NIXOS=false; shift ;;
+    --nixos)             # EXPERIMENTAL — known broken on Hetzner cloud as of
+                         # 2026-04-29. nixos-infect path bricks the host (no
+                         # network after reboot). See docs/planning/NIXOS-KEXEC-
+                         # PROVISIONING.md for the proper kexec rewrite plan.
+                         # Flag is parsed but emits a refuse-to-run warning at
+                         # the call site below.
+                         WANT_NIXOS=true; SKIP_NIXOS=false; shift ;;
     --api-key)           API_KEY="$2"; shift 2 ;;
     --branch)            BRANCH="$2"; shift 2 ;;
     --order-id)          ORDER_ID="$2"; shift 2 ;;
@@ -257,6 +263,24 @@ chage -I -1 -m 0 -M 99999 -E -1 root 2>/dev/null || true
 # On Ubuntu/Debian: converts to NixOS, injects Phase 2 service into NixOS config,
 # reboots into NixOS, Phase 2 downloads and runs install.sh --skip-nixos.
 # On NixOS (or --skip-nixos): skips straight to daemon installation.
+if [ "$SKIP_NIXOS" = false ] && [ "$WANT_NIXOS" = true ]; then
+  # SAFETY: --nixos was tested 2026-04-29, host became unreachable after
+  # reboot (no SSH, no ping, no traffic). The 3 documented bug fixes
+  # (mutableUsers/hashedPassword/rebuild-boot) addressed symptoms but a
+  # deeper failure remains — likely NixOS-side networking config not
+  # surviving nixos-infect's rebuild on Hetzner. Refuse to run and point at
+  # the kexec rewrite plan rather than brick the host.
+  warn "============================================================"
+  warn "--nixos: EXPERIMENTAL and known to BRICK Hetzner Cloud hosts."
+  warn "Last live test 2026-04-29: host unreachable after reboot."
+  warn "See docs/planning/NIXOS-KEXEC-PROVISIONING.md for the proper"
+  warn "kexec-based replacement (TBD)."
+  warn "Falling back to --skip-nixos (Ubuntu) for now."
+  warn "============================================================"
+  SKIP_NIXOS=true
+  WANT_NIXOS=false
+  report_progress "nixos" "skipped" "experimental --nixos refused; falling back to Ubuntu"
+fi
 if [ "$SKIP_NIXOS" = false ] && [ "$WANT_NIXOS" = true ]; then
   if [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
     report_progress "nixos" "started" "Converting to NixOS via nixos-infect (opt-in --nixos)"
