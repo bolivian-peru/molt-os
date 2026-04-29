@@ -75,6 +75,7 @@ fi
 # Parse arguments
 # ---------------------------------------------------------------------------
 SKIP_NIXOS=false
+WANT_NIXOS=false        # opt-in: --nixos enables nixos-infect path with hardened config
 API_KEY=""
 BRANCH="main"
 ORDER_ID=""
@@ -90,6 +91,7 @@ CREDENTIALS=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     --skip-nixos)        SKIP_NIXOS=true; shift ;;
+    --nixos)             WANT_NIXOS=true; SKIP_NIXOS=false; shift ;;
     --api-key)           API_KEY="$2"; shift 2 ;;
     --branch)            BRANCH="$2"; shift 2 ;;
     --order-id)          ORDER_ID="$2"; shift 2 ;;
@@ -255,9 +257,9 @@ chage -I -1 -m 0 -M 99999 -E -1 root 2>/dev/null || true
 # On Ubuntu/Debian: converts to NixOS, injects Phase 2 service into NixOS config,
 # reboots into NixOS, Phase 2 downloads and runs install.sh --skip-nixos.
 # On NixOS (or --skip-nixos): skips straight to daemon installation.
-if [ "$SKIP_NIXOS" = false ]; then
+if [ "$SKIP_NIXOS" = false ] && [ "$WANT_NIXOS" = true ]; then
   if [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
-    report_progress "nixos" "started" "Converting to NixOS via nixos-infect"
+    report_progress "nixos" "started" "Converting to NixOS via nixos-infect (opt-in --nixos)"
     log "Step 1: Converting to NixOS..."
     log "This takes 8-15 minutes. Server reboots into NixOS, then daemons install automatically."
 
@@ -328,15 +330,31 @@ if [ "$SKIP_NIXOS" = false ]; then
         log "Preserved $(grep -c '' /root/.ssh/authorized_keys) SSH keys for NixOS config"
       fi
 
-      # Write Phase 2 NixOS config block to a temp file, then inject before closing brace
+      # Write Phase 2 NixOS config block to a temp file, then inject before closing brace.
+      #
+      # Bug-fixes applied here vs the original (per the 2026-04 incident notes):
+      #   1. mutableUsers = false  — was true. With mutable, NixOS does NOT
+      #      enforce the declared root password on rebuild, so /etc/shadow stays
+      #      whatever nixos-infect inherited from Ubuntu (locked). False = config
+      #      is the source of truth on every boot.
+      #   2. hashedPassword = "" — was initialHashedPassword. The "initial" form
+      #      is only honored on FIRST setup; subsequent rebuilds ignore it. Plain
+      #      hashedPassword is enforced every rebuild.
+      #   3. Phase 2's ExecStart uses `nixos-rebuild boot` not `switch`. boot
+      #      installs into /boot for the next reboot but doesn't activate the
+      #      profile in the running system — so it works without a TTY/PTY/dbus
+      #      session, where switch fails silently in cloud-init context.
       cat > /tmp/osmoda-phase2.nix.fragment <<NIXEOF
 
   # osModa Phase 2: auto-install daemons after NixOS conversion
   environment.systemPackages = with pkgs; [ curl bash git cacert gcc gnumake pkg-config nix nodejs_22 ];
 
-  # Fix root password (prevents SSH lockout after NixOS conversion)
-  users.users.root.initialHashedPassword = "";
-  users.mutableUsers = true;
+  # Fix #1+2: declarative root user — empty password (key-auth only) +
+  # mutableUsers=false so rebuild forces /etc/shadow to declared state.
+  users.mutableUsers = false;
+  users.users.root.hashedPassword = "";
+  services.openssh.enable = true;
+  services.openssh.settings.PermitRootLogin = "yes";
 
   systemd.services.osmoda-phase2 = {
     description = "osModa Phase 2 Install (post-NixOS conversion)";
@@ -346,7 +364,9 @@ if [ "$SKIP_NIXOS" = false ]; then
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      ExecStart = "/bin/sh -c 'export PATH=/run/current-system/sw/bin:\\\$PATH HOME=/root; curl -fsSL $INSTALL_URL | bash -s -- $PHASE2_ARGS; nixos-rebuild switch 2>/dev/null; systemctl disable osmoda-phase2.service 2>/dev/null'";
+      # Fix #3: rebuild boot (not switch) — works without PTY. Reboot via
+      # systemd schedule after install so the new generation activates cleanly.
+      ExecStart = "/bin/sh -c 'export PATH=/run/current-system/sw/bin:\\\$PATH HOME=/root; curl -fsSL $INSTALL_URL | bash -s -- $PHASE2_ARGS; nixos-rebuild boot 2>&1 | tail -10; systemctl disable osmoda-phase2.service 2>/dev/null; systemd-run --on-active=10 systemctl reboot'";
       TimeoutStartSec = 1800;
       Environment = [ "HOME=/root" "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ];
     };
@@ -361,20 +381,26 @@ NIXEOF
       rm -f /tmp/osmoda-phase2.nix.fragment
       log "Phase 2 service injected into /etc/nixos/configuration.nix"
 
-      # Rebuild NixOS closure with Phase 2 service + password fix
-      log "Rebuilding NixOS closure with Phase 2 service..."
+      # Rebuild NixOS closure with Phase 2 service + password fix.
+      # Use `nixos-rebuild boot` not `switch`. boot installs the new generation
+      # to /boot for the next reboot but does NOT activate it in the running
+      # system — this is critical because activation needs systemd's running
+      # session bus and a TTY-backed sudo, neither available in cloud-init.
+      # The hard reboot below picks up the new generation cleanly.
+      log "Rebuilding NixOS closure with Phase 2 service (using boot mode)..."
       report_progress "nixos" "started" "Rebuilding NixOS closure (2-3 min)"
-      # Source nix profile so nixos-rebuild is in PATH
       . /root/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null || true
       export NIX_PATH="nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos:nixos-config=/etc/nixos/configuration.nix"
-      # Try nixos-rebuild first (works if nix channels are set up), fall back to nixos-install
-      if nixos-rebuild switch 2>&1 | tail -5; then
-        log "NixOS rebuilt with Phase 2. Rebooting into NixOS..."
-      elif nixos-install --no-root-passwd 2>&1 | tail -5; then
-        log "NixOS closure rebuilt via nixos-install. Rebooting..."
+      # boot mode first (no PTY needed). nixos-install fallback only if rebuild
+      # itself fails (e.g. config eval error).
+      if nixos-rebuild boot 2>&1 | tail -10; then
+        log "NixOS generation built. Next reboot activates Phase 2."
+      elif nixos-install --no-root-passwd 2>&1 | tail -10; then
+        log "NixOS closure built via nixos-install. Rebooting..."
       else
         warn "NixOS rebuild failed — Phase 2 may not run after reboot."
-        # Last resort: clear root password directly in shadow before reboot
+        # Last resort: clear root password directly in shadow before reboot.
+        # If the rebuild failed, the running Ubuntu /etc/shadow is what survives.
         sed -i 's|^root:!:|root::|' /etc/shadow 2>/dev/null || true
         sed -i 's|^root:[^:]*:\([0-9]*\):[0-9]*:[0-9]*:[0-9]*:.*|root::\1:0:99999:7:::|' /etc/shadow 2>/dev/null || true
       fi
