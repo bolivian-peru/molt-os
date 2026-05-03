@@ -2,7 +2,7 @@
 
 Last updated: 2026-04-18
 
-Current state: 10 Rust crates (9 daemons + 1 CLI), **92 MCP tools**, 19 skills, **modular
+Current state: 10 Rust crates (9 daemons + 1 CLI), **92 MCP tools**, 20 skills, **modular
 runtime** (claude-code + openclaw drivers, v0.2 of the gateway), Spawn API **v1.2.0** with
 idempotency + structured errors + encrypted credential store + per-server dashboard config.
 

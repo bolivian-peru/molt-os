@@ -171,7 +171,7 @@ agentctl verify-ledger
 │  └─ future drivers        drop-in files under src/drivers/                    │
 │                                                                               │
 │  Multi-Agent Router (hot-reloadable via agents.json)                          │
-│  ├─ osmoda agent (Opus)         92 tools · 19 skills · full access · web      │
+│  ├─ osmoda agent (Opus)         92 tools · 20 skills · full access · web      │
 │  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA   │
 │  osmoda-mcp-bridge              92 typed tools via MCP protocol               │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
@@ -537,7 +537,7 @@ skills/                     19 system skill definitions
 - 10 Rust crates (10 daemons + 1 CLI)
 - 205 tests passing (all green)
 - 90 bridge tools registered
-- 19 system skills
+- 20 system skills
 - Stress tested: 700/700 concurrent health checks, 50 concurrent queries, hash chain verified across 300+ events with zero broken links
 
 **What works today:** Structured system access, hash-chained audit ledger, FTS5 full-text memory search, SafeSwitch deploys with auto-rollback, background automation, P2P encrypted mesh with hybrid post-quantum crypto (Noise_XX + ML-KEM-768), local voice (whisper.cpp + piper), MCP server management, system learning and self-optimization with auto-generated skills, fleet coordination with quorum voting, approval gates for destructive ops, sandboxed execution, service discovery, emergency safety commands, Cloudflare Tunnel + Tailscale remote access, app process management, ETH + SOL crypto wallets, one-command cloud deployment via [spawn.os.moda](https://spawn.os.moda).

@@ -111,7 +111,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    `cfg.gateway.runtime`: `"claude-code"` (default) or `"openclaw"` (legacy).
 
 13. **Multi-agent routing** — One gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 92 tools, all 19 skills, full system access
+   - `osmoda` (default): Claude Opus, all 92 tools, all 20 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace and system prompt. Config at `/var/lib/osmoda/config/gateway.json`.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).

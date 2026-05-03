@@ -274,7 +274,7 @@ independently.
               │   claude-code  │    │    claude-code     │
               │  Opus 4.6      │    │   Sonnet 4.6       │
               │  92 tools      │    │   92 tools         │
-              │  19 skills     │    │   19 skills        │
+              │  20 skills     │    │   20 skills        │
               │  Full access   │    │   Full access      │
               │                │    │   Concise replies  │
               │  ← Web chat    │    │   ← Telegram       │
