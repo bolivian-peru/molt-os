@@ -76,6 +76,8 @@ fi
 # ---------------------------------------------------------------------------
 SKIP_NIXOS=false
 WANT_NIXOS=false        # opt-in: --nixos enables nixos-infect path with hardened config
+SKIP_SPEC_KIT=false     # spec-kit (github.com/github/spec-kit) on by default since 2026-04-30
+SPEC_KIT_VERSION="v0.8.4"  # bump when validated against later releases
 API_KEY=""
 BRANCH="main"
 ORDER_ID=""
@@ -91,6 +93,8 @@ CREDENTIALS=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     --skip-nixos)        SKIP_NIXOS=true; shift ;;
+    --skip-spec-kit)     SKIP_SPEC_KIT=true; shift ;;
+    --spec-kit-version)  SPEC_KIT_VERSION="$2"; shift 2 ;;
     --nixos)             # EXPERIMENTAL — known broken on Hetzner cloud as of
                          # 2026-04-29. nixos-infect path bricks the host (no
                          # network after reboot). See docs/planning/NIXOS-KEXEC-
@@ -115,6 +119,8 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --skip-nixos          Skip NixOS conversion (already on NixOS or Phase 2 post-reboot)"
+      echo "  --skip-spec-kit       Skip spec-kit (uv + specify-cli) install"
+      echo "  --spec-kit-version V  Pin spec-kit to a specific release tag (default: $SPEC_KIT_VERSION)"
       echo "  --api-key KEY         Set API key (base64-encoded or raw). Legacy; auto-migrates to a credential."
       echo "  --credential SPEC     Add a credential. Repeatable. Format:"
       echo "                          label|provider|type|base64-secret"
@@ -740,7 +746,66 @@ fi
 # Step 6: Set up tool bridge
 # ---------------------------------------------------------------------------
 report_progress "openclaw" "done" "$RUNTIME runtime installed"
-report_progress "bridge" "started" "Setting up tool bridge (91 tools)"
+
+# ---------------------------------------------------------------------------
+# Step 6.5: Spec-Kit (GitHub Spec-Driven Development toolkit)
+# ---------------------------------------------------------------------------
+# Bakes uv + specify-cli + spec-kit templates into the customer server.
+# After this phase, the agent can scaffold spec-driven projects on demand:
+#   cd /workspace && specify init my-feature --integration claude --no-git
+# which writes 9 speckit-* skills into .claude/skills/. The agent invokes
+# them via /speckit-<command> in claude --print mode.
+#
+# Phase 0 (2026-04-30) measured: uv 2s, specify-cli 5s. Total ~10s overhead
+# vs the install we already do.
+if [ "$SKIP_SPEC_KIT" != true ]; then
+  report_progress "spec-kit" "started" "Installing uv + specify-cli (spec-driven dev)"
+  log "Step 6.5: Installing spec-kit ($SPEC_KIT_VERSION)..."
+
+  # uv — single-binary Python package manager. Installs to ~/.local/bin/uv
+  if ! command -v uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh 2>&1 | tail -2
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  # specify-cli — pinned to a tested release tag. Phase 0 validated v0.8.4.
+  if [ -x "$HOME/.local/bin/uv" ]; then
+    "$HOME/.local/bin/uv" tool install specify-cli \
+      --from "git+https://github.com/github/spec-kit.git@${SPEC_KIT_VERSION}" \
+      2>&1 | tail -3 || warn "specify-cli install failed (non-fatal)"
+
+    # System-wide symlink so the agent can invoke `specify` without PATH gymnastics
+    if [ -x "$HOME/.local/bin/specify" ]; then
+      ln -sf "$HOME/.local/bin/specify" /usr/local/bin/specify
+      log "specify $(/usr/local/bin/specify --version 2>&1 | head -1) installed"
+    fi
+  else
+    warn "uv not on PATH after install — skipping spec-kit (set --skip-spec-kit to silence)"
+  fi
+
+  # Pre-deploy spec-kit templates into a known location so the agent doesn't
+  # need a git clone at scaffold time. /workspace/<project> still gets its own
+  # copy when `specify init` runs — these are reference templates only.
+  mkdir -p /var/lib/osmoda/templates/spec-kit
+  if command -v git >/dev/null 2>&1; then
+    rm -rf /tmp/spec-kit-clone
+    git clone --depth 1 --branch "$SPEC_KIT_VERSION" \
+      https://github.com/github/spec-kit.git /tmp/spec-kit-clone 2>&1 | tail -2 || \
+      warn "spec-kit template clone failed"
+    if [ -d /tmp/spec-kit-clone/templates ]; then
+      cp -r /tmp/spec-kit-clone/templates/* /var/lib/osmoda/templates/spec-kit/ 2>/dev/null
+      cp /tmp/spec-kit-clone/spec-driven.md /var/lib/osmoda/templates/spec-kit/ 2>/dev/null
+      rm -rf /tmp/spec-kit-clone
+      log "spec-kit reference templates pre-deployed at /var/lib/osmoda/templates/spec-kit/"
+    fi
+  fi
+
+  report_progress "spec-kit" "done" "specify-cli + templates ready"
+else
+  log "Skipping spec-kit (--skip-spec-kit)"
+fi
+
+report_progress "bridge" "started" "Setting up tool bridge (93 tools)"
 log "Step 6: Setting up tool bridge..."
 
 # MCP bridge is ALWAYS installed (both drivers route tools through it).
