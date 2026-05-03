@@ -585,7 +585,8 @@ Payment via Coinbase x402 protocol (USDC on Base or Solana). Full API docs at [`
 
 ## In the wild
 
-- **[spawn.os.moda](https://spawn.os.moda)** — hosted provisioning. Public x402-payable API, live ERC-8004 agent card, v1.2 modular runtime.
+- **[spawn.os.moda](https://spawn.os.moda)** — hosted provisioning. Public x402-payable API, live ERC-8004 agent card, v1.2 modular runtime, **github/spec-kit baked into every spawn**.
+- **Spec-driven dev support** — every new spawn comes with `uv` + `specify-cli` + the 9 `speckit-*` skills. Run `specify init` and you're in the github/spec-kit ecosystem (92K stars). See `skills/spec-driven-development/SKILL.md` and the [`SPEC-KIT-INTEGRATION`](docs/planning/SPEC-KIT-INTEGRATION.md) deep dive.
 - *Your deployment here →* open a PR adding a one-line description + link.
 
 ## Contributing
