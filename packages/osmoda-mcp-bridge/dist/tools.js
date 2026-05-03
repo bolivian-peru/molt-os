@@ -1,12 +1,12 @@
 /**
- * All 90 osModa tool definitions for MCP.
+ * All 92 osModa tool definitions for MCP.
  * Each tool maps to a daemon Unix socket call or local shell execution.
  *
  * Tool categories:
  *   agentd (6), system (4), systemd (2), network (1), wallet (7), switch (5),
  *   watcher (2), routine (3), identity (1), receipt (3), voice (5), backup (2),
  *   mesh (11), mcp (4), safety (4), teach (14), approval (4), sandbox (2),
- *   fleet (4), app (6), wallet_tx (1)
+ *   fleet (4), app (6), wallet_tx (1), spec_kit (2)  // ← spec-kit added 2026-04-30
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -460,6 +460,116 @@ export function getAllTools() {
                     saveApps(apps);
                 }
                 return JSON.stringify({ removed: name });
+            },
+        },
+        // ═══════════════════════════════════════════════════════════════
+        // SPEC-KIT (2 tools) — github.com/github/spec-kit baked into spawn.
+        // These wrap the `specify` CLI so the agent invokes spec-driven
+        // development as audited tool calls instead of raw shell. Both
+        // require Phase 1 install: /usr/local/bin/specify must exist.
+        // See docs/planning/SPEC-KIT-INTEGRATION.md.
+        // ═══════════════════════════════════════════════════════════════
+        {
+            name: "spec_kit_init",
+            description: "Scaffold a new spec-driven development project under /workspace using GitHub's spec-kit. Creates .claude/skills/speckit-* + .specify/ + CLAUDE.md. Returns the project path and the 9 speckit-* skills the agent can then invoke.",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    project_name: { type: "string", description: "Slug-safe project directory name (a-z, 0-9, hyphens). Created under /workspace/." },
+                    integration: { type: "string", enum: ["claude", "codex", "gemini", "copilot", "windsurf", "generic"], description: "Coding agent integration. Default: claude." },
+                    constitution_seed: { type: "string", description: "Optional. Free-form principles you'd pass to /speckit-constitution next. Stored at .specify/.constitution-seed.md so the agent can read it before invoking the constitution skill." },
+                },
+                required: ["project_name"],
+            },
+            handler: async (p) => {
+                const slug = String(p.project_name || "").toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
+                if (!slug) return JSON.stringify({ error: "invalid project_name (empty after slug-sanitization)" });
+                const integ = ["claude", "codex", "gemini", "copilot", "windsurf", "generic"].includes(p.integration) ? p.integration : "claude";
+                const projectPath = `/workspace/${slug}`;
+                try {
+                    if (fs.existsSync(projectPath)) return JSON.stringify({ error: `${projectPath} already exists. Pick a different project_name or rm -rf first.` });
+                    fs.mkdirSync(projectPath, { recursive: true });
+                    // We invoke specify with --here pointed at the just-created dir so it
+                    // doesn't reject "directory already exists." --no-git keeps it light;
+                    // the user / agent can `git init` later if they want history.
+                    const cmd = `cd '${projectPath}' && /usr/local/bin/specify init --here --integration '${integ}' --no-git --force 2>&1 | tail -30`;
+                    const out = runShell(cmd, 60_000);
+                    if (p.constitution_seed) {
+                        const seedPath = `${projectPath}/.specify/.constitution-seed.md`;
+                        fs.mkdirSync(path.dirname(seedPath), { recursive: true });
+                        fs.writeFileSync(seedPath, String(p.constitution_seed));
+                    }
+                    // Discover the speckit-* skills that landed
+                    const skillsDir = `${projectPath}/.claude/skills`;
+                    let skills = [];
+                    try { skills = fs.readdirSync(skillsDir).filter(d => d.startsWith("speckit-")); } catch { /* no skills dir */ }
+                    agentd("POST", "/memory/ingest", { event: { category: "spec-kit", subcategory: "init", actor: "mcp.agent", summary: `Scaffolded ${slug}`, metadata: { project_path: projectPath, integration: integ, skills_count: skills.length } } }).catch(() => { });
+                    return JSON.stringify({
+                        project_path: projectPath,
+                        integration: integ,
+                        skills,
+                        next_action: skills.includes("speckit-constitution")
+                            ? "Run spec_kit_run with command='constitution' to set governance, then 'specify' for the WHAT/WHY."
+                            : "specify init returned no speckit-* skills — check /usr/local/bin/specify --version. Run install.sh --skip-spec-kit=false to repair.",
+                        scaffold_output_tail: String(out).slice(-1000),
+                    }, null, 2);
+                } catch (e) {
+                    return JSON.stringify({ error: String(e && e.message || e) });
+                }
+            },
+        },
+        {
+            name: "spec_kit_run",
+            description: "Invoke a spec-kit skill (constitution, specify, clarify, plan, tasks, analyze, checklist, implement) inside an existing spec-kit project. Wraps `claude --print` cd'd into the project. Streams the full agent output back. Long-running by design — /speckit-implement can take 10+ minutes.",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    project_path: { type: "string", description: "Absolute path under /workspace/ where spec_kit_init was previously run." },
+                    command: { type: "string", enum: ["constitution", "specify", "clarify", "plan", "tasks", "analyze", "checklist", "implement", "taskstoissues"], description: "Which speckit-* skill to invoke." },
+                    prompt: { type: "string", description: "Free-form text passed as $ARGUMENTS to the skill (e.g. 'Build a CSV exporter with tests' for /speckit-specify)." },
+                    timeout_seconds: { type: "number", description: "Max wall-clock seconds before SIGKILL. Default 600 (10 min). Max 1800." },
+                },
+                required: ["project_path", "command"],
+            },
+            handler: async (p) => {
+                const projPath = String(p.project_path || "");
+                if (!projPath.startsWith("/workspace/")) return JSON.stringify({ error: "project_path must be under /workspace/" });
+                if (projPath.includes("..")) return JSON.stringify({ error: "project_path traversal denied" });
+                if (!fs.existsSync(projPath)) return JSON.stringify({ error: `${projPath} not found — run spec_kit_init first` });
+                const cmd = String(p.command || "");
+                const allowed = ["constitution", "specify", "clarify", "plan", "tasks", "analyze", "checklist", "implement", "taskstoissues"];
+                if (!allowed.includes(cmd)) return JSON.stringify({ error: `unknown command '${cmd}'. allowed: ${allowed.join(", ")}` });
+                const prompt = String(p.prompt || "");
+                const timeoutMs = Math.min(Math.max(Number(p.timeout_seconds) || 600, 60), 1800) * 1000;
+                // The agent's prompt to claude --print: "/speckit-<cmd> <prompt>"
+                // claude expands the slash into the skill's SKILL.md template and runs it.
+                // We use single-quote escape to harden against prompt injection of shell metachars.
+                const escapedPrompt = prompt.replace(/'/g, "'\\''");
+                const slash = `/speckit-${cmd}${prompt ? " " + escapedPrompt : ""}`;
+                // shell-escape the argument: pass via positional arg (after --) so claude
+                // treats it as the user message, not as a flag.
+                const claudeCmd = [
+                    "cd", `'${projPath}'`, "&&",
+                    "/usr/local/bin/claude",
+                    "-p", "--output-format", "stream-json", "--verbose",
+                    "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,Skill,mcp__osmoda__*",
+                    "--model", "claude-haiku-4-5", // upgrade to opus per-call by changing this
+                    "--", `'${slash.replace(/'/g, "'\\''")}'`,
+                ].join(" ");
+                try {
+                    const startedAt = Date.now();
+                    const out = runShell(claudeCmd, timeoutMs);
+                    const durationSec = Math.round((Date.now() - startedAt) / 1000);
+                    agentd("POST", "/memory/ingest", { event: { category: "spec-kit", subcategory: cmd, actor: "mcp.agent", summary: `${cmd} on ${path.basename(projPath)}`, metadata: { project: path.basename(projPath), command: cmd, prompt_prefix: prompt.slice(0, 80), duration_seconds: durationSec } } }).catch(() => { });
+                    return JSON.stringify({
+                        project_path: projPath,
+                        command: cmd,
+                        duration_seconds: durationSec,
+                        output: String(out).slice(-15000), // last 15K chars; full log in /workspace/<proj>/.claude/...
+                    }, null, 2);
+                } catch (e) {
+                    return JSON.stringify({ error: String(e && e.message || e) });
+                }
             },
         },
     ];

@@ -2,7 +2,7 @@
 
 Last updated: 2026-04-18
 
-Current state: 10 Rust crates (9 daemons + 1 CLI), **91 MCP tools**, 19 skills, **modular
+Current state: 10 Rust crates (9 daemons + 1 CLI), **92 MCP tools**, 19 skills, **modular
 runtime** (claude-code + openclaw drivers, v0.2 of the gateway), Spawn API **v1.2.0** with
 idempotency + structured errors + encrypted credential store + per-server dashboard config.
 
@@ -15,7 +15,7 @@ for the trust model and [STATUS.md](STATUS.md) for detailed per-component maturi
 
 | Feature | Where | Maturity |
 |---------|-------|----------|
-| Full system access (processes, files, services, sysctl) | agentd + 91 MCP tools | **Solid** |
+| Full system access (processes, files, services, sysctl) | agentd + 92 MCP tools | **Solid** |
 | **Modular agent runtime** — swap claude-code ⇄ openclaw via dashboard, no rebuild | osmoda-gateway v0.2 + drivers/ | **Solid** (v1.2, April 2026) |
 | **Encrypted credential store** — AES-256-GCM, REST CRUD + test-per-provider | osmoda-gateway | **Solid** (v1.2) |
 | **Hot-reload via SIGHUP** — in-flight WS sessions keep their driver | osmoda-gateway | **Solid** (v1.2) |

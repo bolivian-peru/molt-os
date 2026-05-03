@@ -36,10 +36,10 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    their snapshot — zero WS drops). Encrypted credential store at
    `/var/lib/osmoda/config/credentials.json.enc` (AES-256-GCM). REST `/config/*`
    endpoints (Bearer-authed) let the dashboard edit runtime/credentials/model per
-   agent with no SSH or rebuild. Telegram webhook, WebSocket chat, 91 MCP tools.
+   agent with no SSH or rebuild. Telegram webhook, WebSocket chat, 92 MCP tools.
 
 2b. **osmoda-bridge** (TypeScript) — Legacy OpenClaw plugin. Registers tools via
-   `api.registerTool()` factory pattern (91 tools): system_health, system_query,
+   `api.registerTool()` factory pattern (92 tools): system_health, system_query,
    system_discover, event_log, memory_store, memory_recall, shell_exec, file_read,
    file_write, directory_list, service_status, journal_logs, network_info,
    wallet_create, wallet_list, wallet_sign, wallet_send, wallet_delete, wallet_receipt,
@@ -111,7 +111,7 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
    `cfg.gateway.runtime`: `"claude-code"` (default) or `"openclaw"` (legacy).
 
 13. **Multi-agent routing** — One gateway, multiple routed agents:
-   - `osmoda` (default): Claude Opus, all 91 tools, all 19 skills, full system access
+   - `osmoda` (default): Claude Opus, all 92 tools, all 19 skills, full system access
    - `mobile`: Claude Sonnet, all tools, concise phone-optimized responses, for Telegram/WhatsApp
    Each agent has its own workspace and system prompt. Config at `/var/lib/osmoda/config/gateway.json`.
    Bindings route Telegram/WhatsApp to mobile agent; web chat falls through to default (osmoda).
@@ -221,15 +221,15 @@ TIER 2: Untrusted tools (max isolation, no network, minimal fs)
   ├── src/index.ts                       # HTTP+WS server (port 18789), Telegram webhook
   ├── src/agent.ts                       # Claude Code CLI wrapper (--print --stream-json)
   └── src/sessions.ts                    # Session management (30-min expiry)
-./packages/osmoda-mcp-bridge/            # TypeScript: MCP server (91 tools over stdio)
+./packages/osmoda-mcp-bridge/            # TypeScript: MCP server (92 tools over stdio)
   └── dist/
       ├── index.js                       # MCP server entry + teachd auto-logging middleware
-      ├── tools.js                       # All 91 tool definitions + handlers
+      ├── tools.js                       # All 92 tool definitions + handlers
       └── daemon-clients.js              # Unix socket HTTP clients for all daemons
 ./packages/osmoda-bridge/                # TypeScript: OpenClaw plugin (legacy)
   ├── package.json                       # OpenClaw plugin format (openclaw.extensions)
   ├── openclaw.plugin.json               # Plugin manifest (id + kind)
-  ├── index.ts                           # Plugin entry — 91 tools via api.registerTool()
+  ├── index.ts                           # Plugin entry — 92 tools via api.registerTool()
   ├── keyd-client.ts                     # HTTP-over-Unix-socket client for keyd
   ├── watch-client.ts                    # HTTP-over-Unix-socket client for watch
   ├── routines-client.ts                 # HTTP-over-Unix-socket client for routines

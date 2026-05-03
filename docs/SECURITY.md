@@ -104,7 +104,7 @@ Notice what's **not** in this list: tool-level permissions, rate-limit buckets, 
 
 ### Inside the box
 
-The 91 MCP tools exposed by `osmoda-mcp-bridge` are the agent's interface to the system. Every tool has a typed schema and an `agentd` contract. Destructive operations (apps_remove, service_restart of a critical unit, wallet_send) route through `approval_request` or a SafeSwitch. `sandbox_exec` runs tier-2 untrusted code in bubblewrap with no network access and a minimal filesystem overlay.
+The 92 MCP tools exposed by `osmoda-mcp-bridge` are the agent's interface to the system. Every tool has a typed schema and an `agentd` contract. Destructive operations (apps_remove, service_restart of a critical unit, wallet_send) route through `approval_request` or a SafeSwitch. `sandbox_exec` runs tier-2 untrusted code in bubblewrap with no network access and a minimal filesystem overlay.
 
 The `shell_exec` tool — the agent's escape hatch — has a 17-pattern blocklist (`rm -rf /`, `dd of=/dev/`, `mkfs`, `curl | sh`, and friends), a 30-request-per-minute rate limit, and a 180-second subprocess timeout. It's not a security primitive; it's a guardrail. The real safety for `shell_exec` comes from the atomic rollback guarantee: if the agent uses it to edit NixOS config in a way that breaks boot, `nixos-rebuild switch --rollback` saves you.
 

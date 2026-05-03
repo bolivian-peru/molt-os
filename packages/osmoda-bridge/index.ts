@@ -4,7 +4,7 @@
  * Uses the correct OpenClaw registerTool() factory pattern.
  * Each tool's parameters MUST use JSON Schema format with type/properties/required.
  *
- * 91 tools registered:
+ * 92 tools registered:
  *   agentd:   system_health, system_query, system_discover, event_log, memory_store, memory_recall (6)
  *   system:   shell_exec, file_read, file_write, directory_list (4)
  *   systemd:  service_status, journal_logs (2)

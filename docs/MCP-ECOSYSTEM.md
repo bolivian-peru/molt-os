@@ -4,7 +4,7 @@
 
 Last updated: 2026-04-18
 
-Nine daemons + the modular `osmoda-gateway` are built. **91 MCP tools** are registered via
+Nine daemons + the modular `osmoda-gateway` are built. **92 MCP tools** are registered via
 `osmoda-mcp-bridge`. The OS works. `osmoda-mcpd` is live — it manages MCP server lifecycle
 from NixOS config. What comes next is expanding the MCP ecosystem: any MCP server becomes an
 OS capability without writing another line of bridge code.
@@ -44,7 +44,7 @@ osmoda-gateway (:18789)   — modular, TypeScript, one systemd unit
         └──► MCP servers (any runtime consumes the same tool set)
               │
               ├── osmoda-mcp-bridge (built in) ← THE OS
-              │     91 tools: agentd, keyd, watch, routines, mesh, voice, mcpd, teachd, apps, memory, approvals
+              │     92 tools: agentd, keyd, watch, routines, mesh, voice, mcpd, teachd, apps, memory, approvals
               │     Unix sockets, root access, NixOS mutations
               │
               └── Managed MCP servers (osmoda-mcpd)

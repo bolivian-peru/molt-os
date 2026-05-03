@@ -23,7 +23,7 @@ osmoda-gateway (one systemd unit, modular — reads agents.json)
   └── openclaw driver      → spawns `openclaw` binary
   │
   ▼
-91 MCP tools over stdio → agentd / keyd / watch / routines / mesh / voice / mcpd / teachd
+92 MCP tools over stdio → agentd / keyd / watch / routines / mesh / voice / mcpd / teachd
   │
   ▼
 Audit ledger (every message + every tool call logged with channel source)

@@ -9,7 +9,7 @@ Entry point for the `docs/` tree. Start here, then follow links into the specifi
 ## If you're new — start here
 
 1. **[GETTING-STARTED.md](GETTING-STARTED.md)** — install, configure credentials, open the web chat, talk to your server. ~10 minutes.
-2. **[ARCHITECTURE.md](ARCHITECTURE.md)** — the mental model: 10 daemons, modular gateway, 91 MCP tools, NixOS atomic rollback, hash-chained audit ledger.
+2. **[ARCHITECTURE.md](ARCHITECTURE.md)** — the mental model: 10 daemons, modular gateway, 92 MCP tools, NixOS atomic rollback, hash-chained audit ledger.
 3. **[SECURITY.md](SECURITY.md)** — the honest security brief. The four trust boundaries, what they protect, what they don't.
 
 ---

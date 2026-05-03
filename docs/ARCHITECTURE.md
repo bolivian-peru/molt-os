@@ -14,7 +14,7 @@ Local inter-daemon communication happens over Unix sockets. osmoda-mesh adds TCP
 TIER 0: osmoda-gateway + agentd + keyd + watch + routines + mesh + voice + mcpd + teachd
   Full system access. Root-equivalent. See and control everything.
   Components: osmoda-gateway (modular), driver-of-choice (claude-code or openclaw),
-  osmoda-bridge OR osmoda-mcp-bridge (91 tools), plus all Rust daemons above.
+  osmoda-bridge OR osmoda-mcp-bridge (92 tools), plus all Rust daemons above.
 
 TIER 1: Approved Apps
   Sandboxed with declared capabilities. No root, no arbitrary filesystem.
@@ -60,8 +60,8 @@ TIER 2: Untrusted Execution
              └────────┬────────┘
                       ▼
               ┌───────────────┐
-              │ MCP bridge    │   91 tools, runtime-neutral
-              │ (91 tools)    │
+              │ MCP bridge    │   92 tools, runtime-neutral
+              │ (92 tools)    │
               └───────┬───────┘
                       ▼
         (all osModa daemons via Unix sockets)
@@ -90,7 +90,7 @@ agents.json. In-flight sessions keep their original driver + credential snapshot
 │ osmoda-gateway (:18789) — modular, TypeScript                 │
 │   reads agents.json → routes per-agent to a driver            │
 │   drivers: claude-code (default) · openclaw (legacy)          │
-│   osmoda-mcp-bridge → 91 MCP tools                            │
+│   osmoda-mcp-bridge → 92 MCP tools                            │
 │   Memory Backend → FTS5 BM25 search (live) · vector (M1+)   │
 └──────┬──────────┬───────────┬──────────┬──────────┬──────────┘
        │          │           │          │          │
@@ -273,7 +273,7 @@ independently.
               │  runtime:      │    │   runtime:         │
               │   claude-code  │    │    claude-code     │
               │  Opus 4.6      │    │   Sonnet 4.6       │
-              │  91 tools      │    │   91 tools         │
+              │  92 tools      │    │   92 tools         │
               │  19 skills     │    │   19 skills        │
               │  Full access   │    │   Full access      │
               │                │    │   Concise replies  │

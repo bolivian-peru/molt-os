@@ -95,9 +95,9 @@ Explicitly store something in long-term memory.
 ### GET /memory/health
 Memory system status: embedding model readiness, collection size, state directory.
 
-## Agent tools (91 tools via MCP bridge)
+## Agent tools (92 tools via MCP bridge)
 
-These are the 91 tools available to the AI agent.
+These are the 92 tools available to the AI agent.
 Exposed via MCP protocol (`packages/osmoda-mcp-bridge/`) or OpenClaw plugin (`packages/osmoda-bridge/`).
 
 ### agentd tools (communicate over Unix socket)

@@ -44,12 +44,12 @@ osModa is the other half: **the machine itself is AI-native.** 91 structured too
 
 ## What Happens in the First 5 Minutes
 
-1. **Install** — `curl | bash` the installer (or add the flake to NixOS). The installer converts to NixOS, builds the 10 Rust daemons, installs `osmoda-gateway` + `claude` CLI + 91 MCP tools, starts everything.
+1. **Install** — `curl | bash` the installer (or add the flake to NixOS). The installer converts to NixOS, builds the 10 Rust daemons, installs `osmoda-gateway` + `claude` CLI + 92 MCP tools, starts everything.
 2. **First boot of the gateway** — `agents.json` + encrypted `credentials.json.enc` are created in `/var/lib/osmoda/config/`. If you passed `--credential` or `--api-key` at install, they're already loaded; if not, the agent is disabled until you add one.
 3. **Open the dashboard** (`https://spawn.os.moda/#/servers/<your-id>/engine` if hosted, or the local web UI) → **Engine** tab:
    - **Credentials** section — Add one. Paste your `sk-ant-oat01-…` (Claude Pro — cheapest for heavy use), `sk-ant-api03-…` (Console, pay-per-token), or any OpenAI/OpenRouter key. Click **Test** to verify with a 1-token ping.
    - **Agents** section — Pick runtime (Claude Code or OpenClaw), credential, and model for each agent (`osmoda` for web / full access, `mobile` for Telegram / concise). Save.
-4. **Switch to the Chat tab** — start a conversation. The agent has all 91 tools, already knows your system, and will do an initial `system_health` check if you ask.
+4. **Switch to the Chat tab** — start a conversation. The agent has all 92 tools, already knows your system, and will do an initial `system_health` check if you ask.
 5. **Try something real** — *"Install nginx and reverse-proxy port 3000"* — it edits NixOS config, rebuilds via SafeSwitch with auto-rollback if health checks fail.
 
 **Want to switch runtimes later?** Engine tab → change the Runtime dropdown → Save. SIGHUP fires; in-flight sessions keep running on their old driver; the next message uses the new one. Zero downtime.
@@ -99,7 +99,7 @@ This is the primary install path. NixOS flakes give you reproducible builds, ato
 curl -fsSL https://raw.githubusercontent.com/bolivian-peru/os-moda/main/scripts/install.sh | sudo bash
 ```
 
-Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs **osmoda-gateway** (the TypeScript gateway that drives both Claude Code and OpenClaw), installs the Claude Code CLI + 91 MCP tools, starts everything. Takes ~10 minutes on a CX22.
+Converts Ubuntu/Debian to NixOS, builds 10 Rust daemons from source, installs **osmoda-gateway** (the TypeScript gateway that drives both Claude Code and OpenClaw), installs the Claude Code CLI + 92 MCP tools, starts everything. Takes ~10 minutes on a CX22.
 
 Supports OAuth tokens (Claude Pro / Max subscription) or Console API keys (pay-per-token). OpenAI, OpenRouter, and future providers plug in the same way.
 
@@ -171,9 +171,9 @@ agentctl verify-ledger
 │  └─ future drivers        drop-in files under src/drivers/                    │
 │                                                                               │
 │  Multi-Agent Router (hot-reloadable via agents.json)                          │
-│  ├─ osmoda agent (Opus)         91 tools · 19 skills · full access · web      │
+│  ├─ osmoda agent (Opus)         92 tools · 19 skills · full access · web      │
 │  └─ mobile agent (Sonnet)       full access · concise replies · Telegram/WA   │
-│  osmoda-mcp-bridge              91 typed tools via MCP protocol               │
+│  osmoda-mcp-bridge              92 typed tools via MCP protocol               │
 │  MCP Servers (stdio)            managed by osmoda-mcpd                        │
 ├────────┬────────┬────────┬──────────┬────────┬───────┬──────┬───────┬───────┤
 │ agentd │ watch  │routine │ teachd   │ mesh   │ voice │ mcpd │ keyd  │egress │
@@ -514,8 +514,8 @@ crates/osmoda-egress/       Domain-filtered egress proxy
 crates/osmoda-keyd/         Crypto wallet daemon (ETH + SOL, AES-256-GCM)
 packages/osmoda-gateway/    Modular gateway (drivers + agents.json + credentials, HTTP+WS+Telegram)
   └── src/drivers/          { claude-code, openclaw } — pluggable runtime drivers
-packages/osmoda-mcp-bridge/ MCP server (91 tools over stdio protocol)
-packages/osmoda-bridge/     OpenClaw plugin (91 tools, used by openclaw driver)
+packages/osmoda-mcp-bridge/ MCP server (92 tools over stdio protocol)
+packages/osmoda-bridge/     OpenClaw plugin (92 tools, used by openclaw driver)
 packages/osmoda-client/     First-party TypeScript SDK for the spawn.os.moda v1 API
 nix/modules/osmoda.nix      NixOS module (single source of truth)
 nix/hosts/                  VM, server, ISO configs

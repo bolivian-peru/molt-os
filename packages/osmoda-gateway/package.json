@@ -1,7 +1,7 @@
 {
   "name": "osmoda-gateway",
   "version": "0.2.0",
-  "description": "osModa Gateway — modular runtime (claude-code + openclaw drivers), 91 MCP tools, hot-reloadable agents.json",
+  "description": "osModa Gateway — modular runtime (claude-code + openclaw drivers), 92 MCP tools, hot-reloadable agents.json",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

@@ -144,7 +144,7 @@ Open in your browser:
 http://localhost:18789?token=YOUR_GATEWAY_TOKEN
 ```
 
-You're now talking to your server. The agent has full system access — 91 MCP tools across 10 daemons, with root-level control mediated by structured tool calls (not raw shell).
+You're now talking to your server. The agent has full system access — 92 MCP tools across 10 daemons, with root-level control mediated by structured tool calls (not raw shell).
 
 ---
 

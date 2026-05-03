@@ -115,7 +115,7 @@ function loadSystemPrompt(agent: AgentProfile): string {
   for (const p of candidates) {
     try { return fs.readFileSync(p, "utf8"); } catch { /* next */ }
   }
-  return `You are osModa, an AI system administrator with full root access. You manage this NixOS server using 91 tools via MCP.`;
+  return `You are osModa, an AI system administrator with full root access. You manage this NixOS server using 92 tools via MCP.`;
 }
 
 // ── Boot ────────────────────────────────────────────────────────────────
