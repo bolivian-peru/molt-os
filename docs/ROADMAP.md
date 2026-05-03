@@ -36,6 +36,8 @@ for the trust model and [STATUS.md](STATUS.md) for detailed per-component maturi
 | Spawn-time runtime + credentials — `POST /api/v1/spawn/:planId` `{runtime, credentials[]}` | spawn.os.moda + install.sh | **Functional** (v1.2) |
 | A2A agent discovery (ERC-8004 Agent Card, protocols array, chainId) | spawn.os.moda `/.well-known/` | **Functional** |
 | First-party TypeScript SDK `@osmoda/client` | packages/osmoda-client | **Functional** |
+| **Spec-Driven Development** — github/spec-kit baked into every spawn (uv + specify-cli + 9 speckit-* skills + 2 MCP tools) | scripts/install.sh + osmoda-mcp-bridge + skills/spec-driven-development | **Solid** (v1.2.2, 2026-04-30) |
+| Spec-kit project discovery API — `GET /api/v1/spec-kit/projects` | spawn.os.moda v1 API | **Functional** (v1.2.2) |
 
 Maturity levels: **Solid** = has tests, handles edge cases. **Functional** = works but has known limitations. See [STATUS.md](STATUS.md) for full details.
 

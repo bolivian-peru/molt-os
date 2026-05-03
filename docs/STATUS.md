@@ -2,7 +2,18 @@
 
 Honest assessment of what works, what's placeholder, and what's next.
 
-Last updated: 2026-04-24
+Last updated: 2026-04-30
+
+## Recent operational changes (2026-04-30)
+
+| Area | Change | Why |
+|---|---|---|
+| Spec-kit | github/spec-kit baked into every spawn (uv + specify-cli + templates) | Joins canonical AI-coding-agent ecosystem (92K stars). Closes the YC "software factories" weak-fit gap — see docs/planning/SPEC-KIT-INTEGRATION.md. |
+| MCP | New `spec_kit_init` + `spec_kit_run` tools (91→92) | Agent invokes spec-driven dev as audited tool calls; ledger captures every phase transition. |
+| Skills | New `spec-driven-development` (19→20) | Heuristic — when to invoke spec-kit, the 8-step workflow, common pitfalls. |
+| API | `GET /api/v1/spec-kit/projects` (Bearer) | External SaaS integrators can list per-server spec-driven projects without SSHing in. |
+| Agent card | `spec_driven_development:true` + `spec_kit_version` capability flags | Discoverable by other agents via `/.well-known/agent-card.json`. |
+| OpenAPI | Bumped 1.2.1 → **1.2.2** | New `Spec-Kit` tag + `SpecKitProject` schema + 1 path. Total 26 documented paths. |
 
 ## Recent operational changes (2026-04-24)
 
@@ -32,7 +43,7 @@ Last updated: 2026-04-24
 | Rust crates | 10 (9 daemons + 1 CLI) |
 | MCP tools (via osmoda-mcp-bridge) | 91 |
 | Runtime drivers | 2 (claude-code, openclaw) |
-| System skills | 19 |
+| System skills | 20 |
 | NixOS systemd services | 13 (agentd, gateway, keyd, watch, routines, voice, mesh, mcpd, teachd, egress, app-restore, cloudflared, tailscale-auth) |
 | Spawn API version | 1.2.0 |
 | osmoda-gateway version | 0.2.0 |
