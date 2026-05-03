@@ -805,7 +805,7 @@ else
   log "Skipping spec-kit (--skip-spec-kit)"
 fi
 
-report_progress "bridge" "started" "Setting up tool bridge (93 tools)"
+report_progress "bridge" "started" "Setting up tool bridge (92 tools)"
 log "Step 6: Setting up tool bridge..."
 
 # MCP bridge is ALWAYS installed (both drivers route tools through it).
@@ -828,7 +828,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 7: Multi-agent workspaces + skills (OpenClaw multi-agent routing)
 # ---------------------------------------------------------------------------
-report_progress "bridge" "done" "90 tools registered"
+report_progress "bridge" "done" "92 tools registered"
 report_progress "workspaces" "started" "Setting up agent workspaces + skills"
 log "Step 7: Setting up multi-agent workspaces..."
 
